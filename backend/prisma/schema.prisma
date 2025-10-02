@@ -1,0 +1,74 @@
+// Prisma Schema для OrderHub CRM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Product {
+  id        String      @id @default(uuid())
+  sku       String      @unique
+  name      String
+  cost      Float
+  price     Float
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  orderItems OrderItem[]
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  orderNumber    String      @unique
+  date           DateTime    @default(now())
+  source         String
+  customerName   String
+  customerEmail  String
+  customerAddress String
+  total          Float
+  fees           Float       @default(0)
+  status         String      @default("New")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  items          OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  productId String
+  title     String
+  quantity  Int
+  price     Float
+  cost      Float?
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Integration {
+  id        String   @id @default(uuid())
+  platform  String   @unique
+  apiKey    String
+  apiSecret String
+  isActive  Boolean  @default(true)
+  lastSync  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
