@@ -4,7 +4,11 @@ OrderHub CRM — Common Schemas
 Shared schemas for pagination, errors, etc.
 """
 
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel
+
+T = TypeVar("T")
 
 
 class PaginationParams(BaseModel):
@@ -12,8 +16,8 @@ class PaginationParams(BaseModel):
     limit: int = 50
 
 
-class PaginatedResponse(BaseModel):
-    items: list
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
     total: int
     page: int
     limit: int
