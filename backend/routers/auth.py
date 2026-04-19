@@ -61,7 +61,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
             detail="Refresh token missing",
         )
 
-    payload = decode_token(refresh_token)
+    payload = decode_token(refresh_token, token_type="refresh")
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

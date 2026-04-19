@@ -83,8 +83,12 @@ async def update_user(
             detail="Cannot deactivate yourself",
         )
 
-    # Prevent deactivating the last active owner
-    if body.is_active is False and user.role == UserRole.OWNER:
+    # Prevent deactivating or demoting the last active owner
+    is_removing_owner = (
+        (body.is_active is False and user.role == UserRole.OWNER)
+        or (body.role is not None and body.role != UserRole.OWNER and user.role == UserRole.OWNER)
+    )
+    if is_removing_owner:
         count_result = await db.execute(
             select(func.count())
             .select_from(User)
@@ -93,7 +97,7 @@ async def update_user(
         if count_result.scalar() == 0:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Cannot deactivate the last active owner",
+                detail="Cannot remove the last active owner",
             )
 
     # Apply updates

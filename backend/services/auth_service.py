@@ -3,8 +3,11 @@ OrderHub CRM — Authentication Service
 
 JWT token creation/verification and password hashing with bcrypt.
 Access tokens: 15 min. Refresh tokens: 30 days (httpOnly cookie).
+Refresh tokens use a separate signing key for cryptographic isolation.
 """
 
+import secrets
+import string
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +24,7 @@ settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ALGORITHM = "HS256"
+REFRESH_SECRET_KEY = settings.SECRET_KEY + "-refresh"
 
 
 def hash_password(password: str) -> str:
@@ -48,7 +52,7 @@ def create_access_token(user_id: uuid.UUID, role: str) -> str:
 
 
 def create_refresh_token(user_id: uuid.UUID) -> str:
-    """Create a long-lived JWT refresh token (30 days)."""
+    """Create a long-lived JWT refresh token (30 days). Uses a separate signing key."""
     expire = datetime.now(timezone.utc) + timedelta(
         days=settings.REFRESH_TOKEN_EXPIRE_DAYS
     )
@@ -57,13 +61,14 @@ def create_refresh_token(user_id: uuid.UUID) -> str:
         "exp": expire,
         "type": "refresh",
     }
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode(payload, REFRESH_SECRET_KEY, algorithm=ALGORITHM)
 
 
-def decode_token(token: str) -> dict | None:
-    """Decode and validate a JWT token. Returns payload or None if invalid."""
+def decode_token(token: str, token_type: str = "access") -> dict | None:
+    """Decode and validate a JWT token. Uses the appropriate key based on token type."""
+    key = REFRESH_SECRET_KEY if token_type == "refresh" else settings.SECRET_KEY
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, key, algorithms=[ALGORITHM])
         return payload
     except JWTError:
         return None
@@ -89,8 +94,21 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
 
 
 def generate_temp_password(length: int = 12) -> str:
-    """Generate a random temporary password for new users."""
-    import secrets
-    import string
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+    """Generate a random temporary password with guaranteed complexity."""
+    special_chars = "!@#$%^&*"
+    alphabet = string.ascii_letters + string.digits + special_chars
+
+    # Guarantee at least one of each category
+    password = [
+        secrets.choice(string.ascii_uppercase),
+        secrets.choice(string.ascii_lowercase),
+        secrets.choice(string.digits),
+        secrets.choice(special_chars),
+    ]
+    # Fill remaining length with random choices from full alphabet
+    password += [secrets.choice(alphabet) for _ in range(length - 4)]
+
+    # Shuffle to avoid predictable positions
+    import random
+    random.SystemRandom().shuffle(password)
+    return "".join(password)

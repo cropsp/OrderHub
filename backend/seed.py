@@ -40,6 +40,7 @@ async def seed():
     """Populate the database with development data."""
     async with async_session_factory() as session:
         # ─── Users ─────────────────────────────────────────────
+        # Dev credentials: owner@crm.local / owner123
         owner = User(
             id=uuid.uuid4(),
             email="owner@crm.local",
@@ -47,6 +48,7 @@ async def seed():
             full_name="Микола Шевченко",
             role=UserRole.OWNER,
         )
+        # Dev credentials: manager@crm.local / manager123
         manager = User(
             id=uuid.uuid4(),
             email="manager@crm.local",
@@ -54,6 +56,7 @@ async def seed():
             full_name="Оксана Коваленко",
             role=UserRole.MANAGER,
         )
+        # Dev credentials: designer@crm.local / designer123
         designer = User(
             id=uuid.uuid4(),
             email="designer@crm.local",
@@ -139,13 +142,16 @@ async def seed():
                 shop_id=shop.id,
                 customer_id=customer.id,
                 status=order_status,
-                title=title if not multi else f"{title}",
+                title=title,
                 total_price=total,
                 currency=curr,
                 ordered_at=ordered,
                 shipping_name=customer.full_name,
                 shipping_country=customer.country,
-                shipping_city="Kyiv" if customer.country == "UA" else "New York",
+                shipping_city={
+                    "UA": "Kyiv", "US": "New York", "DE": "Berlin",
+                    "GB": "London", "FR": "Paris",
+                }.get(customer.country, "Unknown"),
                 shipping_street_1="вул. Хрещатик, 1" if customer.country == "UA" else "123 Main St",
                 shipping_zip="01001" if customer.country == "UA" else "10001",
                 customer_note="Please gift wrap" if ci % 3 == 0 else None,
