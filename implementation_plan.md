@@ -292,8 +292,8 @@ Order:
 
 | # | Задача | Файли | Складність | Статус |
 |---|--------|-------|------------|--------|
-| 3.1 | Axios client + token refresh interceptor | frontend/src/api/client.ts | Проста | [TODO] |
-| 3.2 | Auth store + useAuth hook | frontend/src/store/, hooks/ | Проста | [TODO] |
+| 3.1 | Axios client + token refresh interceptor | frontend/src/api/client.ts | Проста | [DONE] |
+| 3.2 | Auth store + useAuth hook | frontend/src/store/, hooks/ | Проста | [DONE] |
 | 3.3 | Login page (premium UI) | frontend/src/pages/LoginPage.tsx | Складна | [TODO] |
 | 3.4 | App layout: Sidebar (role-aware, shops list) + Topbar | frontend/src/components/layout/ | Складна | [TODO] |
 | 3.5 | React Router config (protected routes) | frontend/src/App.tsx | Складна | [TODO] |
