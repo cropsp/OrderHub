@@ -160,3 +160,8 @@ class StatusChangeRequest(BaseModel):
     """Payload for transitioning order status."""
     new_status: OrderStatus
     comment: str | None = None
+class OrderFilters(BaseModel):
+    status: OrderStatus | None = None
+    shop_id: uuid.UUID | None = None
+    search: str | None = None
+    assigned_designer_id: uuid.UUID | None = None

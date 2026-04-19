@@ -13,6 +13,7 @@ from schemas.order import (
     OrderCreate, OrderUpdate, StatusChangeRequest
 )
 from schemas.dashboard import DashboardStats, RevenueByCurrency, DashboardResponse
+from schemas.attachment import AttachmentResponse
 
 __all__ = [
     "LoginRequest", "TokenResponse", "RefreshResponse", "TokenPayload",
@@ -23,4 +24,5 @@ __all__ = [
     "OrderItemResponse", "StatusHistoryResponse", "OrderBase", "OrderListResponse",
     "OrderResponse", "OrderCreate", "OrderUpdate", "StatusChangeRequest",
     "DashboardStats", "RevenueByCurrency", "DashboardResponse",
+    "AttachmentResponse",
 ]

@@ -3,7 +3,11 @@ OrderHub CRM — Orders Router
 """
 
 import uuid
+import csv
+import io
 from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -149,3 +153,50 @@ async def transition_order_status(
         
     await change_order_status(db, order, body.new_status, current_user, body.comment)
     return await get_order(order_id, current_user, db)
+
+
+@router.get("/action/export")
+async def export_orders_csv(
+    status: str | None = Query(None),
+    shop_id: uuid.UUID | None = Query(None),
+    search: str | None = Query(None),
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export filtered orders as CSV. Designers cannot export."""
+    filters = OrderFilters(status=status, shop_id=shop_id, search=search)
+    orders, _ = await get_orders_filtered(db, 0, 10000, filters)
+    
+    # Generate CSV in memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Headers
+    writer.writerow([
+        "External ID", "Shop", "Customer", "Email", "Status", "Title", 
+        "Total Price", "Currency", "Ordered At", "Shipped At", "Completed At"
+    ])
+    
+    # Data rows
+    for o in orders:
+        writer.writerow([
+            o.external_id,
+            o.shop.name if o.shop else "",
+            o.customer.full_name if o.customer else "",
+            o.customer.email if o.customer else "",
+            o.status.value,
+            o.title,
+            o.total_price,
+            o.currency,
+            o.ordered_at.isoformat() if o.ordered_at else "",
+            o.shipped_at.isoformat() if o.shipped_at else "",
+            o.completed_at.isoformat() if o.completed_at else ""
+        ])
+        
+    output.seek(0)
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=orders_export.csv"}
+    )

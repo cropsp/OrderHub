@@ -11,7 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from routers import auth, users
+from routers import (
+    auth, users, shops, customers, orders, imports, attachments, dashboard
+)
 
 settings = get_settings()
 
@@ -63,6 +65,12 @@ async def internal_error_handler(request: Request, exc):
 # ─── Routers ──────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(shops.router)
+app.include_router(customers.router)
+app.include_router(orders.router)
+app.include_router(imports.router)
+app.include_router(attachments.router)
+app.include_router(dashboard.router)
 
 
 # ─── Health Check ──────────────────────────────────────────
