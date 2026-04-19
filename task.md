@@ -19,6 +19,8 @@
     - [ ] Logic for encrypting/decrypting API tokens
 
 - [ ] **Orders Logic** [Складна]
+    - [x] 3.1 Setup Axios client with JWT interceptors & token refresh logic (`client.ts`)
+    - [x] 3.2 Implement global Auth store (Zustand or Context) + `useAuth` hookistory
     - [ ] Order fetching with filters (status, shop_id, search)
     - [ ] `order_service.py` for status transitions and history
     - [ ] Pagination support

@@ -29,6 +29,12 @@ async def list_users(
     return result.scalars().all()
 
 
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Get current user profile."""
+    return current_user
+
+
 @router.post("", response_model=UserWithPasswordResponse, status_code=status.HTTP_201_CREATED)
 async def create_user(
     body: UserCreate,
