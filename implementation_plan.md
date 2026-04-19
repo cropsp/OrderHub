@@ -378,3 +378,18 @@ Order:
 - [ ] Archive: таблиця, CSV export
 - [ ] MCP: підключення агента, виконання read/write tools
 - [ ] Role restrictions: designer бачить тільки свої замовлення
+
+---
+
+## Поточний стан (Last Sync)
+
+> **Активний Спрінт**: Sprint 3 — Frontend Shell
+
+**Щойно завершено (Sprint 2 & Початок Sprint 3):**
+*   **Core Backend API (Sprint 2) виконано на 100%**. Працюють всі ендпоінти: orders, shops, customers, Etsy CSV imports, dashboard stats, file storage.
+*   Виправлені зауваження після Code Review: N+1 query (`customers.py`), безпека шляхів (`file_storage.py`), парсинг дат та підрахунок `total_price` (`etsy_parser.py`).
+*   **Відкрито Sprint 3 (Задачі 3.1 & 3.2)**: Налаштовано Axios клієнт (`client.ts`) для silent JWT token refresh. Реалізовано глобальний стейт через `zustand` (`authStore.ts`) та хук `useAuth`. Typescript збирається без помилок.
+
+**Наступні кроки для старту:**
+*   **Task 3.3**: Побудова `LoginPage.tsx` (Premium дизайн, Tailwind v4 + shadcn/ui).
+*   **Task 3.4**: Створення App Layout (`Sidebar.tsx`, `Topbar.tsx`, `AppLayout.tsx`).

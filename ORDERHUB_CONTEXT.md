@@ -63,19 +63,3 @@ The system uses a robust, cookie-based JWT strategy:
 *   **Token Rotation**: Every time a refresh token is used, a new one is issued and the old one is invalidated via cookie replacement. 
 *   **Axios Interceptor**: The frontend uses a custom Axios client that catches `401 Unauthorized` responses, queues any parallel requests, silently refreshes the token using the cookie, and then replays the queued requests seamlessly.
 
----
-
-## 5. Current Development State (Last Sync)
-
-> **Active Sprint**: Sprint 3 — Frontend Shell
-
-**Recently Completed (Sprint 2 & Start of Sprint 3):**
-*   **Core Backend API (Sprint 2) is 100% complete**. All endpoints for orders, shops, customers, Etsy CSV imports, dashboard stats, and attached file storage are working and registered in `main.py`.
-*   Static code analysis (`flake8`, `mypy`) and Code Review issues (N+1 query, path traversal, date parsing bugs) were fixed.
-*   **Frontend Foundation (Tasks 3.1 & 3.2)**: Set up the Axios API Client (`src/api/client.ts`) with silent JWT token refresh and queueing logic. Implemented global state via `zustand` (`src/store/authStore.ts`) and `useAuth` hook. `tsconfig` and Vite compilation are verified.
-
-**Next Tasks to Pick Up:**
-*   **Task 3.3**: Build `LoginPage.tsx` (Premium AI-ready design, Tailwind v4 + shadcn/ui).
-*   **Task 3.4**: Create App Layout (`Sidebar.tsx`, `Topbar.tsx`, `AppLayout.tsx`).
-
-Refer to `task.md` for the detailed UI requirements and checkboxes.
