@@ -266,22 +266,22 @@ Order:
 
 ---
 
-### Sprint 2 — Core Backend API 📦
+### Sprint 2 — Core Backend API 📦 [DONE]
 > Мета: всі бізнес-ендпоінти працюють, CSV імпорт, статуси
 
 | # | Задача | Файли | Складність | Статус |
 |---|--------|-------|------------|--------|
-| 2.1 | Pydantic schemas для всіх моделей | backend/schemas/ | Проста | [TODO] |
-| 2.2 | Shop CRUD + encrypt/decrypt API tokens | backend/routers/shops.py | Проста | [TODO] |
-| 2.3 | Customer service (upsert by email) | backend/services/customer_service.py | Проста | [TODO] |
-| 2.4 | Order CRUD + фільтри (status, shop_id, search, pagination) | backend/routers/orders.py | Складна | [TODO] |
-| 2.5 | `order_service.py` — status transition validation + history logging | backend/services/ | Складна | [TODO] |
-| 2.6 | Etsy CSV parser (BOM strip, grouping by Order ID, multi-item) | backend/services/etsy_parser.py | Складна | [TODO] |
-| 2.7 | Import endpoint (POST /api/imports/etsy) | backend/routers/imports.py | Проста | [TODO] |
-| 2.8 | File storage service + attachment endpoints (auth-protected) | backend/services/file_storage.py | Проста | [TODO] |
-| 2.9 | Customer endpoints | backend/routers/customers.py | Проста | [TODO] |
-| 2.10 | Dashboard stat endpoints (revenue per currency) | backend/routers/dashboard.py | Складна | [TODO] |
-| 2.11 | CSV export endpoint (owner only) | backend/routers/orders.py | Проста | [TODO] |
+| 2.1 | Pydantic schemas для всіх моделей | backend/schemas/ | Проста | [DONE] |
+| 2.2 | Shop CRUD + encrypt/decrypt API tokens | backend/routers/shops.py | Проста | [DONE] |
+| 2.3 | Customer service (upsert by email) | backend/services/customer_service.py | Проста | [DONE] |
+| 2.4 | Order CRUD + фільтри (status, shop_id, search, pagination) | backend/routers/orders.py | Складна | [DONE] |
+| 2.5 | `order_service.py` — status transition validation + history logging | backend/services/ | Складна | [DONE] |
+| 2.6 | Etsy CSV parser (BOM strip, grouping by Order ID, multi-item) | backend/services/etsy_parser.py | Складна | [DONE] |
+| 2.7 | Import endpoint (POST /api/imports/etsy) | backend/routers/imports.py | Проста | [DONE] |
+| 2.8 | File storage service + attachment endpoints (auth-protected) | backend/services/file_storage.py | Проста | [DONE] |
+| 2.9 | Customer endpoints | backend/routers/customers.py | Проста | [DONE] |
+| 2.10 | Dashboard stat endpoints (revenue per currency) | backend/routers/dashboard.py | Складна | [DONE] |
+| 2.11 | CSV export endpoint (owner only) | backend/routers/orders.py | Проста | [DONE] |
 
 **Результат**: повний REST API, тестований через Swagger UI на :8000/docs.
 

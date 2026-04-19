@@ -32,7 +32,11 @@ async def list_customers(
     skip = (page - 1) * limit
     
     # Base queries
-    query = select(Customer)
+    query = select(
+        Customer, 
+        func.count(Order.id).label("order_count")
+    ).outerjoin(Order, Order.customer_id == Customer.id).group_by(Customer.id)
+    
     count_query = select(func.count()).select_from(Customer)
     
     if search:
@@ -46,14 +50,12 @@ async def list_customers(
     
     query = query.order_by(Customer.created_at.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
-    customers = list(result.scalars().all())
+    customers_data = result.all()
     
-    # We need to compute order_count for each (in a real app this might be a subquery)
-    # For now, we do individual queries since list size is small
     responses = []
-    for c in customers:
-        c_with_count = await get_customer_with_order_count(db, c.id)
-        responses.append(CustomerResponse.model_validate(c_with_count))
+    for c, count in customers_data:
+        c.order_count = count
+        responses.append(CustomerResponse.model_validate(c))
         
     return PaginatedResponse[CustomerResponse](
         items=responses,

@@ -21,8 +21,9 @@ async def save_file(upload_file: UploadFile, order_id: uuid.UUID) -> tuple[str, 
     order_dir = UPLOADS_DIR / str(order_id)
     order_dir.mkdir(parents=True, exist_ok=True)
     
-    # Generate unique filename to avoid collisions
-    safe_filename = f"{uuid.uuid4()}_{upload_file.filename}"
+    # Generate unique filename to avoid collisions and path traversal
+    base_name = os.path.basename(upload_file.filename) if upload_file.filename else "unknown"
+    safe_filename = f"{uuid.uuid4()}_{base_name}"
     file_path = order_dir / safe_filename
     
     # Relative path to store in DB

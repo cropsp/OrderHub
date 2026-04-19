@@ -2,7 +2,7 @@ import csv
 import io
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from sqlalchemy import select
@@ -60,10 +60,10 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
             date_str = primary_row.get("Sale Date")
             try:
                 # Assuming generic M/D/y format from Etsy. Need strict parsing in prod.
-                ordered_at = datetime.strptime(date_str, "%m/%d/%y") 
+                ordered_at = datetime.strptime(date_str, "%m/%d/%y").replace(tzinfo=timezone.utc)
             except (ValueError, TypeError):
                  # Fallback to now if parse fails, or log it
-                 ordered_at = datetime.utcnow()
+                 ordered_at = datetime.now(timezone.utc)
                  
             # Customer
             email = primary_row.get("Buyer Email", "").strip() or f"unknown_{sale_id}@example.com"
@@ -72,7 +72,8 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
             
             customer = await upsert_customer(db, email, customer_name, country)
             
-            total_price = sum(float(r.get("Order Total", 0) or 0) for r in rows if r == primary_row) # Only take Total once if repeated
+            # The total order price is typically listed on every row identically
+            total_price = float(primary_row.get("Order Total", 0) or 0)
             
             # Create Order
             order = Order(
@@ -82,7 +83,7 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
                 customer_id=customer.id,
                 status=OrderStatus.NEW,
                 title=f"Etsy Order {sale_id}",
-                total_price=float(primary_row.get("Order Total", 0) or 0), 
+                total_price=total_price, 
                 currency=primary_row.get("Currency", "USD"),
                 ordered_at=ordered_at,
                 shipping_name=primary_row.get("Ship Name"),
