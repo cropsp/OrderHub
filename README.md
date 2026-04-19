@@ -1,6 +1,6 @@
 # OrderHub CRM
 
-Self-hosted Order Management CRM для управління замовленнями handmade бізнесу шкіряних виробів. Замінює workflow **Etsy CSV → Google Sheets → Trello** єдиним веб-додатком.
+Self-hosted Order Management CRM для управління замовленнями handmade бізнесу з виробництва.
 
 ## Tech Stack
 
