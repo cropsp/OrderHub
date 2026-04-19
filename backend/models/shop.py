@@ -1,0 +1,60 @@
+"""
+OrderHub CRM — Shop Model
+
+Represents an Etsy or Shopify store with optional
+Nova Poshta sender configuration and encrypted API tokens.
+"""
+
+import enum
+
+from sqlalchemy import Boolean, DateTime, Enum, Float, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class ShopPlatform(str, enum.Enum):
+    ETSY = "etsy"
+    SHOPIFY = "shopify"
+
+
+class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    __tablename__ = "shops"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    platform: Mapped[ShopPlatform] = mapped_column(
+        Enum(ShopPlatform, name="shop_platform", create_constraint=True),
+        nullable=False,
+    )
+
+    # Shopify-specific
+    shopify_store_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    shopify_access_token_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+
+    # Nova Poshta sender configuration (per shop)
+    np_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    np_sender_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    np_sender_phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    np_sender_city_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    np_sender_warehouse_ref: Mapped[str | None] = mapped_column(
+        String(36), nullable=True
+    )
+    np_default_description: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    np_default_weight_kg: Mapped[float] = mapped_column(Float, default=0.5)
+
+    # UI
+    color: Mapped[str] = mapped_column(String(7), default="#6366F1")
+
+    # State
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_synced_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    orders = relationship("Order", back_populates="shop", lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<Shop {self.name} ({self.platform.value})>"
