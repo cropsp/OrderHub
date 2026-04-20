@@ -40,26 +40,26 @@ async def seed():
     """Populate the database with development data."""
     async with async_session_factory() as session:
         # ─── Users ─────────────────────────────────────────────
-        # Dev credentials: owner@crm.local / owner123
+        # Dev credentials: owner@orderhub.dev / owner123
         owner = User(
             id=uuid.uuid4(),
-            email="owner@crm.local",
+            email="owner@orderhub.dev",
             hashed_password=hash_password("owner123"),
             full_name="Микола Шевченко",
             role=UserRole.OWNER,
         )
-        # Dev credentials: manager@crm.local / manager123
+        # Dev credentials: manager@orderhub.dev / manager123
         manager = User(
             id=uuid.uuid4(),
-            email="manager@crm.local",
+            email="manager@orderhub.dev",
             hashed_password=hash_password("manager123"),
             full_name="Оксана Коваленко",
             role=UserRole.MANAGER,
         )
-        # Dev credentials: designer@crm.local / designer123
+        # Dev credentials: designer@orderhub.dev / designer123
         designer = User(
             id=uuid.uuid4(),
-            email="designer@crm.local",
+            email="designer@orderhub.dev",
             hashed_password=hash_password("designer123"),
             full_name="Андрій Мельник",
             role=UserRole.DESIGNER,

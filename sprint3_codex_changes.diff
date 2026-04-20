@@ -1,0 +1,1914 @@
+commit e7e1539bcc36f700bf73c111fd76df3049c8e3de
+Author: cropsp <cropsp@local.dev>
+Date:   Mon Apr 20 11:02:04 2026 +0000
+
+    feat: complete sprint 3 frontend shell
+
+diff --git a/CODEX_MODEL_SELECTION.md b/CODEX_MODEL_SELECTION.md
+new file mode 100644
+index 0000000..f347392
+--- /dev/null
++++ b/CODEX_MODEL_SELECTION.md
+@@ -0,0 +1,30 @@
++# Codex Model Selection Matrix (OrderHub)
++
++This repo uses multiple models via Codex. Pick the smallest model that can do the job reliably.
++
++## Quick Picks
++
++- Default coding work: `gpt-5.3-codex`
++- Complex analysis / design / debugging: `gpt-5.2`
++- Very large / risky refactors: `gpt-5.1-codex-max`
++- Small, low-risk edits: `gpt-5.4-mini` or `gpt-5.1-codex-mini`
++
++## Task -> Model
++
++| Task type | Use | Notes |
++|---|---|---|
++| Product/architecture decisions | `gpt-5.4`, `gpt-5.2` | Best reasoning and tradeoff handling |
++| Bug triage across many modules | `gpt-5.2`, `gpt-5.4` | Strong at root-cause analysis |
++| Implement a feature (few files) | `gpt-5.3-codex`, `gpt-5.2-codex` | Prefer when requirements are clear |
++| Implement a feature (many files) | `gpt-5.2-codex`, `gpt-5.1-codex-max` | Use max model when coupling is high |
++| Frontend UI build (React/Tailwind) | `gpt-5.3-codex`, `gpt-5.2-codex` | Use `gpt-5.2` if UX decisions are unclear |
++| Backend API changes | `gpt-5.3-codex`, `gpt-5.2-codex` | Use `gpt-5.2` for security/permission logic |
++| Review (risk-focused) | `gpt-5.2`, `gpt-5.4` | Prefer broader reasoning |
++| Docs, small edits, cleanup | `gpt-5.4-mini`, `gpt-5.1-codex-mini` | Fast and cheap |
++| One-off scripts / refactors (mechanical) | `gpt-5.4-mini`, `gpt-5.3-codex` | Pick based on complexity |
++
++## Practical Rules
++
++- If you see many moving parts (auth, permissions, DB + UI): start with `gpt-5.2`.
++- If you already have a clear plan and just need code: use `gpt-5.3-codex`.
++- If you hit repeated dead-ends or regressions: escalate to `gpt-5.1-codex-max`.
+diff --git a/ORDERHUB_CONTEXT.md b/ORDERHUB_CONTEXT.md
+index 2f95521..2f9b0e0 100644
+--- a/ORDERHUB_CONTEXT.md
++++ b/ORDERHUB_CONTEXT.md
+@@ -1,65 +1,226 @@
+-# OrderHub CRM — Core Project Context
++# OrderHub CRM - Core Project Context
+ 
+-This document provides a comprehensive overview of the OrderHub project architecture, technical stack, core business logic, and fundamental design decisions. It serves as the primary context source for any developer or AI agent working on the codebase.
++## Purpose
+ 
+----
++This file stores the stable project context for OrderHub:
+ 
+-## 1. Project Overview & Tech Stack
++- product scope
++- architecture decisions
++- domain rules and invariants
++- security model
++- shared terminology
+ 
+-**OrderHub** is a self-hosted Order Management CRM tailored for a handmade leather goods e-commerce business. It replaces a fragmented workflow (Etsy CSV → Google Sheets → Trello) with a unified, automated web application.
++This file should change rarely. Day-to-day execution status belongs in `implementation_plan.md`.
+ 
+-*   **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 (async), PostgreSQL 16.
+-*   **Frontend**: React 19, TypeScript, Vite, TailwindCSS v4, React Router, React Query.
+-*   **Infrastructure**: Dockerized environment with dedicated `docker-compose.yml` (production via Nginx) and `docker-compose.dev.yml` (with volumes and HMR). Database migrations are handled automatically via Alembic on container startup (`entrypoint.sh`).
++## Product Summary
+ 
+----
++OrderHub is a self-hosted CRM for managing orders in a handmade leather goods business.
+ 
+-## 2. Key Architectural Decisions
++Primary workflow being replaced:
+ 
+-1.  **AI Integration via MCP (Model Context Protocol)**
+-    *   *Decision*: We fundamentally rejected the idea of embedding an AI Chat UI and LLM runner directly inside the CRM.
+-    *   *Implementation*: The API exposes an **MCP Server**. All CRM operations (changing statuses, creating shipping labels, reading orders) are exposed as standard MCP Tools. Any external AI Agent (like a local Hermes model via llama.cpp or Claude Desktop) connects to this server. This strictly separates the CRM business logic from the AI provider layer.
++`Etsy CSV -> Google Sheets -> Trello -> manual follow-up`
+ 
+-2.  **Hybrid Order Visualization UI**
+-    *   *Decision*: A traditional 9-column Kanban board was deemed too bulky for daily operations.
+-    *   *Implementation*: The UI relies on a **Hybrid View**.
+-        *   **Primary View**: A Smart Data Table with inline status dropdowns.
+-        *   **Secondary View**: A Pipeline Board (visual columns, no drag-and-drop).
+-        *   The 9 distinct order statuses are grouped into **5 logical tabs/filters**: `New`, `Awaiting`, `Design`, `Production`, and `Shipping`.
++Target outcome:
+ 
+-3.  **Financials & Revenue Tracking**
+-    *   *Decision*: No automatic currency conversion MVP.
+-    *   *Implementation*: Original currencies (`USD`, `EUR`, `GBP`) are preserved throughout the database. Revenue dashboards render separate charts/totals per currency. Order logic includes a custom `platform_fee` to accurately track Etsy/Shopify deductions.
++`single web app -> tracked orders -> controlled status workflow -> attachments -> analytics -> external AI access through MCP`
+ 
+-4.  **Customer & Address Data Model**
+-    *   *Decision*: Address data changes frequently and belongs to the purchase, not just the user.
+-    *   *Implementation*: Shipping addresses and recipient phone numbers are denormalized and stored directly on the `Order` model. The `Customer` model is kept lightweight (primarily used for contact linking and historical grouping via email upserts).
++## Current Delivery Snapshot
+ 
+----
++Last reviewed: `2026-04-20`
+ 
+-## 3. Database Schema & Business Logic
++- Backend foundation and core REST API are present in the repository.
++- Frontend infrastructure is present, but the product UI is still in early shell state.
++- Authentication plumbing exists on both backend and frontend.
++- AI integration is intended through an MCP server, but the MCP implementation is not yet in the repository.
+ 
+-All entities use `UUID` primary keys and include `created_at`/`updated_at` timestamps.
++## Technical Stack
+ 
+-*   **User**: Roles dictate access (`owner` has full access, `manager` cannot see financials/API keys, `designer` only sees assigned items). Safety guards prevent deactivating the last active `owner`.
+-*   **Shop**: Integrates with `etsy` and `shopify`. 
+-    *   *Security*: All third-party secrets (Shopify Tokens, Nova Poshta API Keys) are encrypted at rest in PostgreSQL using the **Fernet** algorithm. They are decrypted only in backend memory.
+-*   **Order & OrderItem**: 
+-    *   `quantity` and `unit_price` exist solely on `OrderItem` (as Etsy orders may contain multiple distinct items). 
+-    *   Orders are strictly unique by the composite constraint: `UNIQUE(external_id, shop_id)`.
+-*   **Status Workflow**: 
+-    *   The backend enforces a strict transition matrix: `new` → `waiting_info` / `info_received` / `design_pending` / `in_production` → `shipped` → `completed`. Orders can be transitioned to `cancelled` at any stage.
+-*   **OrderStatusHistory**: An immutable audit log table tracks every status change, recording the user who made the change and the timestamp.
++- Backend: Python 3.12, FastAPI, SQLAlchemy 2 async, PostgreSQL 16
++- Frontend: React 19, TypeScript, Vite, TailwindCSS v4, React Router, React Query, Zustand
++- Infrastructure: Docker, Docker Compose, Alembic
++- AI integration strategy: MCP server, not embedded chat UI
+ 
+----
++## Architecture Decisions
+ 
+-## 4. Authentication & Security Model
++### 1. AI integration
+ 
+-The system uses a robust, cookie-based JWT strategy:
++OrderHub does not embed a first-party chat UI or direct LLM provider runner inside the CRM.
+ 
+-*   **Passwords**: Hashed via `bcrypt`. Owners can create users and an auto-generated temporary password is returned exactly once in the API response.
+-*   **Access Token**: 15-minute expiration, sent in the `Authorization: Bearer <token>` header.
+-*   **Refresh Token**: 30-day expiration. Stored and transmitted **strictly via `httpOnly` secure cookies** with `SameSite=Strict`. This eliminates the risk of XSS token theft.
+-*   **Token Rotation**: Every time a refresh token is used, a new one is issued and the old one is invalidated via cookie replacement. 
+-*   **Axios Interceptor**: The frontend uses a custom Axios client that catches `401 Unauthorized` responses, queues any parallel requests, silently refreshes the token using the cookie, and then replays the queued requests seamlessly.
++Instead:
+ 
++- the backend exposes CRM capabilities as MCP tools
++- external AI agents connect to the CRM through MCP
++- CRM business logic stays independent from model vendor logic
++
++### 2. Order visualization
++
++The intended UI is hybrid:
++
++- primary view: smart table with inline status changes
++- secondary view: pipeline board for visual overview
++
++Drag-and-drop is intentionally out of scope. Status changes should happen through explicit controls, not card dragging.
++
++### 3. Financials
++
++- currencies are stored as original values
++- no automatic FX conversion in MVP
++- revenue is tracked per currency
++- platform fees are stored explicitly on the order
++
++### 4. Customer and address modeling
++
++- customer identity is lightweight and primarily keyed by contact data
++- shipping address belongs to the order, not only to the customer
++- customer grouping is historical and based on upsert-by-email behavior
++
++## Domain Invariants
++
++### Users
++
++- roles: `owner`, `manager`, `designer`
++- `owner` has full access
++- `manager` has restricted access to sensitive financial and integration data
++- `designer` should only see assigned operational work
++- the system must not allow deactivating the last active owner
++
++### Shops
++
++- supported platforms: `etsy`, `shopify`
++- third-party secrets must be encrypted at rest
++- decrypted tokens should exist only in backend memory
++
++### Orders
++
++- primary key: UUID
++- uniqueness: `(external_id, shop_id)`
++- `quantity` and `unit_price` belong to `OrderItem`, not `Order`
++- `platform_fee` is a first-class financial field on `Order`
++- shipping recipient data is stored directly on `Order`
++- status changes must be validated server-side
++- every status transition must be written to immutable history
++
++### Order statuses
++
++Canonical statuses:
++
++- `new`
++- `waiting_info`
++- `info_received`
++- `design_pending`
++- `design_ready`
++- `in_production`
++- `shipped`
++- `completed`
++- `cancelled`
++
++Logical UI grouping:
++
++- `New`
++- `Awaiting`
++- `Design`
++- `Production`
++- `Shipping`
++
++The grouped labels are a UI concern. The canonical status values above are the source of truth.
++
++## Security Model
++
++### Authentication
++
++- access token: JWT in `Authorization` header
++- refresh token: `httpOnly` cookie
++- refresh token rotation is required
++- frontend silently refreshes and replays queued requests on `401`
++
++### Passwords
++
++- passwords are hashed with `bcrypt`
++- temporary passwords may be returned once at user creation time
++
++### Sensitive data
++
++- shop tokens and carrier credentials must be encrypted at rest
++- role checks must be enforced in backend handlers and services
++
++## Backend Boundaries
++
++Current backend scope already present in the repository:
++
++- auth
++- users
++- shops
++- orders
++- imports
++- customers
++- attachments
++- dashboard
++
++Planned but not yet present in the repository:
++
++- `mcp_server.py`
++- `shopify_sync.py`
++- `scheduler.py`
++- `email_service.py`
++- `nova_poshta.py`
++
++## Frontend Boundaries
++
++Current frontend scope already present in the repository:
++
++- app bootstrap
++- router shell
++- auth API client
++- auth store and hook
++- base UI primitives
++
++Planned but not yet present in the repository:
++
++- dedicated page modules
++- app layout modules
++- orders table and pipeline views
++- import workflow UI
++- dashboard UI
++- archive and management pages
++
++## Terminology
++
++Use these terms consistently:
++
++- `smart table` for the primary orders view
++- `pipeline board` for the secondary visual board
++- `inline status change` for status updates from UI controls
++- `per-shop orders page` instead of `per-shop kanban`
++- `order detail panel` for the slide-over order details UI
++
++Avoid mixing `kanban`, `board`, and `pipeline` as if they are separate planned features unless the distinction matters.
++
++## Documentation Rules
++
++### `ORDERHUB_CONTEXT.md`
++
++Keep only stable truth here:
++
++- architecture
++- product rules
++- security model
++- domain invariants
++- terminology
++
++### `implementation_plan.md`
++
++Keep operational data there:
++
++- sprint breakdown
++- task status
++- next actions
++- known gaps between plan and codebase
++- verification notes
++
++### If a third document is later added
++
++Recommended optional additions:
++
++- `DECISIONS.md` or `docs/adr/` for important architecture decisions
++- `worklog.md` for dated progress notes
++- `risks.md` for technical debt and known implementation risks
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+old mode 100755
+new mode 100644
+index 5ba0435..45125fd
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -1,43 +1,91 @@
+-import { Routes, Route, Navigate } from 'react-router-dom'
++import { Navigate, Route, Routes } from 'react-router-dom'
+ 
+-function LoginPage() {
+-  return (
+-    <div className="min-h-screen flex items-center justify-center">
+-      <div className="glass rounded-xl p-8 w-full max-w-md animate-fade-in">
+-        <h1 className="text-2xl font-bold text-center mb-2">OrderHub</h1>
+-        <p className="text-center mb-6" style={{ color: 'var(--color-text-secondary)' }}>
+-          Order Management CRM
+-        </p>
+-        <p className="text-center" style={{ color: 'var(--color-text-muted)' }}>
+-          Login page — coming in Sprint 3
+-        </p>
+-      </div>
+-    </div>
+-  )
+-}
+-
+-function DashboardPlaceholder() {
+-  return (
+-    <div className="min-h-screen flex items-center justify-center">
+-      <div className="glass rounded-xl p-8 animate-fade-in text-center">
+-        <h1 className="text-3xl font-bold mb-2">🚀 OrderHub CRM</h1>
+-        <p style={{ color: 'var(--color-text-secondary)' }}>
+-          Backend is running. Frontend shell ready.
+-        </p>
+-        <p className="mt-4 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+-          Sprint 1 — Foundation complete
+-        </p>
+-      </div>
+-    </div>
+-  )
+-}
++import { RequireAuth, RequireRole } from '@/components/auth/RouteGuards'
++import LoginPage from '@/pages/LoginPage'
++import DashboardPage from '@/pages/DashboardPage'
++import FeaturePlaceholderPage from '@/pages/FeaturePlaceholderPage'
++import { UserRole } from '@/types/user'
+ 
+ function App() {
+   return (
+     <Routes>
+-      <Route path="/login" element={<LoginPage />} />
+-      <Route path="/dashboard" element={<DashboardPlaceholder />} />
+-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
++      <Route element={<LoginPage />} path="/login" />
++
++      <Route element={<RequireAuth />}>
++        <Route element={<DashboardPage />} path="/dashboard" />
++
++        <Route
++          element={
++            <FeaturePlaceholderPage
++              description="Smart table and board views are planned in Sprint 4."
++              title="Orders"
++            />
++          }
++          path="/orders"
++        />
++        <Route
++          element={
++            <FeaturePlaceholderPage
++              description="Per-shop order views are planned in Sprint 4."
++              title="Shop Orders"
++            />
++          }
++          path="/shops/:shopId/orders"
++        />
++        <Route
++          element={
++            <FeaturePlaceholderPage
++              description="Profile and password controls continue in Sprint 5."
++              title="Settings"
++            />
++          }
++          path="/settings"
++        />
++
++        <Route element={<RequireRole allowedRoles={[UserRole.OWNER, UserRole.MANAGER]} />}>
++          <Route
++            element={
++              <FeaturePlaceholderPage
++                description="CSV import flow is planned in Sprint 4."
++                title="Imports"
++              />
++            }
++            path="/imports"
++          />
++          <Route
++            element={
++              <FeaturePlaceholderPage
++                description="Archive list and export UX are planned in Sprint 5."
++                title="Archive"
++              />
++            }
++            path="/archive"
++          />
++        </Route>
++
++        <Route element={<RequireRole allowedRoles={[UserRole.OWNER]} />}>
++          <Route
++            element={
++              <FeaturePlaceholderPage
++                description="Shop management UI is planned in Sprint 5."
++                title="Shops"
++              />
++            }
++            path="/shops"
++          />
++          <Route
++            element={
++              <FeaturePlaceholderPage
++                description="User management UI is planned in Sprint 5."
++                title="Users"
++              />
++            }
++            path="/users"
++          />
++        </Route>
++      </Route>
++
++      <Route element={<Navigate replace to="/dashboard" />} path="*" />
+     </Routes>
+   )
+ }
+diff --git a/frontend/src/api/orders.ts b/frontend/src/api/orders.ts
+new file mode 100644
+index 0000000..a664c59
+--- /dev/null
++++ b/frontend/src/api/orders.ts
+@@ -0,0 +1,15 @@
++import client from './client'
++
++import type { OrderListFilters, OrderListItem, OrderListResponse } from '@/types/order'
++
++export const ordersApi = {
++  list: async (filters: OrderListFilters = {}): Promise<OrderListResponse> => {
++    const { data } = await client.get<OrderListResponse>('/orders', { params: filters })
++    return data
++  },
++
++  getById: async (orderId: string): Promise<OrderListItem> => {
++    const { data } = await client.get<OrderListItem>(`/orders/${orderId}`)
++    return data
++  },
++}
+diff --git a/frontend/src/api/shops.ts b/frontend/src/api/shops.ts
+new file mode 100644
+index 0000000..724e9a8
+--- /dev/null
++++ b/frontend/src/api/shops.ts
+@@ -0,0 +1,10 @@
++import client from './client'
++
++import type { ShopListItem } from '@/types/shop'
++
++export const shopsApi = {
++  list: async (): Promise<ShopListItem[]> => {
++    const { data } = await client.get<ShopListItem[]>('/shops')
++    return data
++  },
++}
+diff --git a/frontend/src/components/auth/RouteGuards.tsx b/frontend/src/components/auth/RouteGuards.tsx
+new file mode 100644
+index 0000000..b51a7d8
+--- /dev/null
++++ b/frontend/src/components/auth/RouteGuards.tsx
+@@ -0,0 +1,48 @@
++import { Navigate, Outlet, useLocation } from 'react-router-dom'
++
++import { useAuth } from '@/hooks/useAuth'
++import { useAuthStore } from '@/store/authStore'
++import type { UserRoleType } from '@/types/user'
++
++function GuardLoading() {
++  return (
++    <div className="min-h-screen flex items-center justify-center">
++      <div className="glass rounded-xl p-8 animate-fade-in text-center">
++        <p className="text-sm text-slate-300">Checking session...</p>
++      </div>
++    </div>
++  )
++}
++
++type RequireRoleProps = {
++  allowedRoles: UserRoleType[]
++}
++
++export function RequireAuth() {
++  const location = useLocation()
++  const { isAuthenticated, isLoading } = useAuth()
++
++  if (isLoading) {
++    return <GuardLoading />
++  }
++
++  if (!isAuthenticated) {
++    return <Navigate replace state={{ from: location.pathname }} to="/login" />
++  }
++
++  return <Outlet />
++}
++
++export function RequireRole({ allowedRoles }: RequireRoleProps) {
++  const user = useAuthStore((state) => state.user)
++
++  if (!user) {
++    return <Navigate replace to="/dashboard" />
++  }
++
++  if (!allowedRoles.includes(user.role)) {
++    return <Navigate replace to="/dashboard" />
++  }
++
++  return <Outlet />
++}
+diff --git a/frontend/src/components/layout/AppLayout.tsx b/frontend/src/components/layout/AppLayout.tsx
+new file mode 100644
+index 0000000..484589c
+--- /dev/null
++++ b/frontend/src/components/layout/AppLayout.tsx
+@@ -0,0 +1,35 @@
++import type { ReactNode } from 'react'
++
++import type { User } from '@/types/user'
++
++import Sidebar, { type LayoutShop } from './Sidebar'
++import Topbar from './Topbar'
++
++type AppLayoutProps = {
++  title: string
++  description?: string
++  user: User | null
++  shops?: LayoutShop[]
++  onLogout?: () => void | Promise<void>
++  children: ReactNode
++}
++
++export default function AppLayout({ title, description, user, shops = [], onLogout, children }: AppLayoutProps) {
++  return (
++    <div className="min-h-screen bg-[radial-gradient(circle_at_85%_10%,rgba(20,184,166,0.12),transparent_30%),radial-gradient(circle_at_5%_90%,rgba(251,146,60,0.12),transparent_25%),#020617] text-slate-100">
++      <div className="mx-auto flex min-h-screen w-full max-w-[1600px]">
++        <aside className="hidden w-72 border-r border-slate-800/90 bg-slate-950/70 backdrop-blur lg:block">
++          <Sidebar shops={shops} user={user} />
++        </aside>
++
++        <div className="flex min-w-0 flex-1 flex-col">
++          <Topbar description={description} onLogout={onLogout} title={title} user={user} />
++          <div className="border-b border-slate-800/90 bg-slate-950/70 lg:hidden">
++            <Sidebar compact shops={shops} user={user} />
++          </div>
++          <main className="flex-1 p-4 sm:p-6 lg:p-8">{children}</main>
++        </div>
++      </div>
++    </div>
++  )
++}
+diff --git a/frontend/src/components/layout/Sidebar.tsx b/frontend/src/components/layout/Sidebar.tsx
+new file mode 100644
+index 0000000..f29d378
+--- /dev/null
++++ b/frontend/src/components/layout/Sidebar.tsx
+@@ -0,0 +1,185 @@
++import { Archive, FileSpreadsheet, LayoutDashboard, Package, Settings, Shield, Store, Users } from 'lucide-react'
++import type { ComponentType } from 'react'
++import { NavLink } from 'react-router-dom'
++
++import type { User, UserRoleType } from '@/types/user'
++import { UserRole } from '@/types/user'
++import { cn } from '@/lib/utils'
++
++export type LayoutShop = {
++  id: string
++  name: string
++  to: string
++}
++
++type SidebarProps = {
++  user: User | null
++  shops?: LayoutShop[]
++  compact?: boolean
++}
++
++type NavItem = {
++  key: string
++  label: string
++  to: string
++  icon: ComponentType<{ className?: string }>
++  roles: UserRoleType[]
++}
++
++const navItems: NavItem[] = [
++  {
++    key: 'dashboard',
++    label: 'Dashboard',
++    to: '/dashboard',
++    icon: LayoutDashboard,
++    roles: [UserRole.OWNER, UserRole.MANAGER, UserRole.DESIGNER],
++  },
++  {
++    key: 'orders',
++    label: 'Orders',
++    to: '/orders',
++    icon: Package,
++    roles: [UserRole.OWNER, UserRole.MANAGER, UserRole.DESIGNER],
++  },
++  {
++    key: 'imports',
++    label: 'Imports',
++    to: '/imports',
++    icon: FileSpreadsheet,
++    roles: [UserRole.OWNER, UserRole.MANAGER],
++  },
++  {
++    key: 'archive',
++    label: 'Archive',
++    to: '/archive',
++    icon: Archive,
++    roles: [UserRole.OWNER, UserRole.MANAGER],
++  },
++  {
++    key: 'shops',
++    label: 'Shops',
++    to: '/shops',
++    icon: Store,
++    roles: [UserRole.OWNER],
++  },
++  {
++    key: 'users',
++    label: 'Users',
++    to: '/users',
++    icon: Users,
++    roles: [UserRole.OWNER],
++  },
++  {
++    key: 'settings',
++    label: 'Settings',
++    to: '/settings',
++    icon: Settings,
++    roles: [UserRole.OWNER, UserRole.MANAGER, UserRole.DESIGNER],
++  },
++]
++
++function roleLabel(role: UserRoleType | undefined): string {
++  if (role === UserRole.OWNER) return 'Owner'
++  if (role === UserRole.MANAGER) return 'Manager'
++  if (role === UserRole.DESIGNER) return 'Designer'
++  return 'Guest'
++}
++
++function isAllowed(item: NavItem, role: UserRoleType | undefined): boolean {
++  if (!role) return item.to === '/dashboard'
++  return item.roles.includes(role)
++}
++
++function SidebarLink({ item }: { item: NavItem }) {
++  const Icon = item.icon
++
++  return (
++    <NavLink
++      className={({ isActive }) =>
++        cn(
++          'group flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm transition',
++          isActive
++            ? 'border-teal-400/40 bg-teal-400/15 text-teal-100'
++            : 'border-transparent text-slate-300 hover:border-slate-700 hover:bg-slate-800/70 hover:text-slate-100'
++        )
++      }
++      to={item.to}
++    >
++      <Icon className="size-4 shrink-0" />
++      <span>{item.label}</span>
++    </NavLink>
++  )
++}
++
++export default function Sidebar({ user, shops = [], compact = false }: SidebarProps) {
++  const role = user?.role
++  const allowedItems = navItems.filter((item) => isAllowed(item, role))
++
++  if (compact) {
++    return (
++      <nav className="flex items-center gap-2 overflow-x-auto px-4 py-3">
++        {allowedItems.map((item) => (
++          <NavLink
++            className={({ isActive }) =>
++              cn(
++                'shrink-0 rounded-md border px-2.5 py-1.5 text-xs transition',
++                isActive
++                  ? 'border-teal-400/40 bg-teal-400/15 text-teal-100'
++                  : 'border-slate-700 bg-slate-900/70 text-slate-300 hover:text-slate-100'
++              )
++            }
++            key={item.key}
++            to={item.to}
++          >
++            {item.label}
++          </NavLink>
++        ))}
++      </nav>
++    )
++  }
++
++  return (
++    <aside className="flex h-full w-full flex-col">
++      <div className="border-b border-slate-800/90 px-5 py-6">
++        <div className="flex items-center gap-2 text-teal-300">
++          <Shield className="size-5" />
++          <span className="text-sm font-semibold tracking-wide uppercase">OrderHub CRM</span>
++        </div>
++        <p className="mt-2 text-xs text-slate-400">Role-aware workspace shell for Sprint 3.</p>
++      </div>
++
++      <div className="flex-1 space-y-6 overflow-y-auto px-4 py-5">
++        <div className="space-y-2">
++          {allowedItems.map((item) => (
++            <SidebarLink item={item} key={item.key} />
++          ))}
++        </div>
++
++        {shops.length > 0 ? (
++          <div className="space-y-2">
++            <p className="px-1 text-[11px] font-semibold tracking-[0.16em] uppercase text-slate-500">Shops</p>
++            {shops.map((shop) => (
++              <NavLink
++                className={({ isActive }) =>
++                  cn(
++                    'block rounded-md px-3 py-2 text-sm transition',
++                    isActive ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
++                  )
++                }
++                key={shop.id}
++                to={shop.to}
++              >
++                {shop.name}
++              </NavLink>
++            ))}
++          </div>
++        ) : null}
++      </div>
++
++      <div className="border-t border-slate-800/90 px-5 py-4">
++        <p className="text-sm font-medium text-slate-100">{user?.full_name ?? 'Guest user'}</p>
++        <p className="text-xs text-slate-400">{roleLabel(role)}</p>
++      </div>
++    </aside>
++  )
++}
+diff --git a/frontend/src/components/layout/Topbar.tsx b/frontend/src/components/layout/Topbar.tsx
+new file mode 100644
+index 0000000..f663c0a
+--- /dev/null
++++ b/frontend/src/components/layout/Topbar.tsx
+@@ -0,0 +1,64 @@
++import { LogOut, Sparkles } from 'lucide-react'
++
++import { Badge } from '@/components/ui/badge'
++import { Button } from '@/components/ui/button'
++import type { User, UserRoleType } from '@/types/user'
++import { UserRole } from '@/types/user'
++
++type TopbarProps = {
++  title: string
++  description?: string
++  user: User | null
++  onLogout?: () => void | Promise<void>
++}
++
++function roleLabel(role: UserRoleType | undefined): string {
++  if (role === UserRole.OWNER) return 'Owner'
++  if (role === UserRole.MANAGER) return 'Manager'
++  if (role === UserRole.DESIGNER) return 'Designer'
++  return 'Guest'
++}
++
++function roleClass(role: UserRoleType | undefined): string {
++  if (role === UserRole.OWNER) return 'border-amber-400/40 bg-amber-300/15 text-amber-200'
++  if (role === UserRole.MANAGER) return 'border-sky-400/40 bg-sky-300/15 text-sky-200'
++  if (role === UserRole.DESIGNER) return 'border-teal-400/40 bg-teal-300/15 text-teal-200'
++  return 'border-slate-500/40 bg-slate-300/10 text-slate-300'
++}
++
++export default function Topbar({ title, description, user, onLogout }: TopbarProps) {
++  return (
++    <header className="border-b border-slate-800/90 bg-slate-950/80 px-4 py-4 backdrop-blur md:px-6">
++      <div className="flex items-center justify-between gap-4">
++        <div className="min-w-0">
++          <p className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.18em] uppercase text-slate-400">
++            <Sparkles className="size-3.5 text-teal-300" />
++            Sprint 3 shell
++          </p>
++          <h1 className="mt-1 truncate text-xl font-semibold text-slate-100">{title}</h1>
++          {description ? <p className="mt-1 truncate text-sm text-slate-400">{description}</p> : null}
++        </div>
++
++        <div className="flex items-center gap-2.5">
++          <Badge className={roleClass(user?.role)} variant="outline">
++            {roleLabel(user?.role)}
++          </Badge>
++          <span className="hidden text-sm text-slate-300 sm:inline">{user?.full_name ?? 'Guest'}</span>
++          <Button
++            disabled={!onLogout}
++            onClick={() => {
++              if (onLogout) {
++                void onLogout()
++              }
++            }}
++            size="sm"
++            variant="outline"
++          >
++            <LogOut className="size-4" />
++            Logout
++          </Button>
++        </div>
++      </div>
++    </header>
++  )
++}
+diff --git a/frontend/src/hooks/useOrders.ts b/frontend/src/hooks/useOrders.ts
+new file mode 100644
+index 0000000..bd0dbd5
+--- /dev/null
++++ b/frontend/src/hooks/useOrders.ts
+@@ -0,0 +1,28 @@
++import { useQuery } from '@tanstack/react-query'
++
++import { ordersApi } from '@/api/orders'
++import type { OrderListFilters } from '@/types/order'
++
++type UseOrdersOptions = {
++  enabled?: boolean
++}
++
++export function useOrders(filters: OrderListFilters = {}, options: UseOrdersOptions = {}) {
++  const { enabled = true } = options
++
++  return useQuery({
++    queryKey: ['orders', filters],
++    queryFn: () => ordersApi.list(filters),
++    enabled,
++  })
++}
++
++export function useOrder(orderId: string | null, options: UseOrdersOptions = {}) {
++  const { enabled = true } = options
++
++  return useQuery({
++    queryKey: ['orders', orderId],
++    queryFn: () => ordersApi.getById(orderId as string),
++    enabled: enabled && Boolean(orderId),
++  })
++}
+diff --git a/frontend/src/hooks/useShops.ts b/frontend/src/hooks/useShops.ts
+new file mode 100644
+index 0000000..1d5dd34
+--- /dev/null
++++ b/frontend/src/hooks/useShops.ts
+@@ -0,0 +1,17 @@
++import { useQuery } from '@tanstack/react-query'
++
++import { shopsApi } from '@/api/shops'
++
++type UseShopsOptions = {
++  enabled?: boolean
++}
++
++export function useShops(options: UseShopsOptions = {}) {
++  const { enabled = true } = options
++
++  return useQuery({
++    queryKey: ['shops'],
++    queryFn: shopsApi.list,
++    enabled,
++  })
++}
+diff --git a/frontend/src/pages/DashboardPage.tsx b/frontend/src/pages/DashboardPage.tsx
+new file mode 100644
+index 0000000..831b173
+--- /dev/null
++++ b/frontend/src/pages/DashboardPage.tsx
+@@ -0,0 +1,47 @@
++import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
++import { useOrders } from '@/hooks/useOrders'
++import { useShops } from '@/hooks/useShops'
++
++import ShellPage from './ShellPage'
++
++export default function DashboardPage() {
++  const shopsQuery = useShops()
++  const ordersQuery = useOrders({ page: 1, limit: 5 })
++
++  const shopsCount = shopsQuery.data?.length ?? 0
++  const ordersCount = ordersQuery.data?.total ?? 0
++  const statusLabel = shopsQuery.isLoading || ordersQuery.isLoading ? 'Syncing' : 'Online'
++
++  return (
++    <ShellPage
++      description="Core shell is connected. Protected routes and data hooks are active."
++      title="Dashboard"
++    >
++      <section className="grid gap-4 md:grid-cols-3">
++        <Card className="border border-slate-800/90 bg-slate-900/70">
++          <CardHeader>
++            <CardTitle>Backend Status</CardTitle>
++            <CardDescription>Auth + API hooks are connected.</CardDescription>
++          </CardHeader>
++          <CardContent className="text-2xl font-semibold text-teal-300">{statusLabel}</CardContent>
++        </Card>
++
++        <Card className="border border-slate-800/90 bg-slate-900/70">
++          <CardHeader>
++            <CardTitle>Active Shops</CardTitle>
++            <CardDescription>Loaded from `/api/shops`.</CardDescription>
++          </CardHeader>
++          <CardContent className="text-2xl font-semibold text-sky-300">{shopsCount}</CardContent>
++        </Card>
++
++        <Card className="border border-slate-800/90 bg-slate-900/70">
++          <CardHeader>
++            <CardTitle>Total Orders</CardTitle>
++            <CardDescription>Loaded from `/api/orders`.</CardDescription>
++          </CardHeader>
++          <CardContent className="text-2xl font-semibold text-amber-300">{ordersCount}</CardContent>
++        </Card>
++      </section>
++    </ShellPage>
++  )
++}
+diff --git a/frontend/src/pages/FeaturePlaceholderPage.tsx b/frontend/src/pages/FeaturePlaceholderPage.tsx
+new file mode 100644
+index 0000000..fc40fa9
+--- /dev/null
++++ b/frontend/src/pages/FeaturePlaceholderPage.tsx
+@@ -0,0 +1,24 @@
++import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
++
++import ShellPage from './ShellPage'
++
++type FeaturePlaceholderPageProps = {
++  title: string
++  description: string
++}
++
++export default function FeaturePlaceholderPage({ title, description }: FeaturePlaceholderPageProps) {
++  return (
++    <ShellPage description={description} title={title}>
++      <Card className="max-w-2xl border border-slate-800/90 bg-slate-900/70">
++        <CardHeader>
++          <CardTitle>{title}</CardTitle>
++          <CardDescription>{description}</CardDescription>
++        </CardHeader>
++        <CardContent className="text-sm text-slate-300">
++          This route is wired and protected in Sprint 3. Feature implementation continues in Sprint 4/5.
++        </CardContent>
++      </Card>
++    </ShellPage>
++  )
++}
+diff --git a/frontend/src/pages/LoginPage.tsx b/frontend/src/pages/LoginPage.tsx
+new file mode 100644
+index 0000000..5291724
+--- /dev/null
++++ b/frontend/src/pages/LoginPage.tsx
+@@ -0,0 +1,142 @@
++import { useEffect, useState } from 'react'
++import type { FormEvent } from 'react'
++import { isAxiosError } from 'axios'
++import { Link, useLocation, useNavigate } from 'react-router-dom'
++
++import { useAuth } from '@/hooks/useAuth'
++import { Button } from '@/components/ui/button'
++import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
++import { Input } from '@/components/ui/input'
++
++type LoginFormState = {
++  email: string
++  password: string
++}
++
++const initialForm: LoginFormState = {
++  email: '',
++  password: '',
++}
++
++function extractErrorMessage(error: unknown): string {
++  if (!isAxiosError(error)) {
++    return 'Login failed. Please try again.'
++  }
++
++  const detail = error.response?.data?.detail
++  if (typeof detail === 'string' && detail.trim().length > 0) {
++    return detail
++  }
++
++  return 'Login failed. Please check your credentials.'
++}
++
++export default function LoginPage() {
++  const location = useLocation()
++  const navigate = useNavigate()
++  const { login, isAuthenticated } = useAuth()
++  const redirectTo = (location.state as { from?: string } | undefined)?.from ?? '/dashboard'
++
++  const [form, setForm] = useState<LoginFormState>(initialForm)
++  const [isSubmitting, setIsSubmitting] = useState(false)
++  const [errorMessage, setErrorMessage] = useState<string | null>(null)
++
++  useEffect(() => {
++    if (isAuthenticated) {
++      navigate(redirectTo, { replace: true })
++    }
++  }, [isAuthenticated, navigate, redirectTo])
++
++  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
++    event.preventDefault()
++    if (isSubmitting) return
++
++    setErrorMessage(null)
++    setIsSubmitting(true)
++
++    try {
++      await login(form)
++      navigate(redirectTo, { replace: true })
++    } catch (error) {
++      setErrorMessage(extractErrorMessage(error))
++    } finally {
++      setIsSubmitting(false)
++    }
++  }
++
++  return (
++    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_15%_20%,rgba(20,184,166,0.15),transparent_35%),radial-gradient(circle_at_80%_10%,rgba(251,146,60,0.15),transparent_30%),linear-gradient(180deg,#0b1020_0%,#111827_100%)] px-4 py-10">
++      <div className="pointer-events-none absolute inset-0 opacity-60 [background:linear-gradient(115deg,transparent_0%,rgba(148,163,184,0.08)_30%,transparent_65%)]" />
++      <section className="relative z-10 w-full max-w-md animate-fade-in">
++        <Card className="border border-white/10 bg-slate-950/70 text-slate-100 shadow-2xl shadow-black/30 backdrop-blur-xl">
++          <CardHeader className="space-y-2">
++            <p className="text-xs font-semibold tracking-[0.24em] uppercase text-teal-300/90">
++              OrderHub CRM
++            </p>
++            <CardTitle className="font-heading text-3xl leading-tight">
++              Welcome back
++            </CardTitle>
++            <CardDescription className="text-slate-300">
++              Sign in to manage orders, customers, and production flow.
++            </CardDescription>
++          </CardHeader>
++
++          <CardContent>
++            <form className="space-y-4" onSubmit={handleSubmit}>
++              <div className="space-y-2">
++                <label className="block text-xs font-medium tracking-wide text-slate-300 uppercase" htmlFor="email">
++                  Email
++                </label>
++                <Input
++                  id="email"
++                  autoComplete="email"
++                  className="h-10 border-slate-700/80 bg-slate-900/70 text-slate-100 placeholder:text-slate-400"
++                  disabled={isSubmitting}
++                  onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
++                  placeholder="owner@crm.local"
++                  required
++                  type="email"
++                  value={form.email}
++                />
++              </div>
++
++              <div className="space-y-2">
++                <label className="block text-xs font-medium tracking-wide text-slate-300 uppercase" htmlFor="password">
++                  Password
++                </label>
++                <Input
++                  id="password"
++                  autoComplete="current-password"
++                  className="h-10 border-slate-700/80 bg-slate-900/70 text-slate-100 placeholder:text-slate-400"
++                  disabled={isSubmitting}
++                  onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
++                  placeholder="Enter your password"
++                  required
++                  type="password"
++                  value={form.password}
++                />
++              </div>
++
++              {errorMessage ? (
++                <p className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-200">
++                  {errorMessage}
++                </p>
++              ) : null}
++
++              <Button className="h-10 w-full bg-teal-500 text-slate-950 hover:bg-teal-400" disabled={isSubmitting} type="submit">
++                {isSubmitting ? 'Signing in...' : 'Sign in'}
++              </Button>
++            </form>
++
++            <div className="mt-6 flex items-center justify-between text-xs text-slate-400">
++              <span>Need access from owner?</span>
++              <Link className="text-teal-300 hover:text-teal-200" to="/dashboard">
++                Open preview
++              </Link>
++            </div>
++          </CardContent>
++        </Card>
++      </section>
++    </main>
++  )
++}
+diff --git a/frontend/src/pages/ShellPage.tsx b/frontend/src/pages/ShellPage.tsx
+new file mode 100644
+index 0000000..59a9eec
+--- /dev/null
++++ b/frontend/src/pages/ShellPage.tsx
+@@ -0,0 +1,62 @@
++import type { ReactNode } from 'react'
++
++import AppLayout from '@/components/layout/AppLayout'
++import type { LayoutShop } from '@/components/layout/Sidebar'
++import { useAuth } from '@/hooks/useAuth'
++import { useShops } from '@/hooks/useShops'
++
++type ShellPageProps = {
++  title: string
++  description?: string
++  children: ReactNode
++}
++
++function SessionLoading() {
++  return (
++    <div className="min-h-screen flex items-center justify-center">
++      <div className="glass rounded-xl p-8 animate-fade-in text-center">
++        <p className="text-sm text-slate-300">Preparing workspace...</p>
++      </div>
++    </div>
++  )
++}
++
++function toLayoutShops(items: { id: string; name: string }[]): LayoutShop[] {
++  const baseShop: LayoutShop = {
++    id: 'all',
++    name: 'All Orders',
++    to: '/orders',
++  }
++
++  return [
++    baseShop,
++    ...items.map((shop) => ({
++      id: shop.id,
++      name: shop.name,
++      to: `/shops/${shop.id}/orders`,
++    })),
++  ]
++}
++
++export default function ShellPage({ title, description, children }: ShellPageProps) {
++  const { isLoading, logout, user } = useAuth()
++  const shopsQuery = useShops({ enabled: Boolean(user) })
++
++  if (isLoading) {
++    return <SessionLoading />
++  }
++
++  const layoutShops = toLayoutShops(shopsQuery.data ?? [])
++
++  return (
++    <AppLayout
++      description={description}
++      onLogout={user ? logout : undefined}
++      shops={layoutShops}
++      title={title}
++      user={user}
++    >
++      {children}
++    </AppLayout>
++  )
++}
+diff --git a/frontend/src/types/order.ts b/frontend/src/types/order.ts
+new file mode 100644
+index 0000000..ce76cfc
+--- /dev/null
++++ b/frontend/src/types/order.ts
+@@ -0,0 +1,17 @@
++import type { Order, OrderStatus, PaginatedResponse } from './common'
++
++export interface OrderListItem extends Order {
++  shop_name: string | null
++  customer_name: string | null
++  platform: string | null
++}
++
++export type OrderListResponse = PaginatedResponse<OrderListItem>
++
++export interface OrderListFilters {
++  page?: number
++  limit?: number
++  status?: OrderStatus
++  shop_id?: string
++  search?: string
++}
+diff --git a/frontend/src/types/shop.ts b/frontend/src/types/shop.ts
+new file mode 100644
+index 0000000..46fcc23
+--- /dev/null
++++ b/frontend/src/types/shop.ts
+@@ -0,0 +1,7 @@
++import type { Shop } from './common'
++
++export interface ShopListItem extends Shop {
++  updated_at: string
++  has_shopify_token: boolean
++  has_np_token: boolean
++}
+diff --git a/frontend/src/types/user.ts b/frontend/src/types/user.ts
+index db421fb..526be37 100644
+--- a/frontend/src/types/user.ts
++++ b/frontend/src/types/user.ts
+@@ -11,7 +11,7 @@ export interface User {
+   email: string;
+   full_name: string;
+   role: UserRoleType;
+-  is_active: string;
++  is_active: boolean;
+   created_at: string;
+   updated_at: string;
+ }
+diff --git a/implementation_plan.md b/implementation_plan.md
+old mode 100755
+new mode 100644
+index 3ae4a1f..dc52801
+--- a/implementation_plan.md
++++ b/implementation_plan.md
+@@ -1,395 +1,263 @@
+-# OrderHub CRM — Implementation Plan
+-
+-## Огляд проєкту
+-
+-**OrderHub** — self-hosted CRM для управління замовленнями handmade бізнесу шкіряних виробів. Замінює workflow Etsy CSV → Google Sheets → Trello єдиним веб-додатком з підтримкою AI-агентів через MCP протокол.
+-
+-### Ключові рішення (зафіксовані)
+-
+-| Рішення | Деталі |
+-|---------|--------|
+-| AI Agent | MCP Server замість вбудованого чату (Phase 6) |
+-| Сторінки магазинів | Окрема сторінка для кожного магазину + "All Orders" |
+-| Візуалізація замовлень | Hybrid: Smart Table (primary) + Pipeline Board (secondary), toggle кнопка |
+-| Адреса доставки | Поля shipping address на моделі Order |
+-| Docker | Окремі dev/prod конфігурації для frontend |
+-| Alembic | Інтегровано в entrypoint.sh |
+-| Валюти | Revenue per currency, без автоконвертації |
+-| Order fields | `quantity` та `item_price` видалені з Order (є в OrderItem) |
+-| Drag-and-drop | Видалено. Статус змінюється через inline dropdown. @dnd-kit прибрано |
+-
+----
+-
+-## Зміни відносно оригінальної специфікації
+-
+-> [!IMPORTANT]
+-> **Видалено** (спрощення через MCP-підхід):
+-> - `AgentSession`, `AgentAction` моделі
+-> - `agent_runner.py`, `llm_provider.py`
+-> - `/api/agent/*` ендпоінти
+-> - `AgentChat.tsx`, `AgentMessage.tsx`, `ToolCallPreview.tsx`, `ConfirmAction.tsx`
+-> - `ANTHROPIC_API_KEY` з `.env`
+-
+-> [!IMPORTANT]
+-> **Додано**:
+-> - `mcp_server.py` — MCP сервер з усіма CRM-інструментами
+-> - Shipping address поля на Order
+-> - `ShopOrdersPage.tsx` — окрема сторінка для кожного магазину
+-> - `CustomersPage.tsx` — сторінка клієнтів
+-> - `entrypoint.sh` — startup script з alembic + seed
+-> - `Dockerfile.dev` для frontend (vite dev server)
+-> - `platform_fee` поле на Order
+-
+----
+-
+-## Оновлена структура проєкту
+-
+-```
+-OrderHub/
+-├── docker-compose.yml              # production
+-├── docker-compose.dev.yml          # development overrides
+-├── .env.example
+-├── README.md
+-│
+-├── backend/
+-│   ├── Dockerfile
+-│   ├── entrypoint.sh               # alembic upgrade + optional seed
+-│   ├── requirements.txt
+-│   ├── main.py                     # FastAPI app, CORS, lifespan
+-│   ├── config.py                   # Settings from env
+-│   ├── database.py                 # async SQLAlchemy engine + session
+-│   ├── seed.py                     # seed data script
+-│   │
+-│   ├── models/
+-│   │   ├── __init__.py
+-│   │   ├── base.py                 # Base model with id, created_at
+-│   │   ├── user.py
+-│   │   ├── shop.py
+-│   │   ├── order.py                # Order + OrderItem + OrderStatusHistory
+-│   │   ├── customer.py
+-│   │   └── attachment.py
+-│   │
+-│   ├── schemas/
+-│   │   ├── __init__.py
+-│   │   ├── auth.py
+-│   │   ├── user.py
+-│   │   ├── shop.py
+-│   │   ├── order.py
+-│   │   ├── customer.py
+-│   │   ├── dashboard.py
+-│   │   └── common.py              # pagination, error schemas
+-│   │
+-│   ├── routers/
+-│   │   ├── __init__.py
+-│   │   ├── auth.py
+-│   │   ├── users.py
+-│   │   ├── shops.py
+-│   │   ├── orders.py
+-│   │   ├── imports.py
+-│   │   ├── customers.py
+-│   │   ├── attachments.py
+-│   │   └── dashboard.py
+-│   │
+-│   ├── services/
+-│   │   ├── __init__.py
+-│   │   ├── auth_service.py
+-│   │   ├── encryption_service.py   # Fernet encrypt/decrypt
+-│   │   ├── order_service.py        # status transitions, CRUD
+-│   │   ├── customer_service.py     # upsert logic
+-│   │   ├── shopify_sync.py
+-│   │   ├── etsy_parser.py
+-│   │   ├── scheduler.py            # APScheduler (single worker)
+-│   │   ├── file_storage.py
+-│   │   ├── email_service.py
+-│   │   └── nova_poshta.py          # NP API client
+-│   │
+-│   ├── mcp_server.py               # [NEW] MCP server
+-│   │
+-│   └── alembic/
+-│       ├── alembic.ini
+-│       ├── env.py
+-│       └── versions/
+-│
+-└── frontend/
+-    ├── Dockerfile                   # production (multi-stage + nginx)
+-    ├── Dockerfile.dev               # development (vite dev server)
+-    ├── nginx.conf
+-    ├── package.json
+-    ├── tsconfig.json
+-    ├── vite.config.ts
+-    ├── tailwind.config.ts
+-    ├── index.html
+-    │
+-    └── src/
+-        ├── main.tsx
+-        ├── App.tsx                  # routes
+-        │
+-        ├── api/
+-        │   ├── client.ts            # axios + interceptors
+-        │   ├── auth.ts
+-        │   ├── orders.ts
+-        │   ├── shops.ts
+-        │   ├── customers.ts
+-        │   ├── imports.ts
+-        │   ├── attachments.ts
+-        │   └── dashboard.ts
+-        │
+-        ├── components/
+-        │   ├── layout/
+-        │   │   ├── Sidebar.tsx
+-        │   │   ├── Topbar.tsx
+-        │   │   └── AppLayout.tsx
+-        │   ├── orders/
+-        │   │   ├── OrdersTable.tsx        # Primary view: smart table with inline status
+-        │   │   ├── PipelineBoard.tsx      # Secondary view: visual pipeline columns
+-        │   │   ├── PipelineCard.tsx        # Card for pipeline view
+-        │   │   ├── StatusTabs.tsx          # Tab bar grouping statuses
+-        │   │   ├── ViewToggle.tsx          # [List] [Board] toggle button
+-        │   │   └── OrderDetailPanel.tsx    # Slide-over panel
+-        │   ├── import/
+-        │   │   ├── CsvDropzone.tsx
+-        │   │   └── ImportResult.tsx
+-        │   ├── dashboard/
+-        │   │   ├── StatCard.tsx
+-        │   │   ├── RevenueChart.tsx
+-        │   │   ├── ShopBreakdownChart.tsx
+-        │   │   └── AttentionList.tsx
+-        │   └── ui/                  # shadcn/ui components
+-        │
+-        ├── pages/
+-        │   ├── LoginPage.tsx
+-        │   ├── DashboardPage.tsx
+-        │   ├── OrdersPage.tsx       # All Orders — Kanban
+-        │   ├── ShopOrdersPage.tsx   # [NEW] Per-shop Kanban
+-        │   ├── OrderDetailPage.tsx
+-        │   ├── ImportPage.tsx
+-        │   ├── ShopsPage.tsx        # Shop management (owner)
+-        │   ├── CustomersPage.tsx    # [NEW] Customer list
+-        │   ├── ArchivePage.tsx
+-        │   ├── UsersPage.tsx
+-        │   └── SettingsPage.tsx     # Profile, password change
+-        │
+-        ├── hooks/
+-        │   ├── useAuth.ts
+-        │   ├── useOrders.ts
+-        │   └── useShops.ts
+-        │
+-        ├── store/
+-        │   └── authStore.ts
+-        │
+-        ├── types/
+-        │   ├── order.ts
+-        │   ├── shop.ts
+-        │   ├── user.ts
+-        │   └── common.ts
+-        │
+-        └── lib/
+-            ├── constants.ts         # status colors, transitions
+-            └── utils.ts             # date formatting, etc.
+-```
+-
+----
+-
+-## Оновлена модель Order (з виправленнями)
+-
+-```python
+-Order:
+-  - id (UUID, PK)
+-  - external_id (string)
+-  - shop_id (FK → Shop, indexed)
+-  - customer_id (FK → Customer, indexed)
+-  - UNIQUE constraint: (external_id, shop_id)
+-  - status: enum('new','waiting_info','info_received','design_pending',
+-                  'design_ready','in_production','shipped','completed','cancelled')
+-  - title (text)                    # перший item або "Multiple items (N)"
+-  - total_price: Numeric(10,2)     # Order Total з платформи
+-  - currency: varchar(3)
+-  - production_cost: Numeric(10,2), nullable
+-  - shipping_np_cost: Numeric(10,2), nullable
+-  - platform_fee: Numeric(10,2), nullable        # [NEW] комісія Etsy/Shopify
+-  
+-  # [NEW] Shipping address fields
+-  - shipping_name (text, nullable)
+-  - shipping_phone (varchar 20, nullable)
+-  - shipping_street_1 (text, nullable)
+-  - shipping_street_2 (text, nullable)
+-  - shipping_city (text, nullable)
+-  - shipping_state (text, nullable)
+-  - shipping_zip (varchar 20, nullable)
+-  - shipping_country (varchar 2, nullable)
+-  
+-  # Assignment & production
+-  - assigned_designer_id (FK → User, nullable)
+-  - assigned_at (timestamp, nullable)
+-  - ttn_number (varchar 20, nullable)
+-  - ttn_created_at (timestamp, nullable)
+-  - ttn_printed (bool, default False)
+-  
+-  # Notes
+-  - customer_note (text, nullable)
+-  - custom_info (text, nullable)
+-  - internal_note (text, nullable)
+-  
+-  # Timestamps
+-  - ordered_at (timestamp)
+-  - shipped_at (timestamp, nullable)
+-  - completed_at (timestamp, nullable)
+-  - created_at, updated_at
+-
+-  # ВИДАЛЕНО: quantity, item_price (є в OrderItem)
+-```
+-
+----
+-
+-## Спрінти
+-
+-### Sprint 1 — Foundation 🏗️ [DONE]
+-> Мета: проёкт запускається в Docker, є БД, авторизація, seed дані
+-
+-| # | Задача | Файли | Складність | Статус |
+-|---|--------|-------|------------|--------|
+-| 1.1 | `.env.example` + `docker-compose.yml` + `docker-compose.dev.yml` | root | Проста | [DONE] |
+-| 1.2 | Backend Dockerfile + `entrypoint.sh` + `requirements.txt` | backend/ | Проста | [DONE] |
+-| 1.3 | `config.py` — Pydantic Settings з .env | backend/ | Проста | [DONE] |
+-| 1.4 | `database.py` — async engine, session, Base | backend/ | Проста | [DONE] |
+-| 1.5 | Всі DB моделі (User, Shop, Order, OrderItem, OrderStatusHistory, Customer, Attachment) | backend/models/ | Проста | [DONE] |
+-| 1.6 | Alembic init + initial migration | backend/alembic/ | Складна | [DONE] |
+-| 1.7 | `main.py` — FastAPI app skeleton (CORS, lifespan, exception handlers) | backend/ | Проста | [DONE] |
+-| 1.8 | Auth: JWT service + login/refresh/logout endpoints | backend/routers/auth.py, services/auth_service.py | Проста | [DONE] |
+-| 1.9 | User CRUD (owner only) | backend/routers/users.py | Проста | [DONE] |
+-| 1.10 | `encryption_service.py` — Fernet helpers | backend/services/ | Проста | [DONE] |
+-| 1.11 | `seed.py` — 3 users, 3 shops, 15 orders | backend/ | Проста | [DONE] |
+-| 1.12 | Frontend: Vite + React + TS + TailwindCSS + shadcn/ui init | frontend/ | Складна | [DONE] |
+-| 1.13 | Frontend Dockerfile.dev + nginx.conf + prod Dockerfile | frontend/ | Проста | [DONE] |
+-
+-**Результат**: `docker compose -f docker-compose.dev.yml up` → backend на :8000, frontend на :3000, PostgreSQL на :5432, seed data в БД, login працює.
+-
+----
+-
+-### Sprint 2 — Core Backend API 📦 [DONE]
+-> Мета: всі бізнес-ендпоінти працюють, CSV імпорт, статуси
+-
+-| # | Задача | Файли | Складність | Статус |
+-|---|--------|-------|------------|--------|
+-| 2.1 | Pydantic schemas для всіх моделей | backend/schemas/ | Проста | [DONE] |
+-| 2.2 | Shop CRUD + encrypt/decrypt API tokens | backend/routers/shops.py | Проста | [DONE] |
+-| 2.3 | Customer service (upsert by email) | backend/services/customer_service.py | Проста | [DONE] |
+-| 2.4 | Order CRUD + фільтри (status, shop_id, search, pagination) | backend/routers/orders.py | Складна | [DONE] |
+-| 2.5 | `order_service.py` — status transition validation + history logging | backend/services/ | Складна | [DONE] |
+-| 2.6 | Etsy CSV parser (BOM strip, grouping by Order ID, multi-item) | backend/services/etsy_parser.py | Складна | [DONE] |
+-| 2.7 | Import endpoint (POST /api/imports/etsy) | backend/routers/imports.py | Проста | [DONE] |
+-| 2.8 | File storage service + attachment endpoints (auth-protected) | backend/services/file_storage.py | Проста | [DONE] |
+-| 2.9 | Customer endpoints | backend/routers/customers.py | Проста | [DONE] |
+-| 2.10 | Dashboard stat endpoints (revenue per currency) | backend/routers/dashboard.py | Складна | [DONE] |
+-| 2.11 | CSV export endpoint (owner only) | backend/routers/orders.py | Проста | [DONE] |
+-
+-**Результат**: повний REST API, тестований через Swagger UI на :8000/docs.
+-
+----
+-
+-### Sprint 3 — Frontend Shell 🖼️
+-> Мета: авторизація, layout, навігація, базові сторінки
+-
+-| # | Задача | Файли | Складність | Статус |
+-|---|--------|-------|------------|--------|
+-| 3.1 | Axios client + token refresh interceptor | frontend/src/api/client.ts | Проста | [DONE] |
+-| 3.2 | Auth store + useAuth hook | frontend/src/store/, hooks/ | Проста | [DONE] |
+-| 3.3 | Login page (premium UI) | frontend/src/pages/LoginPage.tsx | Складна | [TODO] |
+-| 3.4 | App layout: Sidebar (role-aware, shops list) + Topbar | frontend/src/components/layout/ | Складна | [TODO] |
+-| 3.5 | React Router config (protected routes) | frontend/src/App.tsx | Складна | [TODO] |
+-| 3.6 | API hooks (React Query) для orders, shops | frontend/src/api/ | Складна | [TODO] |
+-| 3.7 | Базові shadcn/ui компоненти (Button, Card, Badge, Input, Dialog, etc.) | frontend/src/components/ui/ | Проста | [TODO] |
+-
+-**Результат**: login → redirect to dashboard, sidebar з навігацією per shop, protected routes по ролях.
+-
+----
+-
+-### Sprint 4 — Core Frontend 🎯
+-> Мета: Orders views, деталі замовлення, імпорт CSV
+-
+-| # | Задача | Файли | Складність | Статус |
+-|---|--------|-------|------------|--------|
+-| 4.1 | Status Tabs — групування 9 статусів у 5 табів | StatusTabs.tsx | Проста | [TODO] |
+-| 4.2 | Orders Table (primary view) — smart table | OrdersTable.tsx | Складна | [TODO] |
+-| 4.3 | Pipeline Board (secondary view) — канбан | PipelineBoard.tsx | Складна | [TODO] |
+-| 4.4 | View Toggle — [📋 List] [◻️ Board] | ViewToggle.tsx | Проста | [TODO] |
+-| 4.5 | Shop Orders Page — per-shop view | ShopOrdersPage.tsx | Проста | [TODO] |
+-| 4.6 | Order Detail Panel (slide-over) | OrderDetailPanel.tsx | Складна | [TODO] |
+-| 4.7 | CSV Import page | ImportPage.tsx | Складна | [TODO] |
+-| 4.8 | Customers page | CustomersPage.tsx | Проста | [TODO] |
+-
+-**Результат**: повний workflow: import CSV → table/board view → inline status change → view details → upload mockup.
+-
+----
+-
+-### Sprint 5 — Dashboard, Archive & Management 📊
+-> Мета: аналітика, архів, адмін-панелі
+-
+-| # | Задача | Файли | Складність | Статус |
+-|---|--------|-------|------------|--------|
+-| 5.1 | Dashboard: stat cards | DashboardPage.tsx | Проста | [TODO] |
+-| 5.2 | Dashboard: revenue chart | RevenueChart.tsx | Складна | [TODO] |
+-| 5.3 | Dashboard: shop breakdown | ShopBreakdownChart.tsx | Проста | [TODO] |
+-| 5.4 | Dashboard: attention needed list | AttentionList.tsx | Проста | [TODO] |
+-| 5.5 | Dashboard: recent activity | DashboardPage.tsx | Проста | [TODO] |
+-| 5.6 | Archive page | ArchivePage.tsx | Проста | [TODO] |
+-| 5.7 | Shops management | ShopsPage.tsx | Проста | [TODO] |
+-| 5.8 | User management | UsersPage.tsx | Проста | [TODO] |
+-| 5.9 | Settings page | SettingsPage.tsx | Проста | [TODO] |
+-
+-**Результат**: повна CRM без AI — ready to use.
+-
+----
+-
+-### Sprint 6 — Integrations & MCP 🔌
+-> Мета: зовнішні інтеграції + MCP server для AI-агента
+-
+-| # | Задача | Файли | Складність | Статус |
+-|---|--------|-------|------------|--------|
+-| 6.1 | Nova Poshta API client | backend/services/nova_poshta.py | Складна | [TODO] |
+-| 6.2 | Shopify sync service + scheduler | backend/services/shopify_sync.py | Складна | [TODO] |
+-| 6.3 | Manual sync trigger | backend/routers/shops.py | Проста | [TODO] |
+-| 6.4 | Email service (aiosmtplib) | backend/services/email_service.py | Проста | [TODO] |
+-| 6.5 | NP "Test connection" endpoint | backend/routers/shops.py | Проста | [TODO] |
+-| 6.6 | MCP Server — read tools | backend/mcp_server.py | Складна | [TODO] |
+-| 6.7 | MCP Server — NP tools | backend/mcp_server.py | Складна | [TODO] |
+-| 6.8 | MCP Server — write tools | backend/mcp_server.py | Складна | [TODO] |
+-| 6.9 | MCP auth & role checking | backend/mcp_server.py | Складна | [TODO] |
+-| 6.10 | README.md — документація | root | Проста | [TODO] |
+-
+-**Результат**: Hermes (або будь-який MCP-клієнт) підключається до CRM і виконує операції. Shopify auto-sync працює. NP TTN створюються.
+-
+----
+-
+-## Верифікація
+-
+-### Після кожного спрінту
+-- Backend: Swagger UI manual testing
+-- Frontend: візуальна перевірка в браузері
+-- Docker: `docker compose up` працює без помилок
+-
+-### Фінальна верифікація
+-- [ ] Login/logout всіх трьох ролей
+-- [ ] Import Etsy CSV → замовлення з'являються на Kanban
+-- [ ] Drag-and-drop зміна статусу з перевіркою дозволів
+-- [ ] Order detail: всі секції, upload файлу, status history
+-- [ ] Per-shop Kanban фільтрація
+-- [ ] Dashboard: графіки, stats, attention list
+-- [ ] Archive: таблиця, CSV export
+-- [ ] MCP: підключення агента, виконання read/write tools
+-- [ ] Role restrictions: designer бачить тільки свої замовлення
+-
+----
+-
+-## Поточний стан (Last Sync)
+-
+-> **Активний Спрінт**: Sprint 3 — Frontend Shell
+-
+-**Щойно завершено (Sprint 2 & Початок Sprint 3):**
+-*   **Core Backend API (Sprint 2) виконано на 100%**. Працюють всі ендпоінти: orders, shops, customers, Etsy CSV imports, dashboard stats, file storage.
+-*   Виправлені зауваження після Code Review: N+1 query (`customers.py`), безпека шляхів (`file_storage.py`), парсинг дат та підрахунок `total_price` (`etsy_parser.py`).
+-*   **Відкрито Sprint 3 (Задачі 3.1 & 3.2)**: Налаштовано Axios клієнт (`client.ts`) для silent JWT token refresh. Реалізовано глобальний стейт через `zustand` (`authStore.ts`) та хук `useAuth`. Typescript збирається без помилок.
+-
+-**Наступні кроки для старту:**
+-*   **Task 3.3**: Побудова `LoginPage.tsx` (Premium дизайн, Tailwind v4 + shadcn/ui).
+-*   **Task 3.4**: Створення App Layout (`Sidebar.tsx`, `Topbar.tsx`, `AppLayout.tsx`).
++# OrderHub CRM - Implementation Plan
++
++## How To Use This File
++
++This file is the operational execution plan for the repository.
++
++Use it for:
++
++- sprint scope
++- task status
++- next implementation steps
++- known mismatches between plan and actual codebase
++- verification checkpoints
++
++Do not duplicate stable architecture here. Stable project logic belongs in `ORDERHUB_CONTEXT.md`.
++
++## Status Snapshot
++
++Last reviewed: `2026-04-20`
++
++- Active sprint: `Sprint 4 - Core Frontend`
++- Sprint 1 status: `DONE`
++- Sprint 2 status: `DONE`
++- Sprint 3 status: `DONE`
++- Sprint 4 status: `NOT STARTED`
++- Sprint 5 status: `NOT STARTED`
++- Sprint 6 status: `NOT STARTED`
++
++## Actual Repository Snapshot
++
++Verified against the current tree before editing this file.
++
++Backend present now:
++
++- app bootstrap and config
++- models, schemas, routers, services
++- Alembic migration setup
++- seed script
++
++Frontend present now:
++
++- `main.tsx`
++- `App.tsx` with protected route shell
++- auth API layer
++- orders and shops API modules
++- auth store and hook
++- orders and shops React Query hooks
++- `pages/` with login, dashboard and shell placeholders
++- `components/layout/` with sidebar, topbar and app layout
++- `components/auth/RouteGuards.tsx`
++- base UI primitives in `components/ui`
++
++Frontend not present yet:
++
++- `src/components/orders/`
++- `src/components/dashboard/`
++- full feature pages for sprint 4/5
++
++Planned backend files not present yet:
++
++- `backend/mcp_server.py`
++- `backend/services/shopify_sync.py`
++- `backend/services/scheduler.py`
++- `backend/services/email_service.py`
++- `backend/services/nova_poshta.py`
++
++## Plan Corrections
++
++These were inaccurate in the previous version of the plan and are now normalized:
++
++1. The old plan mixed current filesystem state with target structure. This file now separates actual repository state from planned work.
++2. `Sprint 3 / Task 3.7` was marked `TODO`, but base UI primitives already exist in `frontend/src/components/ui`.
++3. The plan used `kanban`, `pipeline`, and `board` inconsistently. The canonical UI language is now:
++   `smart table` as primary view, `pipeline board` as secondary view.
++4. Final verification still mentioned drag-and-drop, but drag-and-drop was previously removed from scope. Verification now checks inline status changes instead.
++5. `Task 3.6` referenced React Query hooks under `frontend/src/api/`, while the intended split is API clients in `api/` and React Query hooks in `hooks/`.
++6. The old structure section listed files like `tailwind.config.ts` and multiple page modules as if they already existed. They do not exist yet in the current repository.
++
++## Working Rules
++
++- When a task is finished, update its status in this file immediately.
++- When a sprint assumption becomes false, add it to `Plan Corrections` before continuing.
++- Keep task IDs stable so future updates can reference them unambiguously.
++- Every sprint should end with at least one concrete verification step.
++
++## Sprint 1 - Foundation
++
++Goal: boot the project in Docker with database, auth, migrations, and seed data.
++
++Status: `DONE`
++
++| ID | Task | Scope | Status |
++|---|---|---|---|
++| S1-1 | Environment and Compose setup | root config | DONE |
++| S1-2 | Backend container setup | `backend/` | DONE |
++| S1-3 | App settings and database setup | `backend/config.py`, `backend/database.py` | DONE |
++| S1-4 | Core database models and migration | `backend/models/`, `backend/alembic/` | DONE |
++| S1-5 | FastAPI app skeleton | `backend/main.py` | DONE |
++| S1-6 | Auth endpoints and token services | `backend/routers/auth.py`, `backend/services/auth_service.py` | DONE |
++| S1-7 | User CRUD | `backend/routers/users.py` | DONE |
++| S1-8 | Encryption helpers | `backend/services/encryption_service.py` | DONE |
++| S1-9 | Seed data | `backend/seed.py` | DONE |
++| S1-10 | Frontend bootstrap | `frontend/` | DONE |
++| S1-11 | Frontend dev and prod containers | `frontend/Dockerfile*`, `frontend/nginx.conf` | DONE |
++
++Verification:
++
++- `docker compose -f docker-compose.dev.yml up` should start backend, frontend, and PostgreSQL.
++
++## Sprint 2 - Core Backend API
++
++Goal: complete the business API for shops, orders, imports, customers, attachments, and dashboard stats.
++
++Status: `DONE`
++
++| ID | Task | Scope | Status |
++|---|---|---|---|
++| S2-1 | Pydantic schemas for current models | `backend/schemas/` | DONE |
++| S2-2 | Shop CRUD with encrypted secret handling | `backend/routers/shops.py` | DONE |
++| S2-3 | Customer upsert logic | `backend/services/customer_service.py` | DONE |
++| S2-4 | Orders CRUD with filters and pagination | `backend/routers/orders.py` | DONE |
++| S2-5 | Order status transition validation and history | `backend/services/order_service.py` | DONE |
++| S2-6 | Etsy CSV parser | `backend/services/etsy_parser.py` | DONE |
++| S2-7 | Etsy import endpoint | `backend/routers/imports.py` | DONE |
++| S2-8 | Attachment storage and endpoints | `backend/services/file_storage.py`, `backend/routers/attachments.py` | DONE |
++| S2-9 | Customer endpoints | `backend/routers/customers.py` | DONE |
++| S2-10 | Dashboard stats API | `backend/routers/dashboard.py` | DONE |
++| S2-11 | CSV export | `backend/routers/orders.py` | DONE |
++
++Verification:
++
++- backend endpoints should be manually testable through `/docs`
++
++## Sprint 3 - Frontend Shell
++
++Goal: establish auth flow, route shell, layout shell, and reusable frontend structure.
++
++Status: `DONE`
++
++| ID | Task | Scope | Status |
++|---|---|---|---|
++| S3-1 | Axios client with token refresh interceptor | `frontend/src/api/client.ts` | DONE |
++| S3-2 | Auth store and `useAuth` hook | `frontend/src/store/`, `frontend/src/hooks/` | DONE |
++| S3-3 | Login page module | `frontend/src/pages/LoginPage.tsx` | DONE |
++| S3-4 | App layout modules: sidebar, topbar, shell | `frontend/src/components/layout/` | DONE |
++| S3-5 | Protected route configuration | `frontend/src/App.tsx`, `frontend/src/components/auth/` | DONE |
++| S3-6 | Orders and shops data hooks with React Query | `frontend/src/api/`, `frontend/src/hooks/` | DONE |
++| S3-7 | Base UI primitives | `frontend/src/components/ui/` | DONE |
++
++Notes:
++
++- Protected route guards redirect unauthenticated users to `/login`.
++- Role-based route guards are active for owner/manager sections.
++- React Query is wired in `frontend/src/main.tsx` and used by shops/orders hooks.
++
++Verification:
++
++- login route should render a real page module
++- unauthorized users should be redirected correctly
++- authenticated shell should resolve through protected routes
++
++## Sprint 4 - Core Frontend
++
++Goal: implement actual order workflows in the UI.
++
++Status: `NOT STARTED`
++
++| ID | Task | Scope | Status |
++|---|---|---|---|
++| S4-1 | Status tabs for grouped order states | `StatusTabs.tsx` | TODO |
++| S4-2 | Smart orders table | `OrdersTable.tsx` | TODO |
++| S4-3 | Pipeline board | `PipelineBoard.tsx` | TODO |
++| S4-4 | List and board view toggle | `ViewToggle.tsx` | TODO |
++| S4-5 | Per-shop orders page | `ShopOrdersPage.tsx` | TODO |
++| S4-6 | Order detail panel | `OrderDetailPanel.tsx` | TODO |
++| S4-7 | CSV import page | `ImportPage.tsx` | TODO |
++| S4-8 | Customers page | `CustomersPage.tsx` | TODO |
++
++Verification:
++
++- import CSV -> orders appear in UI
++- smart table and pipeline board use the same order data source
++- status changes happen through inline controls, not drag-and-drop
++- order details expose items, notes, history, and attachments
++
++## Sprint 5 - Dashboard, Archive, Management
++
++Goal: finish analytics, archival view, and management screens.
++
++Status: `NOT STARTED`
++
++| ID | Task | Scope | Status |
++|---|---|---|---|
++| S5-1 | Dashboard stat cards | `DashboardPage.tsx` | TODO |
++| S5-2 | Revenue chart | `RevenueChart.tsx` | TODO |
++| S5-3 | Shop breakdown chart | `ShopBreakdownChart.tsx` | TODO |
++| S5-4 | Attention list | `AttentionList.tsx` | TODO |
++| S5-5 | Recent activity block | `DashboardPage.tsx` | TODO |
++| S5-6 | Archive page | `ArchivePage.tsx` | TODO |
++| S5-7 | Shops management page | `ShopsPage.tsx` | TODO |
++| S5-8 | User management page | `UsersPage.tsx` | TODO |
++| S5-9 | Settings page | `SettingsPage.tsx` | TODO |
++
++Verification:
++
++- dashboard renders stats from backend APIs
++- archive supports filtering and CSV export path
++- management pages enforce role restrictions
++
++## Sprint 6 - Integrations and MCP
++
++Goal: add external integrations and expose CRM operations through MCP.
++
++Status: `NOT STARTED`
++
++| ID | Task | Scope | Status |
++|---|---|---|---|
++| S6-1 | Nova Poshta API client | `backend/services/nova_poshta.py` | TODO |
++| S6-2 | Shopify sync service | `backend/services/shopify_sync.py` | TODO |
++| S6-3 | Scheduler for sync jobs | `backend/services/scheduler.py` | TODO |
++| S6-4 | Manual sync trigger | `backend/routers/shops.py` | TODO |
++| S6-5 | Email service | `backend/services/email_service.py` | TODO |
++| S6-6 | Nova Poshta connection test endpoint | `backend/routers/shops.py` | TODO |
++| S6-7 | MCP server read tools | `backend/mcp_server.py` | TODO |
++| S6-8 | MCP server write tools | `backend/mcp_server.py` | TODO |
++| S6-9 | MCP auth and role checks | `backend/mcp_server.py` | TODO |
++| S6-10 | Integration and MCP documentation | `README.md` | TODO |
++
++Verification:
++
++- MCP client can read CRM data
++- MCP client can perform controlled write operations
++- external integrations respect encrypted credentials and role restrictions
++
++## Next Action
++
++Primary next implementation step:
++
++- `S4-1` Build status tabs for grouped order states
++
++Follow-up after that:
++
++- `S4-2` Build smart orders table
++- `S4-3` Build pipeline board
++
++## Final Verification Checklist
++
++- [ ] Owner, manager, and designer auth flows work
++- [ ] Etsy CSV import produces orders visible in the UI
++- [ ] Orders can change status through inline UI controls
++- [ ] Order details show items, notes, attachments, and history
++- [ ] Per-shop orders view works
++- [ ] Dashboard renders analytics from backend data
++- [ ] Archive supports export flow
++- [ ] MCP integration works for read and write operations
++- [ ] Designer access is limited to assigned work
++
++## Worklog
++
++- `2026-04-20` Rewrote plan structure to separate stable context from execution state.
++- `2026-04-20` Normalized terminology around `smart table` and `pipeline board`.
++- `2026-04-20` Corrected outdated references to drag-and-drop and current filesystem state.
++- `2026-04-20` Completed Sprint 3 tasks S3-3 to S3-6 and verified frontend build.

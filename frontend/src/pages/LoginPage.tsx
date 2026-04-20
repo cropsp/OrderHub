@@ -93,7 +93,7 @@ export default function LoginPage() {
                   className="h-10 border-slate-700/80 bg-slate-900/70 text-slate-100 placeholder:text-slate-400"
                   disabled={isSubmitting}
                   onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-                  placeholder="owner@crm.local"
+                  placeholder="owner@orderhub.dev"
                   required
                   type="email"
                   value={form.email}
