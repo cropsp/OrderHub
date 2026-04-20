@@ -58,7 +58,22 @@ export const STATUS_CATEGORIES: StatusCategory[] = [
   },
 ];
 
+export const ARCHIVE_CATEGORIES: StatusCategory[] = [
+  {
+    id: 'completed',
+    label: 'Completed',
+    statuses: [ORDER_STATUS.COMPLETED],
+    color: 'emerald',
+  },
+  {
+    id: 'cancelled',
+    label: 'Cancelled',
+    statuses: [ORDER_STATUS.CANCELLED],
+    color: 'slate',
+  },
+];
+
 // Helper to find category by status
 export function getCategoryByStatus(status: OrderStatusValue): StatusCategory | undefined {
-  return STATUS_CATEGORIES.find((cat) => cat.statuses.includes(status));
+  return [...STATUS_CATEGORIES, ...ARCHIVE_CATEGORIES].find((cat) => cat.statuses.includes(status));
 }

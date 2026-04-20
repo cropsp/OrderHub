@@ -1,24 +1,26 @@
 import { useState } from 'react';
 import { useOrders } from '@/hooks/useOrders';
-import { STATUS_CATEGORIES } from '@/lib/order-status';
+import { STATUS_CATEGORIES, ARCHIVE_CATEGORIES } from '@/lib/order-status';
 import StatusTabs from './StatusTabs';
 import ViewToggle from './ViewToggle';
 import OrdersTable from './OrdersTable';
 import PipelineBoard from './PipelineBoard';
 import OrderDetailPanel from './OrderDetailPanel';
 
-export default function OrdersLayout() {
+export default function OrdersLayout({ isArchive = false }: { isArchive?: boolean }) {
+  const categories = isArchive ? ARCHIVE_CATEGORIES : STATUS_CATEGORIES;
+  
   // 1. View State (Table or Board)
   const [view, setView] = useState<'table' | 'board'>('table');
   
   // 2. Active Tab State (Logical Category)
-  const [activeCategoryId, setActiveCategoryId] = useState(STATUS_CATEGORIES[0].id);
+  const [activeCategoryId, setActiveCategoryId] = useState(categories[0].id);
 
   // 3. Selection State (for Drawer/Panel)
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   
   // 4. Find current category metadata
-  const currentCategory = STATUS_CATEGORIES.find(c => c.id === activeCategoryId) || STATUS_CATEGORIES[0];
+  const currentCategory = categories.find(c => c.id === activeCategoryId) || categories[0];
   
   // 5. Fetch data
   const { data, isLoading } = useOrders({ 
@@ -32,7 +34,8 @@ export default function OrdersLayout() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <StatusTabs 
           activeCategoryId={activeCategoryId} 
-          onCategoryChange={setActiveCategoryId} 
+          onCategoryChange={setActiveCategoryId}
+          categories={categories}
         />
         <ViewToggle view={view} onViewChange={setView} />
       </div>

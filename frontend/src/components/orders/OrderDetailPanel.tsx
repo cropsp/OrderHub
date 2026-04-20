@@ -24,6 +24,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { UserRole } from '@/types/user';
 import { getCategoryByStatus, type OrderStatusValue } from '@/lib/order-status';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { useCreateTTN } from '@/hooks/useShipping';
 
 type OrderDetailPanelProps = {
   orderId: string | null;
@@ -44,6 +46,9 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
   const order = data as any as import('@/types/order').OrderDetail | undefined;
   const { user } = useAuth();
   const isOwner = user?.role === UserRole.OWNER;
+  const isManager = user?.role === UserRole.MANAGER;
+  const canManageShipping = isOwner || isManager;
+  const createTTN = useCreateTTN();
 
   const isOpen = Boolean(orderId);
 
@@ -122,6 +127,27 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                         {order.shipping_street_2 && <p>{order.shipping_street_2}</p>}
                         <p>{order.shipping_city}, {order.shipping_state} {order.shipping_zip}</p>
                         <p className="font-bold text-slate-500 uppercase tracking-widest mt-1">{order.shipping_country}</p>
+
+                        <div className="pt-2">
+                          {order.ttn_number ? (
+                            <div className="mt-2 p-2 rounded-md bg-teal-500/10 border border-teal-500/20 inline-block">
+                              <p className="text-[10px] font-bold text-teal-500 uppercase">Tracking (TTN)</p>
+                              <p className="font-mono text-slate-200 mt-0.5">{order.ttn_number}</p>
+                            </div>
+                          ) : (
+                            order.shipping_country === 'UA' && canManageShipping && (
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="mt-2 h-7 bg-slate-900 border-slate-700 hover:bg-slate-800 text-xs"
+                                disabled={createTTN.isPending}
+                                onClick={() => createTTN.mutate({ orderId: order.id, data: {} })}
+                              >
+                                {createTTN.isPending ? 'Generating...' : 'Create TTN'}
+                              </Button>
+                            )
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

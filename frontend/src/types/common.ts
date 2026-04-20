@@ -134,3 +134,9 @@ export interface PaginatedResponse<T> {
   limit: number
   pages: number
 }
+
+export interface ImportResult {
+  imported: number
+  skipped: number
+  errors: any[]
+}

@@ -7,6 +7,7 @@ Files are served via authenticated endpoint, never directly.
 
 import enum
 import uuid
+from datetime import datetime
 
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
@@ -43,7 +44,7 @@ class Attachment(Base, UUIDPrimaryKeyMixin):
         nullable=False,
     )
 
-    created_at: Mapped[None] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default="now()",
         nullable=False,

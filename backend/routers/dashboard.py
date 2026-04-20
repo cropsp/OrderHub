@@ -1,15 +1,13 @@
-"""
-OrderHub CRM — Dashboard Router
-"""
-
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, cast, Date, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.user import User, UserRole
 from models.order import Order, OrderStatus
-from schemas.dashboard import DashboardResponse, DashboardStats, RevenueByCurrency
+from models.shop import Shop
+from schemas.dashboard import DashboardResponse, DashboardStats, RevenueByCurrency, DailyRevenue, ShopOrderCount
 from routers.dependencies import get_current_user, require_role
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -23,20 +21,14 @@ async def get_dashboard_stats(
     """Get dashboard statistics and revenue (revenue only shown to owners)."""
     
     # 1. Orders by Status
-    # Base query for all active orders
     status_query = select(Order.status, func.count()).group_by(Order.status)
-    
-    # Designer only sees their assigned orders stats
     if current_user.role == UserRole.DESIGNER:
         status_query = status_query.where(Order.assigned_designer_id == current_user.id)
         
     status_result = await db.execute(status_query)
     orders_by_status = {status.value: count for status, count in status_result.all()}
     
-    # Total active orders
     total_orders = sum(orders_by_status.values())
-    
-    # Attention needed (New, Waiting Info)
     attention_needed_count = orders_by_status.get(OrderStatus.NEW.value, 0) + \
                              orders_by_status.get(OrderStatus.WAITING_INFO.value, 0)
     
@@ -48,8 +40,9 @@ async def get_dashboard_stats(
     
     # 2. Revenue calculation (only for Owner)
     revenue_data = []
+    daily_trend = []
     if current_user.role == UserRole.OWNER:
-        # Sum financials grouped by currency for completed orders
+        # Summary Revenue
         rev_query = (
             select(
                 Order.currency,
@@ -64,21 +57,47 @@ async def get_dashboard_stats(
         rev_result = await db.execute(rev_query)
         
         for curr, rev, prod, fee, ship in rev_result.all():
-            rev = float(rev or 0)
-            prod = float(prod or 0)
-            fee = float(fee or 0)
-            ship = float(ship or 0)
-            net = rev - prod - fee - ship
-            
             revenue_data.append(RevenueByCurrency(
                 currency=curr,
-                total_revenue=rev,
-                total_production_cost=prod,
-                total_fees=fee + ship,
-                net_profit=net
+                total_revenue=float(rev or 0),
+                total_production_cost=float(prod or 0),
+                total_fees=float(fee or 0) + float(ship or 0),
+                net_profit=float(rev or 0) - float(prod or 0) - float(fee or 0) - float(ship or 0)
             ))
+
+        # Daily Trend (Last 30 days)
+        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        day_col = cast(Order.ordered_at, Date)
+        trend_query = (
+            select(
+                day_col.label("day"),
+                func.sum(Order.total_price).label("daily_rev")
+            )
+            .where(Order.status == OrderStatus.COMPLETED)
+            .where(Order.ordered_at >= thirty_days_ago)
+            .group_by(day_col)
+            .order_by(day_col)
+        )
+        trend_result = await db.execute(trend_query)
+        for day, rev in trend_result.all():
+            date_str = day.isoformat() if hasattr(day, "isoformat") else str(day)
+            daily_trend.append(DailyRevenue(date=date_str, revenue=float(rev or 0)))
+
+    # 3. Shop Breakdown
+    shop_query = (
+        select(Shop.name, func.count(Order.id))
+        .join(Order, Order.shop_id == Shop.id)
+        .group_by(Shop.name)
+    )
+    if current_user.role == UserRole.DESIGNER:
+        shop_query = shop_query.where(Order.assigned_designer_id == current_user.id)
+        
+    shop_result = await db.execute(shop_query)
+    orders_by_shop = [ShopOrderCount(shop_name=name, order_count=count) for name, count in shop_result.all()]
             
     return DashboardResponse(
         stats=stats,
-        revenue_by_currency=revenue_data
+        revenue_by_currency=revenue_data,
+        daily_revenue_trend=daily_trend,
+        orders_by_shop=orders_by_shop
     )

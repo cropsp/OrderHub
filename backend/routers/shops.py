@@ -14,11 +14,9 @@ from models.order import Order
 from models.user import User, UserRole
 from schemas.shop import ShopCreate, ShopUpdate, ShopResponse, ShopDetailResponse
 from routers.dependencies import get_current_user, require_role
+from services.shopify_sync import sync_shop_orders
+from services.encryption_service import encrypt_value, decrypt_value
 
-# For Sprint 2 we will use a dummy encrypt function.
-# In a real app this would use cryptography.fernet.
-def encrypt_value(value: str) -> str:
-    return f"ENC_{value}"
 
 router = APIRouter(prefix="/api/shops", tags=["shops"])
 
@@ -162,3 +160,23 @@ async def delete_shop(
         
     shop.is_active = False
     await db.flush()
+
+
+@router.post("/{shop_id}/sync")
+async def manual_sync_shop(
+    shop_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger a manual order sync for a specific shop."""
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
+    shop = result.scalar_one_or_none()
+    
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+        
+    try:
+        count = await sync_shop_orders(db, shop, current_user)
+        return {"status": "success", "synced_count": count}
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -1,7 +1,4 @@
-"""
-OrderHub CRM — Dashboard Schemas
-"""
-
+from datetime import datetime
 from pydantic import BaseModel
 
 
@@ -19,6 +16,28 @@ class RevenueByCurrency(BaseModel):
     net_profit: float
 
 
+class DailyRevenue(BaseModel):
+    date: str
+    revenue: float
+
+
+class ShopOrderCount(BaseModel):
+    shop_name: str
+    order_count: int
+
+
+class RecentActivity(BaseModel):
+    id: str
+    order_title: str
+    from_status: str
+    to_status: str
+    changed_by: str
+    timestamp: datetime
+
+
 class DashboardResponse(BaseModel):
     stats: DashboardStats
     revenue_by_currency: list[RevenueByCurrency]  # Rendered only for owners
+    daily_revenue_trend: list[DailyRevenue] = []
+    orders_by_shop: list[ShopOrderCount] = []
+    # recent_activity: list[RecentActivity] = [] # Optional for later S5-5

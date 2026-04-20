@@ -6,6 +6,7 @@ Nova Poshta sender configuration and encrypted API tokens.
 """
 
 import enum
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Enum, Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -51,7 +52,7 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # State
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    last_synced_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     orders = relationship("Order", back_populates="shop", lazy="selectin")

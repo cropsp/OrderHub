@@ -8,6 +8,7 @@ OrderStatusHistory: immutable audit log of status changes.
 
 import enum
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -127,11 +128,11 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     assigned_designer_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
-    assigned_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)
+    assigned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # TTN (Nova Poshta tracking)
     ttn_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    ttn_created_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ttn_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ttn_printed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Notes
@@ -140,9 +141,9 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     internal_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps
-    ordered_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=False)
-    shipped_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ordered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     shop = relationship("Shop", back_populates="orders", lazy="selectin")
@@ -190,7 +191,7 @@ class OrderItem(Base, UUIDPrimaryKeyMixin):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     variations: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[None] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default="now()",
         nullable=False,
@@ -219,7 +220,7 @@ class OrderStatusHistory(Base, UUIDPrimaryKeyMixin):
     from_status: Mapped[str] = mapped_column(String(20), nullable=False)
     to_status: Mapped[str] = mapped_column(String(20), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
-    changed_at: Mapped[None] = mapped_column(
+    changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default="now()",
         nullable=False,

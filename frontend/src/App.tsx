@@ -2,8 +2,12 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { RequireAuth, RequireRole } from '@/components/auth/RouteGuards'
 import LoginPage from '@/pages/LoginPage'
-import DashBoardPage from '@/pages/DashboardPage'
+import DashboardPage from '@/pages/DashboardPage'
 import OrdersPage from '@/pages/OrdersPage'
+import ShopsPage from '@/pages/ShopsPage'
+import UsersPage from '@/pages/UsersPage'
+import ArchivePage from '@/pages/ArchivePage'
+import ImportsPage from '@/pages/ImportsPage'
 import FeaturePlaceholderPage from '@/pages/FeaturePlaceholderPage'
 import { UserRole } from '@/types/user'
 
@@ -13,7 +17,7 @@ function App() {
       <Route element={<LoginPage />} path="/login" />
 
       <Route element={<RequireAuth />}>
-        <Route element={<DashBoardPage />} path="/dashboard" />
+        <Route element={<DashboardPage />} path="/dashboard" />
 
         <Route element={<OrdersPage />} path="/orders" />
         <Route
@@ -36,45 +40,13 @@ function App() {
         />
 
         <Route element={<RequireRole allowedRoles={[UserRole.OWNER, UserRole.MANAGER]} />}>
-          <Route
-            element={
-              <FeaturePlaceholderPage
-                description="CSV import flow is planned in Sprint 4."
-                title="Imports"
-              />
-            }
-            path="/imports"
-          />
-          <Route
-            element={
-              <FeaturePlaceholderPage
-                description="Archive list and export UX are planned in Sprint 5."
-                title="Archive"
-              />
-            }
-            path="/archive"
-          />
+          <Route element={<ImportsPage />} path="/imports" />
+          <Route element={<ArchivePage />} path="/archive" />
         </Route>
 
         <Route element={<RequireRole allowedRoles={[UserRole.OWNER]} />}>
-          <Route
-            element={
-              <FeaturePlaceholderPage
-                description="Shop management UI is planned in Sprint 5."
-                title="Shops"
-              />
-            }
-            path="/shops"
-          />
-          <Route
-            element={
-              <FeaturePlaceholderPage
-                description="User management UI is planned in Sprint 5."
-                title="Users"
-              />
-            }
-            path="/users"
-          />
+          <Route element={<ShopsPage />} path="/shops" />
+          <Route element={<UsersPage />} path="/users" />
         </Route>
       </Route>
 

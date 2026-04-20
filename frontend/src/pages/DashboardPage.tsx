@@ -1,47 +1,68 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useOrders } from '@/hooks/useOrders'
-import { useShops } from '@/hooks/useShops'
-
-import ShellPage from './ShellPage'
+import { useDashboard } from '@/hooks/useDashboard';
+import ShellPage from './ShellPage';
+import StatCards from '@/components/dashboard/StatCards';
+import RevenueChart from '@/components/dashboard/RevenueChart';
+import ShopDistributionChart from '@/components/dashboard/ShopChart';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function DashboardPage() {
-  const shopsQuery = useShops()
-  const ordersQuery = useOrders({ page: 1, limit: 5 })
+  const { data, isLoading, error } = useDashboard();
 
-  const shopsCount = shopsQuery.data?.length ?? 0
-  const ordersCount = ordersQuery.data?.total ?? 0
-  const statusLabel = shopsQuery.isLoading || ordersQuery.isLoading ? 'Syncing' : 'Online'
+  if (error) {
+    return (
+      <ShellPage title="Dashboard" description="Overview of your business performance.">
+        <div className="flex h-[400px] items-center justify-center rounded-xl border border-red-500/20 bg-red-500/5 text-red-400">
+          Error loading dashboard data. Please try again later.
+        </div>
+      </ShellPage>
+    );
+  }
 
   return (
     <ShellPage
-      description="Core shell is connected. Protected routes and data hooks are active."
-      title="Dashboard"
+      description="Real-time overview of your order pipeline and financial performance."
+      title="Dashboard Overview"
     >
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card className="border border-slate-800/90 bg-slate-900/70">
-          <CardHeader>
-            <CardTitle>Backend Status</CardTitle>
-            <CardDescription>Auth + API hooks are connected.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-teal-300">{statusLabel}</CardContent>
-        </Card>
+      <div className="space-y-8 animate-fade-in">
+        {isLoading || !data ? (
+          <>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-32 w-full bg-slate-900/60" />
+              ))}
+            </div>
+            <div className="grid gap-6 lg:grid-cols-6">
+              <Skeleton className="col-span-4 h-[400px] bg-slate-900/60" />
+              <Skeleton className="col-span-2 h-[400px] bg-slate-900/60" />
+            </div>
+          </>
+        ) : (
+          <>
+            {/* 1. Stat Cards */}
+            <StatCards data={data} />
 
-        <Card className="border border-slate-800/90 bg-slate-900/70">
-          <CardHeader>
-            <CardTitle>Active Shops</CardTitle>
-            <CardDescription>Loaded from `/api/shops`.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-sky-300">{shopsCount}</CardContent>
-        </Card>
+            {/* 2. Charts Row */}
+            <div className="grid gap-6 lg:grid-cols-6">
+              {/* Revenue Trends */}
+              <div className="lg:col-span-4">
+                <RevenueChart data={data.daily_revenue_trend} />
+              </div>
 
-        <Card className="border border-slate-800/90 bg-slate-900/70">
-          <CardHeader>
-            <CardTitle>Total Orders</CardTitle>
-            <CardDescription>Loaded from `/api/orders`.</CardDescription>
-          </CardHeader>
-          <CardContent className="text-2xl font-semibold text-amber-300">{ordersCount}</CardContent>
-        </Card>
-      </section>
+              {/* Shop Distribution */}
+              <div className="lg:col-span-2">
+                <ShopDistributionChart data={data.orders_by_shop} />
+              </div>
+            </div>
+            
+            {/* 3. Placeholder for Attention List / Recent Activity */}
+            <div className="rounded-xl border border-slate-800/60 bg-slate-900/20 p-8 text-center">
+              <p className="text-sm text-slate-500 font-medium">
+                Detailed "Attention Needed" list and "Recent Activity" feed are coming in the next update.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
     </ShellPage>
-  )
+  );
 }

@@ -6,4 +6,19 @@ export const usersApi = {
     const { data } = await client.get<User>('/users/me');
     return data;
   },
+  
+  list: async (): Promise<User[]> => {
+    const { data } = await client.get<User[]>('/users');
+    return data;
+  },
+  
+  create: async (payload: any): Promise<any> => {
+    const { data } = await client.post('/users', payload);
+    return data;
+  },
+  
+  update: async (id: string, payload: any): Promise<User> => {
+    const { data } = await client.patch<User>(`/users/${id}`, payload);
+    return data;
+  }
 };

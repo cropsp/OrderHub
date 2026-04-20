@@ -12,16 +12,18 @@ from fastapi.responses import JSONResponse
 
 from config import get_settings
 from routers import (
-    auth, users, shops, customers, orders, imports, attachments, dashboard
+    auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping
 )
 
-settings = get_settings()
+from scheduler import start_scheduler
 
+settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
     print("=== OrderHub CRM starting ===")
+    start_scheduler()
     yield
     print("=== OrderHub CRM shutting down ===")
 
@@ -71,6 +73,8 @@ app.include_router(orders.router)
 app.include_router(imports.router)
 app.include_router(attachments.router)
 app.include_router(dashboard.router)
+app.include_router(mcp.router)
+app.include_router(shipping.router)
 
 
 # ─── Health Check ──────────────────────────────────────────

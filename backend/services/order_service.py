@@ -103,9 +103,9 @@ async def change_order_status(
     if new_status == order.status:
         return order
         
-    # Check allowed transitions
+    # Check allowed transitions (Only enforce for Designers; Owner/Manager can override for manual correction)
     allowed_targets = ALLOWED_TRANSITIONS.get(order.status, set())
-    if new_status not in allowed_targets:
+    if new_status not in allowed_targets and user.role not in (UserRole.OWNER, UserRole.MANAGER):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot transition from {order.status.value} to {new_status.value}"
