@@ -6,7 +6,7 @@ Roles: owner, manager, designer.
 
 import enum
 
-from sqlalchemy import Boolean, Enum, String
+from sqlalchemy import Boolean, Enum, String, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -31,6 +31,7 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    preferences: Mapped[dict] = mapped_column(JSON, default=dict, server_default='{}', nullable=False)
 
     # Relationships
     assigned_orders = relationship("Order", back_populates="assigned_designer", foreign_keys="Order.assigned_designer_id")

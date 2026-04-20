@@ -12,6 +12,7 @@ export interface User {
   full_name: string;
   role: UserRoleType;
   is_active: boolean;
+  preferences: Record<string, any>;
   created_at: string;
   updated_at: string;
 }

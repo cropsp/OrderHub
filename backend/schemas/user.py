@@ -27,9 +27,14 @@ class UserUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class UserPreferencesUpdate(BaseModel):
+    preferences: dict
+
+
 class UserResponse(UserBase):
     id: uuid.UUID
     is_active: bool
+    preferences: dict
     created_at: datetime
     updated_at: datetime
 

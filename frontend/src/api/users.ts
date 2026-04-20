@@ -20,5 +20,10 @@ export const usersApi = {
   update: async (id: string, payload: any): Promise<User> => {
     const { data } = await client.patch<User>(`/users/${id}`, payload);
     return data;
+  },
+  
+  updatePreferences: async (preferences: any): Promise<User> => {
+    const { data } = await client.patch<User>('/users/me/preferences', { preferences });
+    return data;
   }
 };

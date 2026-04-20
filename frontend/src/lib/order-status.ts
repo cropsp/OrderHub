@@ -27,6 +27,12 @@ export interface StatusCategory {
 
 export const STATUS_CATEGORIES: StatusCategory[] = [
   {
+    id: 'all',
+    label: 'All',
+    statuses: [],
+    color: 'slate',
+  },
+  {
     id: 'new',
     label: 'New',
     statuses: [ORDER_STATUS.NEW],

@@ -35,10 +35,11 @@ async def list_shops(
     shops = result.scalars().all()
     
     # Map to schema manually to set mask flags
-    return [ShopResponse.model_validate(
-        s, update={"has_shopify_token": bool(s.shopify_access_token_encrypted),
-                   "has_np_token": bool(s.np_api_key_encrypted)}
-    ) for s in shops]
+    return [ShopResponse.model_validate({
+        **s.__dict__,
+        "has_shopify_token": bool(s.shopify_access_token_encrypted),
+        "has_np_token": bool(s.np_api_key_encrypted)
+    }) for s in shops]
 
 
 @router.post("", response_model=ShopDetailResponse, status_code=status.HTTP_201_CREATED)
@@ -72,11 +73,12 @@ async def create_shop(
     await db.flush()
     await db.refresh(shop)
     
-    resp = ShopDetailResponse.model_validate(
-        shop, update={"has_shopify_token": bool(shop.shopify_access_token_encrypted),
-                      "has_np_token": bool(shop.np_api_key_encrypted),
-                      "order_count": 0}
-    )
+    resp = ShopDetailResponse.model_validate({
+        **shop.__dict__,
+        "has_shopify_token": bool(shop.shopify_access_token_encrypted),
+        "has_np_token": bool(shop.np_api_key_encrypted),
+        "order_count": 0
+    })
     return resp
 
 
@@ -98,11 +100,12 @@ async def get_shop(
     )
     order_count = count_result.scalar() or 0
     
-    resp = ShopDetailResponse.model_validate(
-        shop, update={"has_shopify_token": bool(shop.shopify_access_token_encrypted),
-                      "has_np_token": bool(shop.np_api_key_encrypted),
-                      "order_count": order_count}
-    )
+    resp = ShopDetailResponse.model_validate({
+        **shop.__dict__,
+        "has_shopify_token": bool(shop.shopify_access_token_encrypted),
+        "has_np_token": bool(shop.np_api_key_encrypted),
+        "order_count": order_count
+    })
     return resp
 
 

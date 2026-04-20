@@ -104,6 +104,15 @@ class OrderResponse(OrderListResponse):
     status_history: list[StatusHistoryResponse] = []
 
 
+class OrderItemCreate(BaseModel):
+    """Payload for manual order item creation."""
+    title: str
+    quantity: int = 1
+    unit_price: float
+    currency: str = "USD"
+    variations: str | None = None
+
+
 class OrderCreate(BaseModel):
     """Payload for manual order creation."""
     shop_id: uuid.UUID
@@ -115,6 +124,9 @@ class OrderCreate(BaseModel):
     currency: str = "USD"
     ordered_at: datetime
     
+    # Items
+    items: list[OrderItemCreate] = []
+
     # Shipping
     shipping_name: str | None = None
     shipping_phone: str | None = None

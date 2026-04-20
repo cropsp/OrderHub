@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.user import User, UserRole
-from schemas.user import UserCreate, UserUpdate, UserResponse, UserWithPasswordResponse
+from schemas.user import UserCreate, UserUpdate, UserResponse, UserWithPasswordResponse, UserPreferencesUpdate
 from routers.dependencies import get_current_user, require_role
 from services.auth_service import hash_password, generate_temp_password
 
@@ -32,6 +32,19 @@ async def list_users(
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)):
     """Get current user profile."""
+    return current_user
+
+
+@router.patch("/me/preferences", response_model=UserResponse)
+async def update_preferences(
+    body: UserPreferencesUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update current user Preferences (timezone, refresh intervals, etc)."""
+    current_user.preferences = body.preferences
+    await db.flush()
+    await db.refresh(current_user)
     return current_user
 
 

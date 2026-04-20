@@ -17,4 +17,14 @@ export const ordersApi = {
     const { data } = await client.patch<OrderListItem>(`/orders/${orderId}/status`, { status })
     return data
   },
+
+  update: async (orderId: string, payload: any): Promise<OrderListItem> => {
+    const { data } = await client.patch<OrderListItem>(`/orders/${orderId}`, payload)
+    return data
+  },
+
+  create: async (payload: any): Promise<OrderListItem> => {
+    const { data } = await client.post<OrderListItem>('/orders', payload)
+    return data
+  },
 };

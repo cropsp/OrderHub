@@ -39,3 +39,27 @@ export function useUpdateOrderStatus() {
     },
   })
 }
+
+export function useUpdateOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ orderId, payload }: { orderId: string; payload: any }) => 
+      ordersApi.update(orderId, payload),
+    onSuccess: (_, { orderId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+    },
+  })
+}
+
+export function useCreateOrder() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (payload: any) => ordersApi.create(payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+    },
+  })
+}

@@ -178,6 +178,19 @@ async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order
     db.add(order)
     await db.flush()
     
+    # Create Items
+    for item_data in data.items:
+        item = OrderItem(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            title=item_data.title,
+            quantity=item_data.quantity,
+            unit_price=item_data.unit_price,
+            currency=item_data.currency,
+            variations=item_data.variations
+        )
+        db.add(item)
+    
     # Initial history
     history = OrderStatusHistory(
         id=uuid.uuid4(),

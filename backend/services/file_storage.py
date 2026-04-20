@@ -7,9 +7,10 @@ import uuid
 import aiofiles
 from fastapi import UploadFile
 from pathlib import Path
+from config import get_settings
 
-# Assuming uploads go to /app/uploads in Docker or ./uploads locally
-UPLOADS_DIR = Path(os.getenv("UPLOADS_DIR", "uploads"))
+settings = get_settings()
+UPLOADS_DIR = Path(settings.UPLOADS_DIR)
 
 
 async def save_file(upload_file: UploadFile, order_id: uuid.UUID) -> tuple[str, int]:

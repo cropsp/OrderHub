@@ -3,11 +3,13 @@ import {
   Plus, 
   Settings2, 
   Trash2, 
-  CheckCircle2, 
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Store,
+  Package2,
+  Truck
 } from 'lucide-react';
-import { useCreateShop, useShops, useDeleteShop, useSyncShop } from '@/hooks/useShops';
+import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop } from '@/hooks/useShops';
 import ShellPage from './ShellPage';
 import { Button } from '@/components/ui/button';
 import {
@@ -37,6 +39,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/hooks/useAuth';
 import type { ShopPlatform } from '@/types/common';
 import { cn } from '@/lib/utils';
@@ -51,67 +55,101 @@ function getErrorMessage(error: unknown) {
   return 'Request failed';
 }
 
+const INITIAL_SHOP_STATE = {
+  id: '',
+  name: '',
+  platform: 'etsy' as ShopPlatform,
+  color: '#14b8a6',
+  shopify_store_url: '',
+  shopify_access_token: '',
+  np_api_key: '',
+  np_sender_name: '',
+  np_sender_phone: '',
+  np_sender_city_ref: '',
+  np_sender_warehouse_ref: '',
+};
+
 export default function ShopsPage() {
   const { user } = useAuth();
   const { data: shops, isLoading, error } = useShops();
   const createShop = useCreateShop();
+  const updateShop = useUpdateShop();
   const deleteShop = useDeleteShop();
   const syncShop = useSyncShop();
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [newShop, setNewShop] = useState({
-    name: '',
-    platform: 'etsy' as ShopPlatform,
-    color: '#14b8a6',
-    shopify_store_url: '',
-    shopify_access_token: '',
-  });
+  
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingShop, setEditingShop] = useState(INITIAL_SHOP_STATE);
+  const [dialogError, setDialogError] = useState<string | null>(null);
   
   const isOwner = user?.role === 'owner';
 
-  const resetCreateForm = () => {
-    setCreateError(null);
-    setNewShop({
-      name: '',
-      platform: 'etsy',
-      color: '#14b8a6',
-      shopify_store_url: '',
-      shopify_access_token: '',
-    });
+  const handleOpenCreate = () => {
+    setEditingShop(INITIAL_SHOP_STATE);
+    setDialogError(null);
+    setIsDialogOpen(true);
   };
 
-  const handleCreateShop = async (event: FormEvent) => {
-    event.preventDefault();
-    setCreateError(null);
+  const handleOpenEdit = (shop: any) => {
+    setEditingShop({
+      id: shop.id,
+      name: shop.name,
+      platform: shop.platform,
+      color: shop.color || '#14b8a6',
+      shopify_store_url: shop.shopify_store_url || '',
+      shopify_access_token: '', // Never pre-fill token
+      np_api_key: '', // Never pre-fill key
+      np_sender_name: shop.np_sender_name || '',
+      np_sender_phone: shop.np_sender_phone || '',
+      np_sender_city_ref: shop.np_sender_city_ref || '',
+      np_sender_warehouse_ref: shop.np_sender_warehouse_ref || '',
+    });
+    setDialogError(null);
+    setIsDialogOpen(true);
+  };
 
-    const name = newShop.name.trim();
+  const handleSaveShop = async (event: FormEvent) => {
+    event.preventDefault();
+    setDialogError(null);
+
+    const name = editingShop.name.trim();
     if (!name) {
-      setCreateError('Store name is required.');
+      setDialogError('Store name is required.');
       return;
     }
 
-    const payload: Record<string, unknown> = {
+    const payload: any = {
       name,
-      platform: newShop.platform,
-      color: newShop.color || '#14b8a6',
+      platform: editingShop.platform,
+      color: editingShop.color || '#14b8a6',
       is_active: true,
+      np_sender_name: editingShop.np_sender_name || null,
+      np_sender_phone: editingShop.np_sender_phone || null,
+      np_sender_city_ref: editingShop.np_sender_city_ref || null,
+      np_sender_warehouse_ref: editingShop.np_sender_warehouse_ref || null,
     };
 
-    if (newShop.platform === 'shopify') {
-      if (newShop.shopify_store_url.trim()) {
-        payload.shopify_store_url = newShop.shopify_store_url.trim();
+    if (editingShop.platform === 'shopify') {
+      if (editingShop.shopify_store_url.trim()) {
+        payload.shopify_store_url = editingShop.shopify_store_url.trim();
       }
-      if (newShop.shopify_access_token.trim()) {
-        payload.shopify_access_token = newShop.shopify_access_token.trim();
+      if (editingShop.shopify_access_token.trim()) {
+        payload.shopify_access_token = editingShop.shopify_access_token.trim();
       }
     }
 
+    if (editingShop.np_api_key.trim()) {
+      payload.np_api_key = editingShop.np_api_key.trim();
+    }
+
     try {
-      await createShop.mutateAsync(payload);
-      setIsCreateOpen(false);
-      resetCreateForm();
-    } catch (createErr) {
-      setCreateError(getErrorMessage(createErr));
+      if (editingShop.id) {
+        await updateShop.mutateAsync({ id: editingShop.id, payload });
+      } else {
+        await createShop.mutateAsync(payload);
+      }
+      setIsDialogOpen(false);
+    } catch (err) {
+      setDialogError(getErrorMessage(err));
     }
   };
 
@@ -128,104 +166,187 @@ export default function ShopsPage() {
   return (
     <ShellPage
       title="Shop Management"
-      description="Connect and manage your Etsy and Shopify stores."
+      description="Connect and manage your Etsy, Shopify, and local Ukrainian stores."
     >
       <Dialog
-        open={isCreateOpen}
-        onOpenChange={(open) => {
-          setIsCreateOpen(open);
-          if (!open) resetCreateForm();
-        }}
+        open={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
       >
-        <DialogContent className="max-w-md border-slate-800 bg-slate-950 text-slate-100">
-          <DialogHeader>
-            <DialogTitle>Add New Store</DialogTitle>
+        <DialogContent className="max-w-2xl border-slate-800 bg-slate-950 text-slate-100">
+          <DialogHeader className="mb-4">
+            <DialogTitle className="text-2xl font-bold tracking-tight">
+              {editingShop.id ? 'Edit Store Settings' : 'Initialize New Store'}
+            </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Create a shop record and optionally configure Shopify access.
+              Configure platform integration and logistics credentials.
             </DialogDescription>
           </DialogHeader>
 
-          <form className="space-y-4" onSubmit={handleCreateShop}>
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Store Name</p>
-              <Input
-                className="border-slate-700 bg-slate-900/50"
-                placeholder="LeatherCraft Boutique"
-                value={newShop.name}
-                onChange={(event) => setNewShop((prev) => ({ ...prev, name: event.target.value }))}
-              />
-            </div>
+          <form onSubmit={handleSaveShop} className="space-y-6">
+            <Tabs defaultValue="general" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 bg-slate-900/50 p-1 border border-slate-800">
+                <TabsTrigger value="general" className="flex items-center gap-2 data-[state=active]:bg-slate-800">
+                  <Store className="size-3.5" /> General
+                </TabsTrigger>
+                <TabsTrigger value="platform" className="flex items-center gap-2 data-[state=active]:bg-slate-800">
+                  <Package2 className="size-3.5" /> Platform API
+                </TabsTrigger>
+                <TabsTrigger value="shipping" className="flex items-center gap-2 data-[state=active]:bg-slate-800">
+                  <Truck className="size-3.5" /> Logistics (NP)
+                </TabsTrigger>
+              </TabsList>
 
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Platform</p>
-              <Select
-                value={newShop.platform}
-                onValueChange={(value) => setNewShop((prev) => ({ ...prev, platform: value as ShopPlatform }))}
-              >
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
-                  <SelectItem value="etsy">ETSY</SelectItem>
-                  <SelectItem value="shopify">SHOPIFY</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="mt-6 min-h-[300px]">
+                <TabsContent value="general" className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Store Name</p>
+                      <Input
+                        className="border-slate-800 bg-slate-900/50"
+                        placeholder="LeatherCraft Boutique"
+                        value={editingShop.name}
+                        onChange={(e) => setEditingShop(p => ({ ...p, name: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Brand Color</p>
+                      <div className="flex gap-2">
+                        <Input
+                          className="h-10 w-12 border-slate-800 bg-slate-900/50 p-1"
+                          type="color"
+                          value={editingShop.color}
+                          onChange={(e) => setEditingShop(p => ({ ...p, color: e.target.value }))}
+                        />
+                        <Input
+                          className="border-slate-800 bg-slate-900/50 font-mono text-xs"
+                          value={editingShop.color}
+                          onChange={(e) => setEditingShop(p => ({ ...p, color: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Sales Platform</p>
+                    <Select
+                      value={editingShop.platform}
+                      onValueChange={(v) => setEditingShop(p => ({ ...p, platform: v as ShopPlatform }))}
+                    >
+                      <SelectTrigger className="w-full border-slate-800 bg-slate-900/50">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border-slate-800 bg-slate-950">
+                        <SelectItem value="etsy" className="focus:bg-orange-500/10 focus:text-orange-400">ETSY (Manual Sync)</SelectItem>
+                        <SelectItem value="shopify" className="focus:bg-green-500/10 focus:text-green-400">SHOPIFY (Auto Sync)</SelectItem>
+                        <SelectItem value="manual" className="focus:bg-teal-500/10 focus:text-teal-400">LOCAL / MANUAL ONLY</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </TabsContent>
 
-            <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Color</p>
-              <Input
-                className="h-10 border-slate-700 bg-slate-900/50 p-2"
-                type="color"
-                value={newShop.color}
-                onChange={(event) => setNewShop((prev) => ({ ...prev, color: event.target.value }))}
-              />
-            </div>
+                <TabsContent value="platform" className="space-y-4">
+                  {editingShop.platform === 'shopify' ? (
+                    <>
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Shopify Store URL</p>
+                        <Input
+                          className="border-slate-800 bg-slate-900/50"
+                          placeholder="https://your-store.myshopify.com"
+                          value={editingShop.shopify_store_url}
+                          onChange={(e) => setEditingShop(p => ({ ...p, shopify_store_url: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Access Token (Admin API)</p>
+                        <Input
+                          className="border-slate-800 bg-slate-900/50"
+                          type="password"
+                          placeholder={editingShop.id ? "Leave empty to keep existing" : "shpat_..."}
+                          value={editingShop.shopify_access_token}
+                          onChange={(e) => setEditingShop(p => ({ ...p, shopify_access_token: e.target.value }))}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-8 border border-dashed border-slate-800 rounded-xl bg-slate-900/10">
+                      <Package2 className="size-12 text-slate-700 mb-2" />
+                      <p className="text-sm text-slate-500">No API configuration needed for {editingShop.platform.toUpperCase()}.</p>
+                    </div>
+                  )}
+                </TabsContent>
 
-            {newShop.platform === 'shopify' && (
-              <>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Store URL</p>
-                  <Input
-                    className="border-slate-700 bg-slate-900/50"
-                    placeholder="https://your-store.myshopify.com"
-                    value={newShop.shopify_store_url}
-                    onChange={(event) => setNewShop((prev) => ({ ...prev, shopify_store_url: event.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Access Token</p>
-                  <Input
-                    className="border-slate-700 bg-slate-900/50"
-                    placeholder="shpat_..."
-                    value={newShop.shopify_access_token}
-                    onChange={(event) => setNewShop((prev) => ({ ...prev, shopify_access_token: event.target.value }))}
-                  />
-                </div>
-              </>
+                <TabsContent value="shipping" className="space-y-4">
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Nova Poshta API Key</p>
+                    <Input
+                      className="border-slate-800 bg-slate-900/50"
+                      type="password"
+                      placeholder={editingShop.id ? "Leave empty to keep existing" : "API secret key"}
+                      value={editingShop.np_api_key}
+                      onChange={(e) => setEditingShop(p => ({ ...p, np_api_key: e.target.value }))}
+                    />
+                  </div>
+                  <Separator className="bg-slate-800" />
+                  <p className="text-[10px] font-bold text-teal-500 uppercase tracking-widest">Sender Metadata</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                       <p className="text-xs font-medium text-slate-400">Sender Name</p>
+                       <Input
+                         className="border-slate-800 bg-slate-900/50"
+                         value={editingShop.np_sender_name}
+                         onChange={(e) => setEditingShop(p => ({ ...p, np_sender_name: e.target.value }))}
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <p className="text-xs font-medium text-slate-400">Sender Phone</p>
+                       <Input
+                         className="border-slate-800 bg-slate-900/50"
+                         value={editingShop.np_sender_phone}
+                         onChange={(e) => setEditingShop(p => ({ ...p, np_sender_phone: e.target.value }))}
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <p className="text-xs font-medium text-slate-400">City REF (UUID)</p>
+                       <Input
+                         className="border-slate-800 bg-slate-900/50 font-mono text-[10px]"
+                         value={editingShop.np_sender_city_ref}
+                         onChange={(e) => setEditingShop(p => ({ ...p, np_sender_city_ref: e.target.value }))}
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <p className="text-xs font-medium text-slate-400">Warehouse REF (UUID)</p>
+                       <Input
+                         className="border-slate-800 bg-slate-900/50 font-mono text-[10px]"
+                         value={editingShop.np_sender_warehouse_ref}
+                         onChange={(e) => setEditingShop(p => ({ ...p, np_sender_warehouse_ref: e.target.value }))}
+                       />
+                    </div>
+                  </div>
+                </TabsContent>
+              </div>
+            </Tabs>
+
+            {dialogError && (
+              <div className="flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 text-xs text-red-400">
+                <AlertCircle className="size-4" />
+                {dialogError}
+              </div>
             )}
 
-            {createError && (
-              <p className="rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
-                {createError}
-              </p>
-            )}
-
-            <DialogFooter className="border-slate-800 bg-slate-900/40">
+            <DialogFooter className="bg-slate-900/20 p-6 -m-6 mt-6 border-t border-slate-800">
               <Button
                 type="button"
-                variant="outline"
-                className="border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
-                onClick={() => setIsCreateOpen(false)}
+                variant="ghost"
+                className="text-slate-400 hover:text-slate-100"
+                onClick={() => setIsDialogOpen(false)}
               >
-                Cancel
+                Close
               </Button>
               <Button
                 type="submit"
-                className="bg-teal-600 text-white hover:bg-teal-500"
-                disabled={createShop.isPending}
+                className="bg-teal-600 text-white hover:bg-teal-500 shadow-[0_0_20px_-5px_rgba(20,184,166,0.5)]"
+                disabled={createShop.isPending || updateShop.isPending}
               >
-                {createShop.isPending ? 'Creating...' : 'Create Store'}
+                {(createShop.isPending || updateShop.isPending) ? 'Saving...' : 'Save Configuration'}
               </Button>
             </DialogFooter>
           </form>
@@ -234,77 +355,94 @@ export default function ShopsPage() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-200">Integrated Stores</h2>
+          <div className="space-y-1">
+             <h2 className="text-2xl font-bold text-slate-50 tracking-tight">Integrated Stores</h2>
+             <p className="text-sm text-slate-500">Manage API connections and brand aesthetics.</p>
+          </div>
           {isOwner && (
             <Button
-              className="bg-teal-600 hover:bg-teal-500 text-white"
-              onClick={() => setIsCreateOpen(true)}
+              className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg"
+              onClick={handleOpenCreate}
             >
-              <Plus className="mr-2 h-4 w-4" /> Add Store
+              <Plus className="mr-2 h-4 w-4" /> Initialize Store
             </Button>
           )}
         </div>
 
         {isLoading ? (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-16 w-full bg-slate-900/60" />
+              <Skeleton key={i} className="h-24 w-full bg-slate-900/40 rounded-2xl" />
             ))}
           </div>
         ) : (
-          <Card className="border-slate-800/60 bg-slate-900/40 backdrop-blur-sm shadow-md overflow-hidden">
+          <Card className="border-slate-800/60 bg-slate-900/20 backdrop-blur-md shadow-2xl overflow-hidden rounded-2xl">
             <CardContent className="p-0">
               <Table>
-                <TableHeader className="bg-slate-800/30">
-                  <TableRow className="border-slate-800/60 hover:bg-transparent">
-                    <TableHead className="w-[300px] text-slate-400">Store Name</TableHead>
-                    <TableHead className="text-slate-400">Platform</TableHead>
-                    <TableHead className="text-slate-400">Status</TableHead>
-                    <TableHead className="text-slate-400">API Connection</TableHead>
-                    {isOwner && <TableHead className="text-right text-slate-400">Actions</TableHead>}
+                <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
+                  <TableRow className="border-none hover:bg-transparent">
+                    <TableHead className="w-[300px] text-[10px] font-bold uppercase tracking-widest text-slate-500 px-8 py-5">Store Identity</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-slate-500 py-5">Platform</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-slate-500 py-5 text-center">Status</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-slate-500 py-5">Connectivity</TableHead>
+                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-slate-500 px-8 py-5">Management</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {Array.isArray(shops) && shops.map((shop) => (
-                    <TableRow key={shop.id} className="border-slate-800/60 hover:bg-slate-800/20">
-                      <TableCell className="font-medium text-slate-200">
-                        <div className="flex items-center gap-3">
+                    <TableRow key={shop.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group">
+                      <TableCell className="px-8 py-6">
+                        <div className="flex items-center gap-4">
                           <div 
-                            className="h-3 w-3 rounded-full" 
-                            style={{ backgroundColor: shop.color || '#94a3b8' }} 
-                          />
-                          {shop.name}
+                            className="size-10 rounded-xl flex items-center justify-center border shadow-inner" 
+                            style={{ 
+                              backgroundColor: `${shop.color}15`, 
+                              borderColor: `${shop.color}40`,
+                              color: shop.color
+                            }} 
+                          >
+                            <Store className="size-5" />
+                          </div>
+                          <div className="space-y-1">
+                             <p className="text-sm font-bold text-slate-100 tracking-tight">{shop.name}</p>
+                             <p className="text-[10px] text-slate-500 font-mono">ID: {shop.id.slice(0, 8)}...</p>
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="border-slate-700 bg-slate-800/50 text-slate-300">
+                        <Badge variant="outline" className="border-slate-800 bg-slate-900/50 text-slate-400 font-mono text-[10px] tracking-widest py-0.5">
                           {String(shop.platform || '').toUpperCase()}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2 text-xs text-teal-400">
-                          <CheckCircle2 className="h-3 w-3" />
-                          Active
+                      <TableCell className="text-center">
+                        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-teal-500/5 text-teal-400 border border-teal-500/10">
+                          <div className="size-1.5 rounded-full bg-teal-500 animate-pulse" />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">Online</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-2">
-                          {shop.has_shopify_token || shop.has_np_token ? (
-                            <Badge className="bg-teal-500/10 text-teal-400 border-teal-500/30">Connected</Badge>
-                          ) : (
-                            <Badge className="bg-slate-500/10 text-slate-500 border-slate-500/30">Manual Only</Badge>
+                        <div className="flex items-center gap-3">
+                          {shop.has_shopify_token && (
+                            <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] uppercase tracking-tighter">Shopify Live</Badge>
+                          )}
+                          {shop.has_np_token && (
+                            <Badge className="bg-red-500/10 text-red-400 border-red-500/20 text-[9px] uppercase tracking-tighter">NovaPoshta Live</Badge>
+                          )}
+                          {!shop.has_shopify_token && !shop.has_np_token && (
+                            <span className="text-[10px] text-slate-600 font-medium">No active connections</span>
                           )}
                         </div>
                       </TableCell>
                       {isOwner && (
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2 text-right">
+                        <TableCell className="px-8 py-6 text-right">
+                          <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             {shop.platform?.toLowerCase() === 'shopify' && (
                               <Button 
                                 variant="ghost" 
                                 size="icon" 
+                                title="Manual Sync"
                                 className={cn(
-                                  "h-8 w-8 text-teal-500 hover:text-teal-400 hover:bg-teal-500/10",
+                                  "h-9 w-9 text-teal-500 hover:text-teal-400 hover:bg-teal-500/10 rounded-xl",
                                   syncShop.isPending && "animate-spin"
                                 )}
                                 disabled={syncShop.isPending}
@@ -313,13 +451,20 @@ export default function ShopsPage() {
                                 <RefreshCw className="h-4 w-4" />
                               </Button>
                             )}
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-100">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              title="Config"
+                              className="h-9 w-9 text-slate-400 hover:text-slate-100 hover:bg-white/[0.05] rounded-xl"
+                              onClick={() => handleOpenEdit(shop)}
+                            >
                               <Settings2 className="h-4 w-4" />
                             </Button>
                             <Button 
                               variant="ghost" 
                               size="icon" 
-                              className="h-8 w-8 text-slate-400 hover:text-red-400"
+                              title="Delete"
+                              className="h-9 w-9 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-xl"
                               onClick={() => {
                                 if (window.confirm(`Are you sure you want to deactivate ${shop.name}?`)) {
                                   deleteShop.mutate(shop.id);
@@ -335,8 +480,11 @@ export default function ShopsPage() {
                   ))}
                   {(!shops || (Array.isArray(shops) && shops.length === 0)) && (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center text-slate-500">
-                        No stores connected yet.
+                      <TableCell colSpan={5} className="h-32 text-center">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                           <Store className="size-8 text-slate-800" />
+                           <p className="text-sm text-slate-500 italic">No stores initialized in this workspace.</p>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}
@@ -346,14 +494,16 @@ export default function ShopsPage() {
           </Card>
         )}
 
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
-          <div className="flex gap-3">
-            <AlertCircle className="h-5 w-5 text-amber-400 shrink-0" />
-            <div className="space-y-1">
-              <h4 className="text-sm font-medium text-amber-400">Technical Note</h4>
-              <p className="text-xs text-amber-500/80 leading-relaxed">
-                Tokens and API keys are stored with industry-standard encryption on the server. 
-                Managers and Designers cannot view or modify these credentials.
+        <div className="rounded-2xl border border-amber-500/10 bg-amber-500/[0.02] p-6 shadow-sm">
+          <div className="flex gap-4">
+            <div className="size-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+               <AlertCircle className="h-5 w-5 text-amber-500" />
+            </div>
+            <div className="space-y-1.5 pt-1">
+              <h4 className="text-sm font-bold text-amber-500 uppercase tracking-widest">Security Audit Context</h4>
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                Cryptographic tokens and NP secret keys are processed through AES-256 server-side encryption. 
+                Managers and Designers can trigger sync actions but are strictly barred from retrieving raw API credentials.
               </p>
             </div>
           </div>

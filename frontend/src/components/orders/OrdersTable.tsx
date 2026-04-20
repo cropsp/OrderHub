@@ -99,7 +99,7 @@ export default function OrdersTable({ orders, isLoading, onSelectOrder }: Orders
                   {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
                 </span>
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                 <Select 
                   defaultValue={order.status} 
                   onValueChange={(val) => handleStatusChange(order.id, val)}

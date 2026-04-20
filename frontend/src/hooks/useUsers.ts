@@ -27,3 +27,14 @@ export function useUpdateUser() {
     },
   });
 }
+
+export function useUpdatePreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: usersApi.updatePreferences,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users', 'me'] });
+      queryClient.invalidateQueries({ queryKey: ['auth-user'] });
+    },
+  });
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Plus } from 'lucide-react';
 import { useOrders } from '@/hooks/useOrders';
 import { STATUS_CATEGORIES, ARCHIVE_CATEGORIES } from '@/lib/order-status';
 import StatusTabs from './StatusTabs';
@@ -6,6 +7,8 @@ import ViewToggle from './ViewToggle';
 import OrdersTable from './OrdersTable';
 import PipelineBoard from './PipelineBoard';
 import OrderDetailPanel from './OrderDetailPanel';
+import NewOrderDialog from './NewOrderDialog';
+import { Button } from '@/components/ui/button';
 import type { OrderListFilters } from '@/types/order';
 
 type OrdersLayoutProps = {
@@ -22,15 +25,16 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
   // 2. Active Tab State (Logical Category)
   const [activeCategoryId, setActiveCategoryId] = useState(categories[0].id);
 
-  // 3. Selection State (for Drawer/Panel)
+  // 3. Selection & Modal State
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   
   // 4. Find current category metadata
   const currentCategory = categories.find(c => c.id === activeCategoryId) || categories[0];
   
   // 5. Fetch data
   const filters: OrderListFilters = {
-    status: currentCategory.statuses[0],
+    status: currentCategory.id === 'all' ? undefined : (currentCategory.statuses[0] || undefined),
     ...(fixedShopId ? { shop_id: fixedShopId } : {}),
   };
 
@@ -46,7 +50,17 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
           onCategoryChange={setActiveCategoryId}
           categories={categories}
         />
-        <ViewToggle view={view} onViewChange={setView} />
+        <div className="flex items-center gap-3">
+          {!isArchive && (
+            <Button 
+              onClick={() => setIsNewOrderOpen(true)}
+              className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg shadow-teal-500/20"
+            >
+              <Plus className="mr-2 size-4" /> New Order
+            </Button>
+          )}
+          <ViewToggle view={view} onViewChange={setView} />
+        </div>
       </div>
 
       <div className="min-h-[500px]">
@@ -69,6 +83,11 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
       <OrderDetailPanel 
         orderId={selectedOrderId} 
         onClose={() => setSelectedOrderId(null)} 
+      />
+
+      <NewOrderDialog 
+        open={isNewOrderOpen} 
+        onOpenChange={setIsNewOrderOpen} 
       />
     </div>
   );

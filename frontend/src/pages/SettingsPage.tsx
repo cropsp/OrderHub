@@ -13,10 +13,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
+import { useUpdatePreferences } from '@/hooks/useUsers';
 
 import ShellPage from './ShellPage';
 
-const SETTINGS_STORAGE_KEY = 'orderhub.settings';
 
 type SystemPreferences = {
   dashboard_refresh_seconds: '60' | '300';
@@ -38,32 +38,32 @@ function roleLabel(role: string) {
 
 export default function SettingsPage() {
   const { user, logout } = useAuth();
+  const updatePreferences = useUpdatePreferences();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [preferences, setPreferences] = useState<SystemPreferences>(DEFAULT_PREFERENCES);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) return;
+    if (!user?.preferences) return;
 
+    const saved = user.preferences as Partial<SystemPreferences>;
+    setPreferences({
+      dashboard_refresh_seconds:
+        saved.dashboard_refresh_seconds === '300' ? '300' : '60',
+      order_view_default: saved.order_view_default === 'board' ? 'board' : 'table',
+      date_display: saved.date_display === 'utc' ? 'utc' : 'local',
+      default_timezone: saved.default_timezone || DEFAULT_PREFERENCES.default_timezone,
+    });
+  }, [user?.preferences]);
+
+  const savePreferences = async () => {
     try {
-      const parsed = JSON.parse(raw) as Partial<SystemPreferences>;
-      setPreferences({
-        dashboard_refresh_seconds:
-          parsed.dashboard_refresh_seconds === '300' ? '300' : '60',
-        order_view_default: parsed.order_view_default === 'board' ? 'board' : 'table',
-        date_display: parsed.date_display === 'utc' ? 'utc' : 'local',
-        default_timezone: parsed.default_timezone || DEFAULT_PREFERENCES.default_timezone,
-      });
-    } catch {
-      setPreferences(DEFAULT_PREFERENCES);
+      await updatePreferences.mutateAsync(preferences);
+      setSaveMessage('Preferences saved to server.');
+      window.setTimeout(() => setSaveMessage(null), 2000);
+    } catch (error) {
+      setSaveMessage('Failed to save preferences.');
     }
-  }, []);
-
-  const savePreferences = () => {
-    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(preferences));
-    setSaveMessage('Preferences saved locally.');
-    window.setTimeout(() => setSaveMessage(null), 2000);
   };
 
   const onLogout = async () => {
@@ -194,10 +194,14 @@ export default function SettingsPage() {
 
             <div className="flex items-center justify-between">
               <p className="text-xs text-slate-500">
-                These preferences are stored in your browser for this device.
+                These preferences are synced across all your devices.
               </p>
-              <Button className="bg-teal-600 text-white hover:bg-teal-500" onClick={savePreferences}>
-                Save Preferences
+              <Button 
+                className="bg-teal-600 text-white hover:bg-teal-500" 
+                onClick={savePreferences}
+                disabled={updatePreferences.isPending}
+              >
+                {updatePreferences.isPending ? 'Saving...' : 'Save Preferences'}
               </Button>
             </div>
 
