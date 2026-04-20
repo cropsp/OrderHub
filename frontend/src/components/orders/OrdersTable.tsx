@@ -22,9 +22,10 @@ import { useUpdateOrderStatus } from '@/hooks/useOrders';
 type OrdersTableProps = {
   orders: OrderListItem[];
   isLoading?: boolean;
+  onSelectOrder: (id: string) => void;
 };
 
-export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
+export default function OrdersTable({ orders, isLoading, onSelectOrder }: OrdersTableProps) {
   const { mutate: updateStatus, isPending } = useUpdateOrderStatus();
 
   if (isLoading) {
@@ -64,7 +65,11 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
         </TableHeader>
         <TableBody>
           {orders.map((order) => (
-            <TableRow key={order.id} className="border-slate-800/60 hover:bg-slate-800/30 transition-colors">
+            <TableRow 
+              key={order.id} 
+              className="border-slate-800/60 hover:bg-slate-800/30 transition-colors cursor-pointer"
+              onClick={() => onSelectOrder(order.id)}
+            >
               <TableCell className="font-mono text-xs font-medium text-teal-400">
                 #{order.external_id}
               </TableCell>

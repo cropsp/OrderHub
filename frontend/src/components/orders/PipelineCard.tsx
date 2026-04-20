@@ -15,9 +15,10 @@ import { useUpdateOrderStatus } from '@/hooks/useOrders';
 
 type PipelineCardProps = {
   order: OrderListItem;
+  onClick: () => void;
 };
 
-export default function PipelineCard({ order }: PipelineCardProps) {
+export default function PipelineCard({ order, onClick }: PipelineCardProps) {
   const { mutate: updateStatus, isPending } = useUpdateOrderStatus();
 
   const handleStatusChange = (newStatus: string) => {
@@ -25,7 +26,10 @@ export default function PipelineCard({ order }: PipelineCardProps) {
   };
 
   return (
-    <Card className="group border-slate-800/80 bg-slate-900/60 transition-all hover:border-teal-500/30 hover:bg-slate-900/90 shadow-sm shadow-black/20">
+    <Card 
+      className="group border-slate-800/80 bg-slate-900/60 transition-all hover:border-teal-500/30 hover:bg-slate-900/90 shadow-sm shadow-black/20 cursor-pointer"
+      onClick={onClick}
+    >
       <CardHeader className="space-y-1.5 p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="font-mono text-[10px] font-bold tracking-wider text-teal-400">

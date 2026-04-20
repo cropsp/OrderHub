@@ -5,6 +5,7 @@ import StatusTabs from './StatusTabs';
 import ViewToggle from './ViewToggle';
 import OrdersTable from './OrdersTable';
 import PipelineBoard from './PipelineBoard';
+import OrderDetailPanel from './OrderDetailPanel';
 
 export default function OrdersLayout() {
   // 1. View State (Table or Board)
@@ -12,14 +13,16 @@ export default function OrdersLayout() {
   
   // 2. Active Tab State (Logical Category)
   const [activeCategoryId, setActiveCategoryId] = useState(STATUS_CATEGORIES[0].id);
+
+  // 3. Selection State (for Drawer/Panel)
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   
-  // 3. Find current category metadata
+  // 4. Find current category metadata
   const currentCategory = STATUS_CATEGORIES.find(c => c.id === activeCategoryId) || STATUS_CATEGORIES[0];
   
-  // 4. Fetch data using React Query hook
-  // We filter by all statuses included in the logical category
+  // 5. Fetch data
   const { data, isLoading } = useOrders({ 
-    status: currentCategory.statuses[0] as any // Backend API currently only accepts one status per request, we'll need to adapt for multiple later
+    status: currentCategory.statuses[0] as any 
   });
 
   const orders = data?.items ?? [];
@@ -39,15 +42,22 @@ export default function OrdersLayout() {
           <OrdersTable 
             isLoading={isLoading} 
             orders={orders} 
+            onSelectOrder={setSelectedOrderId}
           />
         ) : (
           <PipelineBoard 
             columnStatuses={currentCategory.statuses} 
             isLoading={isLoading} 
             orders={orders} 
+            onSelectOrder={setSelectedOrderId}
           />
         )}
       </div>
+
+      <OrderDetailPanel 
+        orderId={selectedOrderId} 
+        onClose={() => setSelectedOrderId(null)} 
+      />
     </div>
   );
 }

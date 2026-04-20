@@ -261,3 +261,4 @@ Follow-up after that:
 - `2026-04-20` Normalized terminology around `smart table` and `pipeline board`.
 - `2026-04-20` Corrected outdated references to drag-and-drop and current filesystem state.
 - `2026-04-20` Completed Sprint 3 tasks S3-3 to S3-6 and verified frontend build.
+- `2026-04-20` Starting S4-6. Note: Editing of internal notes, TTN, and customer info in the Detail Panel is deferred to Sprint 5. S4-6 remains read-only for now (viewing items, shipping, and history).
