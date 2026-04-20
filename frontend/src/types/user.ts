@@ -11,7 +11,7 @@ export interface User {
   email: string;
   full_name: string;
   role: UserRoleType;
-  is_active: string;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
 }

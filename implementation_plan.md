@@ -1,395 +1,263 @@
-# OrderHub CRM — Implementation Plan
+# OrderHub CRM - Implementation Plan
 
-## Огляд проєкту
+## How To Use This File
 
-**OrderHub** — self-hosted CRM для управління замовленнями handmade бізнесу шкіряних виробів. Замінює workflow Etsy CSV → Google Sheets → Trello єдиним веб-додатком з підтримкою AI-агентів через MCP протокол.
+This file is the operational execution plan for the repository.
 
-### Ключові рішення (зафіксовані)
+Use it for:
 
-| Рішення | Деталі |
-|---------|--------|
-| AI Agent | MCP Server замість вбудованого чату (Phase 6) |
-| Сторінки магазинів | Окрема сторінка для кожного магазину + "All Orders" |
-| Візуалізація замовлень | Hybrid: Smart Table (primary) + Pipeline Board (secondary), toggle кнопка |
-| Адреса доставки | Поля shipping address на моделі Order |
-| Docker | Окремі dev/prod конфігурації для frontend |
-| Alembic | Інтегровано в entrypoint.sh |
-| Валюти | Revenue per currency, без автоконвертації |
-| Order fields | `quantity` та `item_price` видалені з Order (є в OrderItem) |
-| Drag-and-drop | Видалено. Статус змінюється через inline dropdown. @dnd-kit прибрано |
+- sprint scope
+- task status
+- next implementation steps
+- known mismatches between plan and actual codebase
+- verification checkpoints
 
----
+Do not duplicate stable architecture here. Stable project logic belongs in `ORDERHUB_CONTEXT.md`.
 
-## Зміни відносно оригінальної специфікації
+## Status Snapshot
 
-> [!IMPORTANT]
-> **Видалено** (спрощення через MCP-підхід):
-> - `AgentSession`, `AgentAction` моделі
-> - `agent_runner.py`, `llm_provider.py`
-> - `/api/agent/*` ендпоінти
-> - `AgentChat.tsx`, `AgentMessage.tsx`, `ToolCallPreview.tsx`, `ConfirmAction.tsx`
-> - `ANTHROPIC_API_KEY` з `.env`
+Last reviewed: `2026-04-20`
 
-> [!IMPORTANT]
-> **Додано**:
-> - `mcp_server.py` — MCP сервер з усіма CRM-інструментами
-> - Shipping address поля на Order
-> - `ShopOrdersPage.tsx` — окрема сторінка для кожного магазину
-> - `CustomersPage.tsx` — сторінка клієнтів
-> - `entrypoint.sh` — startup script з alembic + seed
-> - `Dockerfile.dev` для frontend (vite dev server)
-> - `platform_fee` поле на Order
+- Active sprint: `Sprint 4 - Core Frontend`
+- Sprint 1 status: `DONE`
+- Sprint 2 status: `DONE`
+- Sprint 3 status: `DONE`
+- Sprint 4 status: `NOT STARTED`
+- Sprint 5 status: `NOT STARTED`
+- Sprint 6 status: `NOT STARTED`
 
----
+## Actual Repository Snapshot
 
-## Оновлена структура проєкту
+Verified against the current tree before editing this file.
 
-```
-OrderHub/
-├── docker-compose.yml              # production
-├── docker-compose.dev.yml          # development overrides
-├── .env.example
-├── README.md
-│
-├── backend/
-│   ├── Dockerfile
-│   ├── entrypoint.sh               # alembic upgrade + optional seed
-│   ├── requirements.txt
-│   ├── main.py                     # FastAPI app, CORS, lifespan
-│   ├── config.py                   # Settings from env
-│   ├── database.py                 # async SQLAlchemy engine + session
-│   ├── seed.py                     # seed data script
-│   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── base.py                 # Base model with id, created_at
-│   │   ├── user.py
-│   │   ├── shop.py
-│   │   ├── order.py                # Order + OrderItem + OrderStatusHistory
-│   │   ├── customer.py
-│   │   └── attachment.py
-│   │
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── user.py
-│   │   ├── shop.py
-│   │   ├── order.py
-│   │   ├── customer.py
-│   │   ├── dashboard.py
-│   │   └── common.py              # pagination, error schemas
-│   │
-│   ├── routers/
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── users.py
-│   │   ├── shops.py
-│   │   ├── orders.py
-│   │   ├── imports.py
-│   │   ├── customers.py
-│   │   ├── attachments.py
-│   │   └── dashboard.py
-│   │
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── auth_service.py
-│   │   ├── encryption_service.py   # Fernet encrypt/decrypt
-│   │   ├── order_service.py        # status transitions, CRUD
-│   │   ├── customer_service.py     # upsert logic
-│   │   ├── shopify_sync.py
-│   │   ├── etsy_parser.py
-│   │   ├── scheduler.py            # APScheduler (single worker)
-│   │   ├── file_storage.py
-│   │   ├── email_service.py
-│   │   └── nova_poshta.py          # NP API client
-│   │
-│   ├── mcp_server.py               # [NEW] MCP server
-│   │
-│   └── alembic/
-│       ├── alembic.ini
-│       ├── env.py
-│       └── versions/
-│
-└── frontend/
-    ├── Dockerfile                   # production (multi-stage + nginx)
-    ├── Dockerfile.dev               # development (vite dev server)
-    ├── nginx.conf
-    ├── package.json
-    ├── tsconfig.json
-    ├── vite.config.ts
-    ├── tailwind.config.ts
-    ├── index.html
-    │
-    └── src/
-        ├── main.tsx
-        ├── App.tsx                  # routes
-        │
-        ├── api/
-        │   ├── client.ts            # axios + interceptors
-        │   ├── auth.ts
-        │   ├── orders.ts
-        │   ├── shops.ts
-        │   ├── customers.ts
-        │   ├── imports.ts
-        │   ├── attachments.ts
-        │   └── dashboard.ts
-        │
-        ├── components/
-        │   ├── layout/
-        │   │   ├── Sidebar.tsx
-        │   │   ├── Topbar.tsx
-        │   │   └── AppLayout.tsx
-        │   ├── orders/
-        │   │   ├── OrdersTable.tsx        # Primary view: smart table with inline status
-        │   │   ├── PipelineBoard.tsx      # Secondary view: visual pipeline columns
-        │   │   ├── PipelineCard.tsx        # Card for pipeline view
-        │   │   ├── StatusTabs.tsx          # Tab bar grouping statuses
-        │   │   ├── ViewToggle.tsx          # [List] [Board] toggle button
-        │   │   └── OrderDetailPanel.tsx    # Slide-over panel
-        │   ├── import/
-        │   │   ├── CsvDropzone.tsx
-        │   │   └── ImportResult.tsx
-        │   ├── dashboard/
-        │   │   ├── StatCard.tsx
-        │   │   ├── RevenueChart.tsx
-        │   │   ├── ShopBreakdownChart.tsx
-        │   │   └── AttentionList.tsx
-        │   └── ui/                  # shadcn/ui components
-        │
-        ├── pages/
-        │   ├── LoginPage.tsx
-        │   ├── DashboardPage.tsx
-        │   ├── OrdersPage.tsx       # All Orders — Kanban
-        │   ├── ShopOrdersPage.tsx   # [NEW] Per-shop Kanban
-        │   ├── OrderDetailPage.tsx
-        │   ├── ImportPage.tsx
-        │   ├── ShopsPage.tsx        # Shop management (owner)
-        │   ├── CustomersPage.tsx    # [NEW] Customer list
-        │   ├── ArchivePage.tsx
-        │   ├── UsersPage.tsx
-        │   └── SettingsPage.tsx     # Profile, password change
-        │
-        ├── hooks/
-        │   ├── useAuth.ts
-        │   ├── useOrders.ts
-        │   └── useShops.ts
-        │
-        ├── store/
-        │   └── authStore.ts
-        │
-        ├── types/
-        │   ├── order.ts
-        │   ├── shop.ts
-        │   ├── user.ts
-        │   └── common.ts
-        │
-        └── lib/
-            ├── constants.ts         # status colors, transitions
-            └── utils.ts             # date formatting, etc.
-```
+Backend present now:
 
----
+- app bootstrap and config
+- models, schemas, routers, services
+- Alembic migration setup
+- seed script
 
-## Оновлена модель Order (з виправленнями)
+Frontend present now:
 
-```python
-Order:
-  - id (UUID, PK)
-  - external_id (string)
-  - shop_id (FK → Shop, indexed)
-  - customer_id (FK → Customer, indexed)
-  - UNIQUE constraint: (external_id, shop_id)
-  - status: enum('new','waiting_info','info_received','design_pending',
-                  'design_ready','in_production','shipped','completed','cancelled')
-  - title (text)                    # перший item або "Multiple items (N)"
-  - total_price: Numeric(10,2)     # Order Total з платформи
-  - currency: varchar(3)
-  - production_cost: Numeric(10,2), nullable
-  - shipping_np_cost: Numeric(10,2), nullable
-  - platform_fee: Numeric(10,2), nullable        # [NEW] комісія Etsy/Shopify
-  
-  # [NEW] Shipping address fields
-  - shipping_name (text, nullable)
-  - shipping_phone (varchar 20, nullable)
-  - shipping_street_1 (text, nullable)
-  - shipping_street_2 (text, nullable)
-  - shipping_city (text, nullable)
-  - shipping_state (text, nullable)
-  - shipping_zip (varchar 20, nullable)
-  - shipping_country (varchar 2, nullable)
-  
-  # Assignment & production
-  - assigned_designer_id (FK → User, nullable)
-  - assigned_at (timestamp, nullable)
-  - ttn_number (varchar 20, nullable)
-  - ttn_created_at (timestamp, nullable)
-  - ttn_printed (bool, default False)
-  
-  # Notes
-  - customer_note (text, nullable)
-  - custom_info (text, nullable)
-  - internal_note (text, nullable)
-  
-  # Timestamps
-  - ordered_at (timestamp)
-  - shipped_at (timestamp, nullable)
-  - completed_at (timestamp, nullable)
-  - created_at, updated_at
+- `main.tsx`
+- `App.tsx` with protected route shell
+- auth API layer
+- orders and shops API modules
+- auth store and hook
+- orders and shops React Query hooks
+- `pages/` with login, dashboard and shell placeholders
+- `components/layout/` with sidebar, topbar and app layout
+- `components/auth/RouteGuards.tsx`
+- base UI primitives in `components/ui`
 
-  # ВИДАЛЕНО: quantity, item_price (є в OrderItem)
-```
+Frontend not present yet:
 
----
+- `src/components/orders/`
+- `src/components/dashboard/`
+- full feature pages for sprint 4/5
 
-## Спрінти
+Planned backend files not present yet:
 
-### Sprint 1 — Foundation 🏗️ [DONE]
-> Мета: проёкт запускається в Docker, є БД, авторизація, seed дані
+- `backend/mcp_server.py`
+- `backend/services/shopify_sync.py`
+- `backend/services/scheduler.py`
+- `backend/services/email_service.py`
+- `backend/services/nova_poshta.py`
 
-| # | Задача | Файли | Складність | Статус |
-|---|--------|-------|------------|--------|
-| 1.1 | `.env.example` + `docker-compose.yml` + `docker-compose.dev.yml` | root | Проста | [DONE] |
-| 1.2 | Backend Dockerfile + `entrypoint.sh` + `requirements.txt` | backend/ | Проста | [DONE] |
-| 1.3 | `config.py` — Pydantic Settings з .env | backend/ | Проста | [DONE] |
-| 1.4 | `database.py` — async engine, session, Base | backend/ | Проста | [DONE] |
-| 1.5 | Всі DB моделі (User, Shop, Order, OrderItem, OrderStatusHistory, Customer, Attachment) | backend/models/ | Проста | [DONE] |
-| 1.6 | Alembic init + initial migration | backend/alembic/ | Складна | [DONE] |
-| 1.7 | `main.py` — FastAPI app skeleton (CORS, lifespan, exception handlers) | backend/ | Проста | [DONE] |
-| 1.8 | Auth: JWT service + login/refresh/logout endpoints | backend/routers/auth.py, services/auth_service.py | Проста | [DONE] |
-| 1.9 | User CRUD (owner only) | backend/routers/users.py | Проста | [DONE] |
-| 1.10 | `encryption_service.py` — Fernet helpers | backend/services/ | Проста | [DONE] |
-| 1.11 | `seed.py` — 3 users, 3 shops, 15 orders | backend/ | Проста | [DONE] |
-| 1.12 | Frontend: Vite + React + TS + TailwindCSS + shadcn/ui init | frontend/ | Складна | [DONE] |
-| 1.13 | Frontend Dockerfile.dev + nginx.conf + prod Dockerfile | frontend/ | Проста | [DONE] |
+## Plan Corrections
 
-**Результат**: `docker compose -f docker-compose.dev.yml up` → backend на :8000, frontend на :3000, PostgreSQL на :5432, seed data в БД, login працює.
+These were inaccurate in the previous version of the plan and are now normalized:
 
----
+1. The old plan mixed current filesystem state with target structure. This file now separates actual repository state from planned work.
+2. `Sprint 3 / Task 3.7` was marked `TODO`, but base UI primitives already exist in `frontend/src/components/ui`.
+3. The plan used `kanban`, `pipeline`, and `board` inconsistently. The canonical UI language is now:
+   `smart table` as primary view, `pipeline board` as secondary view.
+4. Final verification still mentioned drag-and-drop, but drag-and-drop was previously removed from scope. Verification now checks inline status changes instead.
+5. `Task 3.6` referenced React Query hooks under `frontend/src/api/`, while the intended split is API clients in `api/` and React Query hooks in `hooks/`.
+6. The old structure section listed files like `tailwind.config.ts` and multiple page modules as if they already existed. They do not exist yet in the current repository.
 
-### Sprint 2 — Core Backend API 📦 [DONE]
-> Мета: всі бізнес-ендпоінти працюють, CSV імпорт, статуси
+## Working Rules
 
-| # | Задача | Файли | Складність | Статус |
-|---|--------|-------|------------|--------|
-| 2.1 | Pydantic schemas для всіх моделей | backend/schemas/ | Проста | [DONE] |
-| 2.2 | Shop CRUD + encrypt/decrypt API tokens | backend/routers/shops.py | Проста | [DONE] |
-| 2.3 | Customer service (upsert by email) | backend/services/customer_service.py | Проста | [DONE] |
-| 2.4 | Order CRUD + фільтри (status, shop_id, search, pagination) | backend/routers/orders.py | Складна | [DONE] |
-| 2.5 | `order_service.py` — status transition validation + history logging | backend/services/ | Складна | [DONE] |
-| 2.6 | Etsy CSV parser (BOM strip, grouping by Order ID, multi-item) | backend/services/etsy_parser.py | Складна | [DONE] |
-| 2.7 | Import endpoint (POST /api/imports/etsy) | backend/routers/imports.py | Проста | [DONE] |
-| 2.8 | File storage service + attachment endpoints (auth-protected) | backend/services/file_storage.py | Проста | [DONE] |
-| 2.9 | Customer endpoints | backend/routers/customers.py | Проста | [DONE] |
-| 2.10 | Dashboard stat endpoints (revenue per currency) | backend/routers/dashboard.py | Складна | [DONE] |
-| 2.11 | CSV export endpoint (owner only) | backend/routers/orders.py | Проста | [DONE] |
+- When a task is finished, update its status in this file immediately.
+- When a sprint assumption becomes false, add it to `Plan Corrections` before continuing.
+- Keep task IDs stable so future updates can reference them unambiguously.
+- Every sprint should end with at least one concrete verification step.
 
-**Результат**: повний REST API, тестований через Swagger UI на :8000/docs.
+## Sprint 1 - Foundation
 
----
+Goal: boot the project in Docker with database, auth, migrations, and seed data.
 
-### Sprint 3 — Frontend Shell 🖼️
-> Мета: авторизація, layout, навігація, базові сторінки
+Status: `DONE`
 
-| # | Задача | Файли | Складність | Статус |
-|---|--------|-------|------------|--------|
-| 3.1 | Axios client + token refresh interceptor | frontend/src/api/client.ts | Проста | [DONE] |
-| 3.2 | Auth store + useAuth hook | frontend/src/store/, hooks/ | Проста | [DONE] |
-| 3.3 | Login page (premium UI) | frontend/src/pages/LoginPage.tsx | Складна | [TODO] |
-| 3.4 | App layout: Sidebar (role-aware, shops list) + Topbar | frontend/src/components/layout/ | Складна | [TODO] |
-| 3.5 | React Router config (protected routes) | frontend/src/App.tsx | Складна | [TODO] |
-| 3.6 | API hooks (React Query) для orders, shops | frontend/src/api/ | Складна | [TODO] |
-| 3.7 | Базові shadcn/ui компоненти (Button, Card, Badge, Input, Dialog, etc.) | frontend/src/components/ui/ | Проста | [TODO] |
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S1-1 | Environment and Compose setup | root config | DONE |
+| S1-2 | Backend container setup | `backend/` | DONE |
+| S1-3 | App settings and database setup | `backend/config.py`, `backend/database.py` | DONE |
+| S1-4 | Core database models and migration | `backend/models/`, `backend/alembic/` | DONE |
+| S1-5 | FastAPI app skeleton | `backend/main.py` | DONE |
+| S1-6 | Auth endpoints and token services | `backend/routers/auth.py`, `backend/services/auth_service.py` | DONE |
+| S1-7 | User CRUD | `backend/routers/users.py` | DONE |
+| S1-8 | Encryption helpers | `backend/services/encryption_service.py` | DONE |
+| S1-9 | Seed data | `backend/seed.py` | DONE |
+| S1-10 | Frontend bootstrap | `frontend/` | DONE |
+| S1-11 | Frontend dev and prod containers | `frontend/Dockerfile*`, `frontend/nginx.conf` | DONE |
 
-**Результат**: login → redirect to dashboard, sidebar з навігацією per shop, protected routes по ролях.
+Verification:
 
----
+- `docker compose -f docker-compose.dev.yml up` should start backend, frontend, and PostgreSQL.
 
-### Sprint 4 — Core Frontend 🎯
-> Мета: Orders views, деталі замовлення, імпорт CSV
+## Sprint 2 - Core Backend API
 
-| # | Задача | Файли | Складність | Статус |
-|---|--------|-------|------------|--------|
-| 4.1 | Status Tabs — групування 9 статусів у 5 табів | StatusTabs.tsx | Проста | [TODO] |
-| 4.2 | Orders Table (primary view) — smart table | OrdersTable.tsx | Складна | [TODO] |
-| 4.3 | Pipeline Board (secondary view) — канбан | PipelineBoard.tsx | Складна | [TODO] |
-| 4.4 | View Toggle — [📋 List] [◻️ Board] | ViewToggle.tsx | Проста | [TODO] |
-| 4.5 | Shop Orders Page — per-shop view | ShopOrdersPage.tsx | Проста | [TODO] |
-| 4.6 | Order Detail Panel (slide-over) | OrderDetailPanel.tsx | Складна | [TODO] |
-| 4.7 | CSV Import page | ImportPage.tsx | Складна | [TODO] |
-| 4.8 | Customers page | CustomersPage.tsx | Проста | [TODO] |
+Goal: complete the business API for shops, orders, imports, customers, attachments, and dashboard stats.
 
-**Результат**: повний workflow: import CSV → table/board view → inline status change → view details → upload mockup.
+Status: `DONE`
 
----
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S2-1 | Pydantic schemas for current models | `backend/schemas/` | DONE |
+| S2-2 | Shop CRUD with encrypted secret handling | `backend/routers/shops.py` | DONE |
+| S2-3 | Customer upsert logic | `backend/services/customer_service.py` | DONE |
+| S2-4 | Orders CRUD with filters and pagination | `backend/routers/orders.py` | DONE |
+| S2-5 | Order status transition validation and history | `backend/services/order_service.py` | DONE |
+| S2-6 | Etsy CSV parser | `backend/services/etsy_parser.py` | DONE |
+| S2-7 | Etsy import endpoint | `backend/routers/imports.py` | DONE |
+| S2-8 | Attachment storage and endpoints | `backend/services/file_storage.py`, `backend/routers/attachments.py` | DONE |
+| S2-9 | Customer endpoints | `backend/routers/customers.py` | DONE |
+| S2-10 | Dashboard stats API | `backend/routers/dashboard.py` | DONE |
+| S2-11 | CSV export | `backend/routers/orders.py` | DONE |
 
-### Sprint 5 — Dashboard, Archive & Management 📊
-> Мета: аналітика, архів, адмін-панелі
+Verification:
 
-| # | Задача | Файли | Складність | Статус |
-|---|--------|-------|------------|--------|
-| 5.1 | Dashboard: stat cards | DashboardPage.tsx | Проста | [TODO] |
-| 5.2 | Dashboard: revenue chart | RevenueChart.tsx | Складна | [TODO] |
-| 5.3 | Dashboard: shop breakdown | ShopBreakdownChart.tsx | Проста | [TODO] |
-| 5.4 | Dashboard: attention needed list | AttentionList.tsx | Проста | [TODO] |
-| 5.5 | Dashboard: recent activity | DashboardPage.tsx | Проста | [TODO] |
-| 5.6 | Archive page | ArchivePage.tsx | Проста | [TODO] |
-| 5.7 | Shops management | ShopsPage.tsx | Проста | [TODO] |
-| 5.8 | User management | UsersPage.tsx | Проста | [TODO] |
-| 5.9 | Settings page | SettingsPage.tsx | Проста | [TODO] |
+- backend endpoints should be manually testable through `/docs`
 
-**Результат**: повна CRM без AI — ready to use.
+## Sprint 3 - Frontend Shell
 
----
+Goal: establish auth flow, route shell, layout shell, and reusable frontend structure.
 
-### Sprint 6 — Integrations & MCP 🔌
-> Мета: зовнішні інтеграції + MCP server для AI-агента
+Status: `DONE`
 
-| # | Задача | Файли | Складність | Статус |
-|---|--------|-------|------------|--------|
-| 6.1 | Nova Poshta API client | backend/services/nova_poshta.py | Складна | [TODO] |
-| 6.2 | Shopify sync service + scheduler | backend/services/shopify_sync.py | Складна | [TODO] |
-| 6.3 | Manual sync trigger | backend/routers/shops.py | Проста | [TODO] |
-| 6.4 | Email service (aiosmtplib) | backend/services/email_service.py | Проста | [TODO] |
-| 6.5 | NP "Test connection" endpoint | backend/routers/shops.py | Проста | [TODO] |
-| 6.6 | MCP Server — read tools | backend/mcp_server.py | Складна | [TODO] |
-| 6.7 | MCP Server — NP tools | backend/mcp_server.py | Складна | [TODO] |
-| 6.8 | MCP Server — write tools | backend/mcp_server.py | Складна | [TODO] |
-| 6.9 | MCP auth & role checking | backend/mcp_server.py | Складна | [TODO] |
-| 6.10 | README.md — документація | root | Проста | [TODO] |
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S3-1 | Axios client with token refresh interceptor | `frontend/src/api/client.ts` | DONE |
+| S3-2 | Auth store and `useAuth` hook | `frontend/src/store/`, `frontend/src/hooks/` | DONE |
+| S3-3 | Login page module | `frontend/src/pages/LoginPage.tsx` | DONE |
+| S3-4 | App layout modules: sidebar, topbar, shell | `frontend/src/components/layout/` | DONE |
+| S3-5 | Protected route configuration | `frontend/src/App.tsx`, `frontend/src/components/auth/` | DONE |
+| S3-6 | Orders and shops data hooks with React Query | `frontend/src/api/`, `frontend/src/hooks/` | DONE |
+| S3-7 | Base UI primitives | `frontend/src/components/ui/` | DONE |
 
-**Результат**: Hermes (або будь-який MCP-клієнт) підключається до CRM і виконує операції. Shopify auto-sync працює. NP TTN створюються.
+Notes:
 
----
+- Protected route guards redirect unauthenticated users to `/login`.
+- Role-based route guards are active for owner/manager sections.
+- React Query is wired in `frontend/src/main.tsx` and used by shops/orders hooks.
 
-## Верифікація
+Verification:
 
-### Після кожного спрінту
-- Backend: Swagger UI manual testing
-- Frontend: візуальна перевірка в браузері
-- Docker: `docker compose up` працює без помилок
+- login route should render a real page module
+- unauthorized users should be redirected correctly
+- authenticated shell should resolve through protected routes
 
-### Фінальна верифікація
-- [ ] Login/logout всіх трьох ролей
-- [ ] Import Etsy CSV → замовлення з'являються на Kanban
-- [ ] Drag-and-drop зміна статусу з перевіркою дозволів
-- [ ] Order detail: всі секції, upload файлу, status history
-- [ ] Per-shop Kanban фільтрація
-- [ ] Dashboard: графіки, stats, attention list
-- [ ] Archive: таблиця, CSV export
-- [ ] MCP: підключення агента, виконання read/write tools
-- [ ] Role restrictions: designer бачить тільки свої замовлення
+## Sprint 4 - Core Frontend
 
----
+Goal: implement actual order workflows in the UI.
 
-## Поточний стан (Last Sync)
+Status: `NOT STARTED`
 
-> **Активний Спрінт**: Sprint 3 — Frontend Shell
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S4-1 | Status tabs for grouped order states | `StatusTabs.tsx` | TODO |
+| S4-2 | Smart orders table | `OrdersTable.tsx` | TODO |
+| S4-3 | Pipeline board | `PipelineBoard.tsx` | TODO |
+| S4-4 | List and board view toggle | `ViewToggle.tsx` | TODO |
+| S4-5 | Per-shop orders page | `ShopOrdersPage.tsx` | TODO |
+| S4-6 | Order detail panel | `OrderDetailPanel.tsx` | TODO |
+| S4-7 | CSV import page | `ImportPage.tsx` | TODO |
+| S4-8 | Customers page | `CustomersPage.tsx` | TODO |
 
-**Щойно завершено (Sprint 2 & Початок Sprint 3):**
-*   **Core Backend API (Sprint 2) виконано на 100%**. Працюють всі ендпоінти: orders, shops, customers, Etsy CSV imports, dashboard stats, file storage.
-*   Виправлені зауваження після Code Review: N+1 query (`customers.py`), безпека шляхів (`file_storage.py`), парсинг дат та підрахунок `total_price` (`etsy_parser.py`).
-*   **Відкрито Sprint 3 (Задачі 3.1 & 3.2)**: Налаштовано Axios клієнт (`client.ts`) для silent JWT token refresh. Реалізовано глобальний стейт через `zustand` (`authStore.ts`) та хук `useAuth`. Typescript збирається без помилок.
+Verification:
 
-**Наступні кроки для старту:**
-*   **Task 3.3**: Побудова `LoginPage.tsx` (Premium дизайн, Tailwind v4 + shadcn/ui).
-*   **Task 3.4**: Створення App Layout (`Sidebar.tsx`, `Topbar.tsx`, `AppLayout.tsx`).
+- import CSV -> orders appear in UI
+- smart table and pipeline board use the same order data source
+- status changes happen through inline controls, not drag-and-drop
+- order details expose items, notes, history, and attachments
+
+## Sprint 5 - Dashboard, Archive, Management
+
+Goal: finish analytics, archival view, and management screens.
+
+Status: `NOT STARTED`
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S5-1 | Dashboard stat cards | `DashboardPage.tsx` | TODO |
+| S5-2 | Revenue chart | `RevenueChart.tsx` | TODO |
+| S5-3 | Shop breakdown chart | `ShopBreakdownChart.tsx` | TODO |
+| S5-4 | Attention list | `AttentionList.tsx` | TODO |
+| S5-5 | Recent activity block | `DashboardPage.tsx` | TODO |
+| S5-6 | Archive page | `ArchivePage.tsx` | TODO |
+| S5-7 | Shops management page | `ShopsPage.tsx` | TODO |
+| S5-8 | User management page | `UsersPage.tsx` | TODO |
+| S5-9 | Settings page | `SettingsPage.tsx` | TODO |
+
+Verification:
+
+- dashboard renders stats from backend APIs
+- archive supports filtering and CSV export path
+- management pages enforce role restrictions
+
+## Sprint 6 - Integrations and MCP
+
+Goal: add external integrations and expose CRM operations through MCP.
+
+Status: `NOT STARTED`
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S6-1 | Nova Poshta API client | `backend/services/nova_poshta.py` | TODO |
+| S6-2 | Shopify sync service | `backend/services/shopify_sync.py` | TODO |
+| S6-3 | Scheduler for sync jobs | `backend/services/scheduler.py` | TODO |
+| S6-4 | Manual sync trigger | `backend/routers/shops.py` | TODO |
+| S6-5 | Email service | `backend/services/email_service.py` | TODO |
+| S6-6 | Nova Poshta connection test endpoint | `backend/routers/shops.py` | TODO |
+| S6-7 | MCP server read tools | `backend/mcp_server.py` | TODO |
+| S6-8 | MCP server write tools | `backend/mcp_server.py` | TODO |
+| S6-9 | MCP auth and role checks | `backend/mcp_server.py` | TODO |
+| S6-10 | Integration and MCP documentation | `README.md` | TODO |
+
+Verification:
+
+- MCP client can read CRM data
+- MCP client can perform controlled write operations
+- external integrations respect encrypted credentials and role restrictions
+
+## Next Action
+
+Primary next implementation step:
+
+- `S4-1` Build status tabs for grouped order states
+
+Follow-up after that:
+
+- `S4-2` Build smart orders table
+- `S4-3` Build pipeline board
+
+## Final Verification Checklist
+
+- [ ] Owner, manager, and designer auth flows work
+- [ ] Etsy CSV import produces orders visible in the UI
+- [ ] Orders can change status through inline UI controls
+- [ ] Order details show items, notes, attachments, and history
+- [ ] Per-shop orders view works
+- [ ] Dashboard renders analytics from backend data
+- [ ] Archive supports export flow
+- [ ] MCP integration works for read and write operations
+- [ ] Designer access is limited to assigned work
+
+## Worklog
+
+- `2026-04-20` Rewrote plan structure to separate stable context from execution state.
+- `2026-04-20` Normalized terminology around `smart table` and `pipeline board`.
+- `2026-04-20` Corrected outdated references to drag-and-drop and current filesystem state.
+- `2026-04-20` Completed Sprint 3 tasks S3-3 to S3-6 and verified frontend build.

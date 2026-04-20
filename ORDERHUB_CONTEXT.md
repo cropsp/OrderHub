@@ -1,65 +1,226 @@
-# OrderHub CRM — Core Project Context
+# OrderHub CRM - Core Project Context
 
-This document provides a comprehensive overview of the OrderHub project architecture, technical stack, core business logic, and fundamental design decisions. It serves as the primary context source for any developer or AI agent working on the codebase.
+## Purpose
 
----
+This file stores the stable project context for OrderHub:
 
-## 1. Project Overview & Tech Stack
+- product scope
+- architecture decisions
+- domain rules and invariants
+- security model
+- shared terminology
 
-**OrderHub** is a self-hosted Order Management CRM tailored for a handmade leather goods e-commerce business. It replaces a fragmented workflow (Etsy CSV → Google Sheets → Trello) with a unified, automated web application.
+This file should change rarely. Day-to-day execution status belongs in `implementation_plan.md`.
 
-*   **Backend**: Python 3.12, FastAPI, SQLAlchemy 2.0 (async), PostgreSQL 16.
-*   **Frontend**: React 19, TypeScript, Vite, TailwindCSS v4, React Router, React Query.
-*   **Infrastructure**: Dockerized environment with dedicated `docker-compose.yml` (production via Nginx) and `docker-compose.dev.yml` (with volumes and HMR). Database migrations are handled automatically via Alembic on container startup (`entrypoint.sh`).
+## Product Summary
 
----
+OrderHub is a self-hosted CRM for managing orders in a handmade leather goods business.
 
-## 2. Key Architectural Decisions
+Primary workflow being replaced:
 
-1.  **AI Integration via MCP (Model Context Protocol)**
-    *   *Decision*: We fundamentally rejected the idea of embedding an AI Chat UI and LLM runner directly inside the CRM.
-    *   *Implementation*: The API exposes an **MCP Server**. All CRM operations (changing statuses, creating shipping labels, reading orders) are exposed as standard MCP Tools. Any external AI Agent (like a local Hermes model via llama.cpp or Claude Desktop) connects to this server. This strictly separates the CRM business logic from the AI provider layer.
+`Etsy CSV -> Google Sheets -> Trello -> manual follow-up`
 
-2.  **Hybrid Order Visualization UI**
-    *   *Decision*: A traditional 9-column Kanban board was deemed too bulky for daily operations.
-    *   *Implementation*: The UI relies on a **Hybrid View**.
-        *   **Primary View**: A Smart Data Table with inline status dropdowns.
-        *   **Secondary View**: A Pipeline Board (visual columns, no drag-and-drop).
-        *   The 9 distinct order statuses are grouped into **5 logical tabs/filters**: `New`, `Awaiting`, `Design`, `Production`, and `Shipping`.
+Target outcome:
 
-3.  **Financials & Revenue Tracking**
-    *   *Decision*: No automatic currency conversion MVP.
-    *   *Implementation*: Original currencies (`USD`, `EUR`, `GBP`) are preserved throughout the database. Revenue dashboards render separate charts/totals per currency. Order logic includes a custom `platform_fee` to accurately track Etsy/Shopify deductions.
+`single web app -> tracked orders -> controlled status workflow -> attachments -> analytics -> external AI access through MCP`
 
-4.  **Customer & Address Data Model**
-    *   *Decision*: Address data changes frequently and belongs to the purchase, not just the user.
-    *   *Implementation*: Shipping addresses and recipient phone numbers are denormalized and stored directly on the `Order` model. The `Customer` model is kept lightweight (primarily used for contact linking and historical grouping via email upserts).
+## Current Delivery Snapshot
 
----
+Last reviewed: `2026-04-20`
 
-## 3. Database Schema & Business Logic
+- Backend foundation and core REST API are present in the repository.
+- Frontend infrastructure is present, but the product UI is still in early shell state.
+- Authentication plumbing exists on both backend and frontend.
+- AI integration is intended through an MCP server, but the MCP implementation is not yet in the repository.
 
-All entities use `UUID` primary keys and include `created_at`/`updated_at` timestamps.
+## Technical Stack
 
-*   **User**: Roles dictate access (`owner` has full access, `manager` cannot see financials/API keys, `designer` only sees assigned items). Safety guards prevent deactivating the last active `owner`.
-*   **Shop**: Integrates with `etsy` and `shopify`. 
-    *   *Security*: All third-party secrets (Shopify Tokens, Nova Poshta API Keys) are encrypted at rest in PostgreSQL using the **Fernet** algorithm. They are decrypted only in backend memory.
-*   **Order & OrderItem**: 
-    *   `quantity` and `unit_price` exist solely on `OrderItem` (as Etsy orders may contain multiple distinct items). 
-    *   Orders are strictly unique by the composite constraint: `UNIQUE(external_id, shop_id)`.
-*   **Status Workflow**: 
-    *   The backend enforces a strict transition matrix: `new` → `waiting_info` / `info_received` / `design_pending` / `in_production` → `shipped` → `completed`. Orders can be transitioned to `cancelled` at any stage.
-*   **OrderStatusHistory**: An immutable audit log table tracks every status change, recording the user who made the change and the timestamp.
+- Backend: Python 3.12, FastAPI, SQLAlchemy 2 async, PostgreSQL 16
+- Frontend: React 19, TypeScript, Vite, TailwindCSS v4, React Router, React Query, Zustand
+- Infrastructure: Docker, Docker Compose, Alembic
+- AI integration strategy: MCP server, not embedded chat UI
 
----
+## Architecture Decisions
 
-## 4. Authentication & Security Model
+### 1. AI integration
 
-The system uses a robust, cookie-based JWT strategy:
+OrderHub does not embed a first-party chat UI or direct LLM provider runner inside the CRM.
 
-*   **Passwords**: Hashed via `bcrypt`. Owners can create users and an auto-generated temporary password is returned exactly once in the API response.
-*   **Access Token**: 15-minute expiration, sent in the `Authorization: Bearer <token>` header.
-*   **Refresh Token**: 30-day expiration. Stored and transmitted **strictly via `httpOnly` secure cookies** with `SameSite=Strict`. This eliminates the risk of XSS token theft.
-*   **Token Rotation**: Every time a refresh token is used, a new one is issued and the old one is invalidated via cookie replacement. 
-*   **Axios Interceptor**: The frontend uses a custom Axios client that catches `401 Unauthorized` responses, queues any parallel requests, silently refreshes the token using the cookie, and then replays the queued requests seamlessly.
+Instead:
 
+- the backend exposes CRM capabilities as MCP tools
+- external AI agents connect to the CRM through MCP
+- CRM business logic stays independent from model vendor logic
+
+### 2. Order visualization
+
+The intended UI is hybrid:
+
+- primary view: smart table with inline status changes
+- secondary view: pipeline board for visual overview
+
+Drag-and-drop is intentionally out of scope. Status changes should happen through explicit controls, not card dragging.
+
+### 3. Financials
+
+- currencies are stored as original values
+- no automatic FX conversion in MVP
+- revenue is tracked per currency
+- platform fees are stored explicitly on the order
+
+### 4. Customer and address modeling
+
+- customer identity is lightweight and primarily keyed by contact data
+- shipping address belongs to the order, not only to the customer
+- customer grouping is historical and based on upsert-by-email behavior
+
+## Domain Invariants
+
+### Users
+
+- roles: `owner`, `manager`, `designer`
+- `owner` has full access
+- `manager` has restricted access to sensitive financial and integration data
+- `designer` should only see assigned operational work
+- the system must not allow deactivating the last active owner
+
+### Shops
+
+- supported platforms: `etsy`, `shopify`
+- third-party secrets must be encrypted at rest
+- decrypted tokens should exist only in backend memory
+
+### Orders
+
+- primary key: UUID
+- uniqueness: `(external_id, shop_id)`
+- `quantity` and `unit_price` belong to `OrderItem`, not `Order`
+- `platform_fee` is a first-class financial field on `Order`
+- shipping recipient data is stored directly on `Order`
+- status changes must be validated server-side
+- every status transition must be written to immutable history
+
+### Order statuses
+
+Canonical statuses:
+
+- `new`
+- `waiting_info`
+- `info_received`
+- `design_pending`
+- `design_ready`
+- `in_production`
+- `shipped`
+- `completed`
+- `cancelled`
+
+Logical UI grouping:
+
+- `New`
+- `Awaiting`
+- `Design`
+- `Production`
+- `Shipping`
+
+The grouped labels are a UI concern. The canonical status values above are the source of truth.
+
+## Security Model
+
+### Authentication
+
+- access token: JWT in `Authorization` header
+- refresh token: `httpOnly` cookie
+- refresh token rotation is required
+- frontend silently refreshes and replays queued requests on `401`
+
+### Passwords
+
+- passwords are hashed with `bcrypt`
+- temporary passwords may be returned once at user creation time
+
+### Sensitive data
+
+- shop tokens and carrier credentials must be encrypted at rest
+- role checks must be enforced in backend handlers and services
+
+## Backend Boundaries
+
+Current backend scope already present in the repository:
+
+- auth
+- users
+- shops
+- orders
+- imports
+- customers
+- attachments
+- dashboard
+
+Planned but not yet present in the repository:
+
+- `mcp_server.py`
+- `shopify_sync.py`
+- `scheduler.py`
+- `email_service.py`
+- `nova_poshta.py`
+
+## Frontend Boundaries
+
+Current frontend scope already present in the repository:
+
+- app bootstrap
+- router shell
+- auth API client
+- auth store and hook
+- base UI primitives
+
+Planned but not yet present in the repository:
+
+- dedicated page modules
+- app layout modules
+- orders table and pipeline views
+- import workflow UI
+- dashboard UI
+- archive and management pages
+
+## Terminology
+
+Use these terms consistently:
+
+- `smart table` for the primary orders view
+- `pipeline board` for the secondary visual board
+- `inline status change` for status updates from UI controls
+- `per-shop orders page` instead of `per-shop kanban`
+- `order detail panel` for the slide-over order details UI
+
+Avoid mixing `kanban`, `board`, and `pipeline` as if they are separate planned features unless the distinction matters.
+
+## Documentation Rules
+
+### `ORDERHUB_CONTEXT.md`
+
+Keep only stable truth here:
+
+- architecture
+- product rules
+- security model
+- domain invariants
+- terminology
+
+### `implementation_plan.md`
+
+Keep operational data there:
+
+- sprint breakdown
+- task status
+- next actions
+- known gaps between plan and codebase
+- verification notes
+
+### If a third document is later added
+
+Recommended optional additions:
+
+- `DECISIONS.md` or `docs/adr/` for important architecture decisions
+- `worklog.md` for dated progress notes
+- `risks.md` for technical debt and known implementation risks

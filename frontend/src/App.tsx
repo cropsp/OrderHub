@@ -1,43 +1,91 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 
-function LoginPage() {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="glass rounded-xl p-8 w-full max-w-md animate-fade-in">
-        <h1 className="text-2xl font-bold text-center mb-2">OrderHub</h1>
-        <p className="text-center mb-6" style={{ color: 'var(--color-text-secondary)' }}>
-          Order Management CRM
-        </p>
-        <p className="text-center" style={{ color: 'var(--color-text-muted)' }}>
-          Login page — coming in Sprint 3
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function DashboardPlaceholder() {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="glass rounded-xl p-8 animate-fade-in text-center">
-        <h1 className="text-3xl font-bold mb-2">🚀 OrderHub CRM</h1>
-        <p style={{ color: 'var(--color-text-secondary)' }}>
-          Backend is running. Frontend shell ready.
-        </p>
-        <p className="mt-4 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          Sprint 1 — Foundation complete
-        </p>
-      </div>
-    </div>
-  )
-}
+import { RequireAuth, RequireRole } from '@/components/auth/RouteGuards'
+import LoginPage from '@/pages/LoginPage'
+import DashboardPage from '@/pages/DashboardPage'
+import FeaturePlaceholderPage from '@/pages/FeaturePlaceholderPage'
+import { UserRole } from '@/types/user'
 
 function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/dashboard" element={<DashboardPlaceholder />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      <Route element={<LoginPage />} path="/login" />
+
+      <Route element={<RequireAuth />}>
+        <Route element={<DashboardPage />} path="/dashboard" />
+
+        <Route
+          element={
+            <FeaturePlaceholderPage
+              description="Smart table and board views are planned in Sprint 4."
+              title="Orders"
+            />
+          }
+          path="/orders"
+        />
+        <Route
+          element={
+            <FeaturePlaceholderPage
+              description="Per-shop order views are planned in Sprint 4."
+              title="Shop Orders"
+            />
+          }
+          path="/shops/:shopId/orders"
+        />
+        <Route
+          element={
+            <FeaturePlaceholderPage
+              description="Profile and password controls continue in Sprint 5."
+              title="Settings"
+            />
+          }
+          path="/settings"
+        />
+
+        <Route element={<RequireRole allowedRoles={[UserRole.OWNER, UserRole.MANAGER]} />}>
+          <Route
+            element={
+              <FeaturePlaceholderPage
+                description="CSV import flow is planned in Sprint 4."
+                title="Imports"
+              />
+            }
+            path="/imports"
+          />
+          <Route
+            element={
+              <FeaturePlaceholderPage
+                description="Archive list and export UX are planned in Sprint 5."
+                title="Archive"
+              />
+            }
+            path="/archive"
+          />
+        </Route>
+
+        <Route element={<RequireRole allowedRoles={[UserRole.OWNER]} />}>
+          <Route
+            element={
+              <FeaturePlaceholderPage
+                description="Shop management UI is planned in Sprint 5."
+                title="Shops"
+              />
+            }
+            path="/shops"
+          />
+          <Route
+            element={
+              <FeaturePlaceholderPage
+                description="User management UI is planned in Sprint 5."
+                title="Users"
+              />
+            }
+            path="/users"
+          />
+        </Route>
+      </Route>
+
+      <Route element={<Navigate replace to="/dashboard" />} path="*" />
     </Routes>
   )
 }
