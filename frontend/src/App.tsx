@@ -1,15 +1,27 @@
+import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { RequireAuth, RequireRole } from '@/components/auth/RouteGuards'
 import LoginPage from '@/pages/LoginPage'
-import DashboardPage from '@/pages/DashboardPage'
-import OrdersPage from '@/pages/OrdersPage'
-import ShopsPage from '@/pages/ShopsPage'
-import UsersPage from '@/pages/UsersPage'
+import ShopOrdersPage from '@/pages/ShopOrdersPage'
 import ArchivePage from '@/pages/ArchivePage'
 import ImportsPage from '@/pages/ImportsPage'
-import FeaturePlaceholderPage from '@/pages/FeaturePlaceholderPage'
 import { UserRole } from '@/types/user'
+
+const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const OrdersPage = lazy(() => import('@/pages/OrdersPage'))
+const CustomersPage = lazy(() => import('@/pages/CustomersPage'))
+const ShopsPage = lazy(() => import('@/pages/ShopsPage'))
+const UsersPage = lazy(() => import('@/pages/UsersPage'))
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+
+function RouteLoadingFallback() {
+  return (
+    <div className="flex min-h-[45vh] items-center justify-center rounded-xl border border-slate-800/60 bg-slate-900/30">
+      <p className="text-sm text-slate-400">Loading page...</p>
+    </div>
+  )
+}
 
 function App() {
   return (
@@ -17,24 +29,37 @@ function App() {
       <Route element={<LoginPage />} path="/login" />
 
       <Route element={<RequireAuth />}>
-        <Route element={<DashboardPage />} path="/dashboard" />
-
-        <Route element={<OrdersPage />} path="/orders" />
         <Route
           element={
-            <FeaturePlaceholderPage
-              description="Per-shop order views are planned in Sprint 4."
-              title="Shop Orders"
-            />
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <DashboardPage />
+            </Suspense>
           }
-          path="/shops/:shopId/orders"
+          path="/dashboard"
+        />
+
+        <Route
+          element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <OrdersPage />
+            </Suspense>
+          }
+          path="/orders"
         />
         <Route
           element={
-            <FeaturePlaceholderPage
-              description="Profile and password controls continue in Sprint 5."
-              title="Settings"
-            />
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <CustomersPage />
+            </Suspense>
+          }
+          path="/customers"
+        />
+        <Route element={<ShopOrdersPage />} path="/shops/:shopId/orders" />
+        <Route
+          element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <SettingsPage />
+            </Suspense>
           }
           path="/settings"
         />
@@ -45,8 +70,22 @@ function App() {
         </Route>
 
         <Route element={<RequireRole allowedRoles={[UserRole.OWNER]} />}>
-          <Route element={<ShopsPage />} path="/shops" />
-          <Route element={<UsersPage />} path="/users" />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <ShopsPage />
+              </Suspense>
+            }
+            path="/shops"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <UsersPage />
+              </Suspense>
+            }
+            path="/users"
+          />
         </Route>
       </Route>
 

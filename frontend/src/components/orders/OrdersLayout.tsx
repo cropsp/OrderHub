@@ -6,8 +6,14 @@ import ViewToggle from './ViewToggle';
 import OrdersTable from './OrdersTable';
 import PipelineBoard from './PipelineBoard';
 import OrderDetailPanel from './OrderDetailPanel';
+import type { OrderListFilters } from '@/types/order';
 
-export default function OrdersLayout({ isArchive = false }: { isArchive?: boolean }) {
+type OrdersLayoutProps = {
+  isArchive?: boolean;
+  fixedShopId?: string;
+};
+
+export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersLayoutProps) {
   const categories = isArchive ? ARCHIVE_CATEGORIES : STATUS_CATEGORIES;
   
   // 1. View State (Table or Board)
@@ -23,9 +29,12 @@ export default function OrdersLayout({ isArchive = false }: { isArchive?: boolea
   const currentCategory = categories.find(c => c.id === activeCategoryId) || categories[0];
   
   // 5. Fetch data
-  const { data, isLoading } = useOrders({ 
-    status: currentCategory.statuses[0] as any 
-  });
+  const filters: OrderListFilters = {
+    status: currentCategory.statuses[0],
+    ...(fixedShopId ? { shop_id: fixedShopId } : {}),
+  };
+
+  const { data, isLoading } = useOrders(filters);
 
   const orders = data?.items ?? [];
 

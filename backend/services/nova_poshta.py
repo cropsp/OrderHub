@@ -2,6 +2,8 @@
 OrderHub CRM — Nova Poshta Service
 """
 
+from datetime import datetime
+
 import httpx
 
 NP_API_URL = "https://api.novaposhta.ua/v2.0/json/"
@@ -75,7 +77,7 @@ def build_ttn_payload(
     return {
         "PayerType": "Sender",
         "PaymentMethod": "Cash",
-        "DateTime": "TODO",  # Would be set to today formatted DD.MM.YYYY
+        "DateTime": datetime.now().strftime("%d.%m.%Y"),
         "CargoType": "Parcel",
         "VolumeGeneral": str(0.01),  # Default volume
         "Weight": str(weight),

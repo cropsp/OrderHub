@@ -42,6 +42,13 @@ const navItems: NavItem[] = [
     roles: [UserRole.OWNER, UserRole.MANAGER, UserRole.DESIGNER],
   },
   {
+    key: 'customers',
+    label: 'Customers',
+    to: '/customers',
+    icon: Users,
+    roles: [UserRole.OWNER, UserRole.MANAGER, UserRole.DESIGNER],
+  },
+  {
     key: 'imports',
     label: 'Imports',
     to: '/imports',

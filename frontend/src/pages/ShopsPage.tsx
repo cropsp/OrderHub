@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from 'react';
 import { 
   Plus, 
   Settings2, 
@@ -6,7 +7,7 @@ import {
   AlertCircle,
   RefreshCw
 } from 'lucide-react';
-import { useShops, useDeleteShop, useSyncShop } from '@/hooks/useShops';
+import { useCreateShop, useShops, useDeleteShop, useSyncShop } from '@/hooks/useShops';
 import ShellPage from './ShellPage';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,16 +21,99 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useAuth } from '@/hooks/useAuth';
+import type { ShopPlatform } from '@/types/common';
 import { cn } from '@/lib/utils';
+
+function getErrorMessage(error: unknown) {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response?: { data?: { detail?: string } } }).response;
+    return response?.data?.detail ?? 'Request failed';
+  }
+
+  if (error instanceof Error) return error.message;
+  return 'Request failed';
+}
 
 export default function ShopsPage() {
   const { user } = useAuth();
   const { data: shops, isLoading, error } = useShops();
+  const createShop = useCreateShop();
   const deleteShop = useDeleteShop();
   const syncShop = useSyncShop();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [newShop, setNewShop] = useState({
+    name: '',
+    platform: 'etsy' as ShopPlatform,
+    color: '#14b8a6',
+    shopify_store_url: '',
+    shopify_access_token: '',
+  });
   
   const isOwner = user?.role === 'owner';
+
+  const resetCreateForm = () => {
+    setCreateError(null);
+    setNewShop({
+      name: '',
+      platform: 'etsy',
+      color: '#14b8a6',
+      shopify_store_url: '',
+      shopify_access_token: '',
+    });
+  };
+
+  const handleCreateShop = async (event: FormEvent) => {
+    event.preventDefault();
+    setCreateError(null);
+
+    const name = newShop.name.trim();
+    if (!name) {
+      setCreateError('Store name is required.');
+      return;
+    }
+
+    const payload: Record<string, unknown> = {
+      name,
+      platform: newShop.platform,
+      color: newShop.color || '#14b8a6',
+      is_active: true,
+    };
+
+    if (newShop.platform === 'shopify') {
+      if (newShop.shopify_store_url.trim()) {
+        payload.shopify_store_url = newShop.shopify_store_url.trim();
+      }
+      if (newShop.shopify_access_token.trim()) {
+        payload.shopify_access_token = newShop.shopify_access_token.trim();
+      }
+    }
+
+    try {
+      await createShop.mutateAsync(payload);
+      setIsCreateOpen(false);
+      resetCreateForm();
+    } catch (createErr) {
+      setCreateError(getErrorMessage(createErr));
+    }
+  };
 
   if (error) {
     return (
@@ -46,11 +130,116 @@ export default function ShopsPage() {
       title="Shop Management"
       description="Connect and manage your Etsy and Shopify stores."
     >
+      <Dialog
+        open={isCreateOpen}
+        onOpenChange={(open) => {
+          setIsCreateOpen(open);
+          if (!open) resetCreateForm();
+        }}
+      >
+        <DialogContent className="max-w-md border-slate-800 bg-slate-950 text-slate-100">
+          <DialogHeader>
+            <DialogTitle>Add New Store</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Create a shop record and optionally configure Shopify access.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form className="space-y-4" onSubmit={handleCreateShop}>
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Store Name</p>
+              <Input
+                className="border-slate-700 bg-slate-900/50"
+                placeholder="LeatherCraft Boutique"
+                value={newShop.name}
+                onChange={(event) => setNewShop((prev) => ({ ...prev, name: event.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Platform</p>
+              <Select
+                value={newShop.platform}
+                onValueChange={(value) => setNewShop((prev) => ({ ...prev, platform: value as ShopPlatform }))}
+              >
+                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-slate-800 bg-slate-900">
+                  <SelectItem value="etsy">ETSY</SelectItem>
+                  <SelectItem value="shopify">SHOPIFY</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Color</p>
+              <Input
+                className="h-10 border-slate-700 bg-slate-900/50 p-2"
+                type="color"
+                value={newShop.color}
+                onChange={(event) => setNewShop((prev) => ({ ...prev, color: event.target.value }))}
+              />
+            </div>
+
+            {newShop.platform === 'shopify' && (
+              <>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Store URL</p>
+                  <Input
+                    className="border-slate-700 bg-slate-900/50"
+                    placeholder="https://your-store.myshopify.com"
+                    value={newShop.shopify_store_url}
+                    onChange={(event) => setNewShop((prev) => ({ ...prev, shopify_store_url: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Access Token</p>
+                  <Input
+                    className="border-slate-700 bg-slate-900/50"
+                    placeholder="shpat_..."
+                    value={newShop.shopify_access_token}
+                    onChange={(event) => setNewShop((prev) => ({ ...prev, shopify_access_token: event.target.value }))}
+                  />
+                </div>
+              </>
+            )}
+
+            {createError && (
+              <p className="rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">
+                {createError}
+              </p>
+            )}
+
+            <DialogFooter className="border-slate-800 bg-slate-900/40">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
+                onClick={() => setIsCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="bg-teal-600 text-white hover:bg-teal-500"
+                disabled={createShop.isPending}
+              >
+                {createShop.isPending ? 'Creating...' : 'Create Store'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-200">Integrated Stores</h2>
           {isOwner && (
-            <Button className="bg-teal-600 hover:bg-teal-500 text-white">
+            <Button
+              className="bg-teal-600 hover:bg-teal-500 text-white"
+              onClick={() => setIsCreateOpen(true)}
+            >
               <Plus className="mr-2 h-4 w-4" /> Add Store
             </Button>
           )}

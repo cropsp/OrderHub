@@ -28,10 +28,10 @@ Target outcome:
 
 Last reviewed: `2026-04-20`
 
-- Backend foundation and core REST API are present in the repository.
-- Frontend infrastructure is present, but the product UI is still in early shell state.
+- Backend foundation, core REST API, MCP endpoints, and sync services are present in the repository.
+- Frontend infrastructure and primary product UI modules are present in the repository, including dedicated Customers, Settings, and dashboard intelligence sections.
 - Authentication plumbing exists on both backend and frontend.
-- AI integration is intended through an MCP server, but the MCP implementation is not yet in the repository.
+- AI integration is exposed through backend MCP endpoints for external agent access.
 
 ## Technical Stack
 
@@ -159,10 +159,7 @@ Current backend scope already present in the repository:
 Planned but not yet present in the repository:
 
 - `mcp_server.py`
-- `shopify_sync.py`
-- `scheduler.py`
 - `email_service.py`
-- `nova_poshta.py`
 
 ## Frontend Boundaries
 
@@ -173,15 +170,16 @@ Current frontend scope already present in the repository:
 - auth API client
 - auth store and hook
 - base UI primitives
-
-Planned but not yet present in the repository:
-
 - dedicated page modules
 - app layout modules
 - orders table and pipeline views
 - import workflow UI
 - dashboard UI
 - archive and management pages
+
+Planned but not yet present in the repository:
+
+- deeper automation modules beyond current scope (for example dedicated outbound email workflows)
 
 ## Terminology
 
