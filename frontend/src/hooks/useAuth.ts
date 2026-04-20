@@ -9,8 +9,8 @@ export function useAuth() {
   const initRef = useRef(false);
 
   const initAuth = useCallback(async () => {
-    // Prevent double initialization in strict mode
-    if (initRef.current) return;
+    // If we're already loading or already have a user, don't re-init
+    if (initRef.current || isAuthenticated || (isLoading && user)) return;
     initRef.current = true;
     
     setLoading(true);

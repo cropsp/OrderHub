@@ -2,7 +2,8 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { RequireAuth, RequireRole } from '@/components/auth/RouteGuards'
 import LoginPage from '@/pages/LoginPage'
-import DashboardPage from '@/pages/DashboardPage'
+import DashBoardPage from '@/pages/DashboardPage'
+import OrdersPage from '@/pages/OrdersPage'
 import FeaturePlaceholderPage from '@/pages/FeaturePlaceholderPage'
 import { UserRole } from '@/types/user'
 
@@ -12,17 +13,9 @@ function App() {
       <Route element={<LoginPage />} path="/login" />
 
       <Route element={<RequireAuth />}>
-        <Route element={<DashboardPage />} path="/dashboard" />
+        <Route element={<DashBoardPage />} path="/dashboard" />
 
-        <Route
-          element={
-            <FeaturePlaceholderPage
-              description="Smart table and board views are planned in Sprint 4."
-              title="Orders"
-            />
-          }
-          path="/orders"
-        />
+        <Route element={<OrdersPage />} path="/orders" />
         <Route
           element={
             <FeaturePlaceholderPage

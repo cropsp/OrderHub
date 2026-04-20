@@ -12,4 +12,9 @@ export const ordersApi = {
     const { data } = await client.get<OrderListItem>(`/orders/${orderId}`)
     return data
   },
-}
+
+  updateStatus: async (orderId: string, status: string): Promise<OrderListItem> => {
+    const { data } = await client.patch<OrderListItem>(`/orders/${orderId}/status`, { status })
+    return data
+  },
+};
