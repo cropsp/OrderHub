@@ -15,17 +15,22 @@ from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping
 )
 
+from logger import setup_logging, get_logger
 from scheduler import start_scheduler
+
+# Initialize logging before anything else
+setup_logging()
+logger = get_logger("main")
 
 settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
-    print("=== OrderHub CRM starting ===")
+    logger.info("=== OrderHub CRM starting ===")
     start_scheduler()
     yield
-    print("=== OrderHub CRM shutting down ===")
+    logger.info("=== OrderHub CRM shutting down ===")
 
 
 app = FastAPI(
