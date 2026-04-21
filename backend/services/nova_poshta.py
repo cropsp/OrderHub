@@ -5,6 +5,10 @@ OrderHub CRM — Nova Poshta Service
 from datetime import datetime
 
 import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+import logging
+
+logger = logging.getLogger(__name__)
 
 NP_API_URL = "https://api.novaposhta.ua/v2.0/json/"
 
@@ -12,6 +16,13 @@ class NovaPoshtaClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((httpx.HTTPError, Exception)),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True
+    )
     async def _post(self, model_name: str, called_method: str, method_properties: dict) -> dict:
         payload = {
             "apiKey": self.api_key,
@@ -19,7 +30,7 @@ class NovaPoshtaClient:
             "calledMethod": called_method,
             "methodProperties": method_properties
         }
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(NP_API_URL, json=payload)
             response.raise_for_status()
             data = response.json()

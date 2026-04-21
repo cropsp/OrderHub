@@ -23,7 +23,6 @@ import {
   DialogTitle,
   DialogDescription
 } from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -69,8 +68,7 @@ function BentoCard({ children, className, title, icon: Icon }: { children: React
 }
 
 export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
-  const { data, isLoading } = useOrder(orderId);
-  const order = data as any as import('@/types/order').OrderDetail | undefined;
+  const { data: order, isLoading, dataUpdatedAt } = useOrder(orderId);
   const { user } = useAuth();
   const updateOrder = useUpdateOrder();
   const [internalNote, setInternalNote] = useState('');
@@ -126,6 +124,19 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
         setSaveStatus('error');
       }
     }
+  };
+
+  const handleGenerateTTN = () => {
+    if (!order) return;
+    
+    // Backend extracts recipient details (name, phone, city) directly from the order
+    createTTN.mutate({ 
+      orderId: order.id, 
+      data: {
+        weight: 0.5, 
+        description: `Order #${order.external_id}: ${order.title.substring(0, 50)}`
+      } 
+    });
   };
 
   const isOpen = Boolean(orderId);
@@ -194,7 +205,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                      </span>
                    </div>
                    <p className="text-[10px] text-slate-600 font-medium">
-                     Last refetched at {format(new Date(), 'HH:mm:ss')}
+                     Last refetched at {format(dataUpdatedAt, 'HH:mm:ss')}
                    </p>
                 </div>
                 <Separator orientation="vertical" className="h-10 bg-white/[0.05]" />
@@ -360,7 +371,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                                   className="w-full py-6 rounded-2xl bg-slate-900 border-slate-800 hover:bg-slate-800 text-teal-500 font-bold tracking-tight"
                                   variant="outline"
                                   disabled={createTTN.isPending}
-                                  onClick={() => createTTN.mutate({ orderId: order.id, data: {} })}
+                                  onClick={handleGenerateTTN}
                                 >
                                   {createTTN.isPending ? 'Connecting NP...' : 'Generate Shipping Label (NP)'}
                                 </Button>

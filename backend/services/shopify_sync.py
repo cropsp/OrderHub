@@ -6,6 +6,10 @@ Pulls orders from Shopify and upserts them into OrderHub.
 import httpx
 from datetime import datetime, timezone
 import uuid
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,6 +21,13 @@ from schemas.order import OrderCreate
 from services.order_service import create_order
 from services.encryption_service import decrypt_value
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((httpx.HTTPError, Exception)),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True
+)
 async def fetch_shopify_orders(shop_url: str, access_token: str, limit: int = 50) -> list[dict]:
     """Fetch recent orders from Shopify Admin API."""
     url = f"{shop_url.rstrip('/')}/admin/api/2024-01/orders.json"
@@ -26,15 +37,17 @@ async def fetch_shopify_orders(shop_url: str, access_token: str, limit: int = 50
     }
     params = {"status": "any", "limit": limit}
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             return response.json().get("orders", [])
         except httpx.HTTPStatusError as e:
             # Handle specific API errors
+            logger.error(f"Shopify Sync Error: {e.response.status_code} - {e.response.text}")
             raise Exception(f"Shopify Sync Error: {e.response.status_code}")
         except Exception as e:
+            logger.exception("Shopify Sync failed")
             raise Exception(f"Shopify Sync failed: {str(e)}")
 
 async def sync_shop_orders(db: AsyncSession, shop: Shop, system_user):

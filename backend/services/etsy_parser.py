@@ -29,21 +29,35 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
     imported = 0
     skipped = 0
     errors = []
+    total_processed_rows = 0
     
     # Group rows by Sale ID
     orders_data: Dict[str, list[Dict[str, Any]]] = {}
+    rows_map: Dict[str, list[int]] = {}  # sale_id -> list of row numbers
     
     for row_num, row in enumerate(csv_reader, start=2): # +1 for header, +1 for 0-index
-        sale_id = row.get("Sale ID")
+        total_processed_rows += 1
+        sale_id = row.get("Sale ID") or row.get("Order ID")
         if not sale_id:
-            errors.append({"row": row_num, "error": "Missing 'Sale ID' column/value"})
+            errors.append({"row": row_num, "error": "Missing 'Sale ID' or 'Order ID' column/value"})
             continue
             
         if sale_id not in orders_data:
             orders_data[sale_id] = []
+            rows_map[sale_id] = []
         orders_data[sale_id].append(row)
+        rows_map[sale_id].append(row_num)
+        
+    # Failure threshold check (BE-3 audit requirement)
+    if total_processed_rows > 0 and (len(errors) / total_processed_rows) > 0.2:
+        return ImportResult(
+            imported=0, 
+            skipped=0, 
+            errors=[{"error": f"Import aborted: {len(errors)}/{total_processed_rows} rows have format errors (>20% threshold)"}]
+        )
         
     for sale_id, rows in orders_data.items():
+        row_nums = rows_map.get(sale_id, [])
         try:
             # Check for duplicates based on external_id and shop_id
             existing = await db.execute(
@@ -56,24 +70,30 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
             # First row contains the order-level information
             primary_row = rows[0]
             
-            # Handle Date (Format: MM/DD/YY or similar in Etsy, depends on locale but usually standard)
-            date_str = primary_row.get("Sale Date")
-            try:
-                # Assuming generic M/D/y format from Etsy. Need strict parsing in prod.
-                ordered_at = datetime.strptime(date_str, "%m/%d/%y").replace(tzinfo=timezone.utc)
-            except (ValueError, TypeError):
-                 # Fallback to now if parse fails, or log it
-                 ordered_at = datetime.now(timezone.utc)
+            # Handle Date (Multiple formats fallback)
+            date_str = primary_row.get("Sale Date", "")
+            ordered_at = None
+            date_formats = ["%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d"]
+            for fmt in date_formats:
+                try:
+                    ordered_at = datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+                    break
+                except (ValueError, TypeError):
+                    continue
+            
+            if not ordered_at:
+                logger.warning(f"Invalid date format for Sale ID {sale_id}: {date_str}. Using current date.")
+                ordered_at = datetime.now(timezone.utc)
                  
             # Customer
-            email = primary_row.get("Buyer Email", "").strip() or f"unknown_{sale_id}@example.com"
+            email = primary_row.get("Buyer Email", "").strip() or f"order_{sale_id}@etsy.internal"
             customer_name = primary_row.get("Buyer", "Unknown Buyer").strip()
             country = primary_row.get("Ship Country", "US").strip()[:2] # Best effort
             
             customer = await upsert_customer(db, email, customer_name, country)
             
             # The total order price is typically listed on every row identically
-            total_price = float(primary_row.get("Order Total", 0) or 0)
+            total_price = float(primary_row.get("Order Total") or primary_row.get("Item Total") or 0)
             
             # Create Order
             order = Order(
@@ -130,7 +150,7 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
 
         except Exception as e:
             logger.exception(f"Error importing sale_id {sale_id}")
-            errors.append({"sale_id": sale_id, "error": str(e)})
+            errors.append({"sale_id": sale_id, "rows": row_nums, "error": str(e)})
 
     await db.flush() # Caller commits
 

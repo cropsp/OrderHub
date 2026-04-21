@@ -25,6 +25,7 @@ Thumbs.db
 
 # Uploads (Docker volume)
 backend/uploads/
+orderhub_data/
 
 # Logs
 *.log

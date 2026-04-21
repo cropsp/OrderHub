@@ -39,32 +39,41 @@ export const STATUS_CATEGORIES: StatusCategory[] = [
     color: 'teal',
   },
   {
-    id: 'awaiting',
-    label: 'Awaiting',
-    statuses: [ORDER_STATUS.WAITING_INFO, ORDER_STATUS.INFO_RECEIVED],
+    id: 'waiting_info',
+    label: 'Waiting Info',
+    statuses: [ORDER_STATUS.WAITING_INFO],
     color: 'sky',
   },
   {
-    id: 'design',
-    label: 'Design',
-    statuses: [ORDER_STATUS.DESIGN_PENDING, ORDER_STATUS.DESIGN_READY],
+    id: 'info_received',
+    label: 'Info Received',
+    statuses: [ORDER_STATUS.INFO_RECEIVED],
+    color: 'blue',
+  },
+  {
+    id: 'design_pending',
+    label: 'Design Pending',
+    statuses: [ORDER_STATUS.DESIGN_PENDING],
     color: 'indigo',
   },
   {
+    id: 'design_ready',
+    label: 'Design Ready',
+    statuses: [ORDER_STATUS.DESIGN_READY],
+    color: 'violet',
+  },
+  {
     id: 'production',
-    label: 'Production',
+    label: 'In Production',
     statuses: [ORDER_STATUS.IN_PRODUCTION],
     color: 'amber',
   },
   {
     id: 'shipping',
-    label: 'Shipping',
+    label: 'Shipped',
     statuses: [ORDER_STATUS.SHIPPED],
     color: 'orange',
   },
-];
-
-export const ARCHIVE_CATEGORIES: StatusCategory[] = [
   {
     id: 'completed',
     label: 'Completed',
@@ -78,6 +87,9 @@ export const ARCHIVE_CATEGORIES: StatusCategory[] = [
     color: 'slate',
   },
 ];
+
+export const ARCHIVE_CATEGORIES: StatusCategory[] = []; // Unified into main tabs
+
 
 // Helper to find category by status
 export function getCategoryByStatus(status: OrderStatusValue): StatusCategory | undefined {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ordersApi } from '@/api/orders'
-import type { OrderListFilters } from '@/types/order'
+import type { OrderListFilters, OrderDetail } from '@/types/order'
 
 type UseOrdersOptions = {
   enabled?: boolean
@@ -22,7 +22,7 @@ export function useOrder(orderId: string | null, options: UseOrdersOptions = {})
 
   return useQuery({
     queryKey: ['orders', orderId],
-    queryFn: () => ordersApi.getById(orderId as string),
+    queryFn: () => ordersApi.getById(orderId as string) as Promise<OrderDetail>,
     enabled: enabled && Boolean(orderId),
   })
 }

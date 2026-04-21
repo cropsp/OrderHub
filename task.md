@@ -1,34 +1,17 @@
-# Project Tasks: OrderHub
+# AI Agent Task List (Session Level)
 
-## ✅ Completed Sprints
-- [x] **Sprint 1 — Foundation** 🏗️
-    - [x] Infrastructure & Config (.env, keys)
-    - [x] Database initial migration & seed
-    - [x] Frontend setup with Tailwind v4 & shadcn/ui
-    - [x] Full stack verification (Docker up)
+> [!IMPORTANT]
+> **To all AI Agents:** This file is a **session-level checklist** for immediate technical tasks. 
+> 
+> - **Strategic Roadmap & History:** Refer to [implementation_plan.md](implementation_plan.md).
+> - **Architectural Audit:** Refer to [REPORT_2026_04_21.md](docs/audit/REPORT_2026_04_21.md).
+> 
+> DO NOT store long-term plans here. Only active, atomic steps for the current session.
 
 ---
 
-## 🚀 Sprint 2 — Core Backend API 📦 (Next)
-
-- [ ] **Data Schemas** [Проста]
-    - [ ] Create Pydantic schemas for all models (`backend/schemas/`)
-
-- [ ] **Shops Management** [Проста]
-    - [ ] Shop CRUD endpoints
-    - [ ] Logic for encrypting/decrypting API tokens
-
-- [ ] **Orders Logic** [Складна]
-    - [x] 3.1 Setup Axios client with JWT interceptors & token refresh logic (`client.ts`)
-    - [x] 3.2 Implement global Auth store (Zustand or Context) + `useAuth` hookistory
-    - [ ] Order fetching with filters (status, shop_id, search)
-    - [ ] `order_service.py` for status transitions and history
-    - [ ] Pagination support
-
-- [ ] **Etsy Integration** [Складна]
-    - [ ] Etsy CSV parser service
-    - [ ] Import endpoint (POST `/api/imports/etsy`)
-
-- [ ] **Dashboard & Analytics** [Складна]
-    - [ ] Service for revenue calculation per currency
-    - [ ] Stat endpoints for the front page
+## Current Session: Documentation Cleanup & Handover
+- [x] Consolidate architecture visuals into `implementation_plan.md`
+- [x] Standardize `task.md` with agent instructions
+- [ ] Remove temporary inventory files
+- [ ] Final project state verification

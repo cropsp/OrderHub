@@ -61,9 +61,22 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
     }
   };
 
-  const handleDownload = (id: string, e: React.MouseEvent) => {
+  const handleDownload = async (attachmentId: string, fileName: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    window.open(attachmentsApi.getDownloadUrl(id), '_blank');
+    try {
+      const blob = await attachmentsApi.download(attachmentId);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert('Failed to download file. Please try again.');
+    }
   };
 
   return (
@@ -144,7 +157,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
                       size="icon-sm" 
                       variant="ghost" 
                       className="size-8 rounded-lg text-slate-400 hover:text-teal-400 hover:bg-teal-400/10"
-                      onClick={(e) => handleDownload(file.id, e)}
+                      onClick={(e) => handleDownload(file.id, file.file_name, e)}
                     >
                       <Download className="size-4" />
                     </Button>

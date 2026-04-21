@@ -211,7 +211,7 @@ async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order
 
 
 async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: User) -> Order:
-    """Partial update with role restrictions."""
+    """Partial update with detailed change tracking (audit trail)."""
     
     update_data = data.model_dump(exclude_unset=True)
     
@@ -223,8 +223,27 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
             detail="Only owner can modify financial fields"
         )
         
+    changes = []
     for key, value in update_data.items():
-        setattr(order, key, value)
+        old_val = getattr(order, key)
+        if old_val != value:
+            # Format value for comment
+            display_old = str(old_val) if old_val is not None else "None"
+            display_new = str(value) if value is not None else "None"
+            changes.append(f"{key}: {display_old} -> {display_new}")
+            setattr(order, key, value)
+            
+    if changes:
+        # Create history entry for field mutations
+        history = OrderStatusHistory(
+            id=uuid.uuid4(),
+            order_id=order.id,
+            changed_by_id=user.id,
+            from_status=order.status.value,
+            to_status=order.status.value,  # Status unchanged
+            comment=f"Fields updated: {', '.join(changes)}"
+        )
+        db.add(history)
         
     await db.flush()
     return order

@@ -7,7 +7,7 @@ export const attachmentsApi = {
     formData.append('file', file)
     formData.append('attachment_type', type)
 
-    const { data } = await client.post<AttachmentResponse>(`/api/attachments/order/${orderId}`, formData, {
+    const { data } = await client.post<AttachmentResponse>(`/attachments/order/${orderId}`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -16,15 +16,22 @@ export const attachmentsApi = {
   },
 
   listByOrder: async (orderId: string): Promise<AttachmentResponse[]> => {
-    const { data } = await client.get<AttachmentResponse[]>(`/api/attachments/order/${orderId}`)
+    const { data } = await client.get<AttachmentResponse[]>(`/attachments/order/${orderId}`)
     return data
   },
 
   delete: async (attachmentId: string): Promise<void> => {
-    await client.delete(`/api/attachments/${attachmentId}`)
+    await client.delete(`/attachments/${attachmentId}`)
   },
 
   getDownloadUrl: (attachmentId: string): string => {
-    return `${client.defaults.baseURL}/api/attachments/${attachmentId}`
+    return `${client.defaults.baseURL}/attachments/${attachmentId}`
+  },
+
+  download: async (attachmentId: string): Promise<Blob> => {
+    const { data } = await client.get(`/attachments/${attachmentId}`, {
+      responseType: 'blob',
+    })
+    return data
   }
 }

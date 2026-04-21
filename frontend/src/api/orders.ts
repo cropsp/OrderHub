@@ -14,7 +14,7 @@ export const ordersApi = {
   },
 
   updateStatus: async (orderId: string, status: string): Promise<OrderListItem> => {
-    const { data } = await client.patch<OrderListItem>(`/orders/${orderId}/status`, { status })
+    const { data } = await client.post<OrderListItem>(`/orders/${orderId}/status`, { new_status: status })
     return data
   },
 

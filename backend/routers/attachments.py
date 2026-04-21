@@ -62,6 +62,31 @@ async def upload_attachment(
     await db.refresh(attachment)
     
     return attachment
+    
+
+@router.get("/order/{order_id}", response_model=list[AttachmentResponse])
+async def list_attachments_by_order(
+    order_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all attachments for a specific order."""
+    # Check if order exists (and permission check if needed)
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    # Designers can only see attachments for assigned orders
+    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this order")
+        
+    result = await db.execute(
+        select(Attachment).where(Attachment.order_id == order_id).order_by(Attachment.created_at.desc())
+    )
+    attachments = result.scalars().all()
+    return attachments
+
 
 
 @router.get("/{attachment_id}")
