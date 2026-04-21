@@ -130,7 +130,62 @@
 157:     - Implemented full CRUD dialogs for `UsersPage` and `ShopsPage`.
 158:     - Fixed Nova Poshta `DateTime` generation.
 159:     - Enabled Lazy Loading for all major routes.
-160: - `2026-04-20` [Finalization Session]:
-161:     - Completed Sprint 8 (Persistence): Fixed status updates and interaction propagation.
-162:     - Completed Sprint 9 (Designer Workflow): Added file uploads and attachment management.
-163:     - Completed Sprint 10 (Logistics): Built New Order dialog and advanced shop editing.
+- `2026-04-20` [Finalization Session]:
+    - Completed Sprint 8 (Persistence): Fixed status updates and interaction propagation.
+    - Completed Sprint 9 (Designer Workflow): Added file uploads and attachment management.
+    - Completed Sprint 10 (Logistics): Built New Order dialog and advanced shop editing.
+- `2026-04-21`: Conducted full Architectural Audit using Hermes Agent. Identified critical technical debt in security (MCP auth) and frontend (component bloat). Full report stored in `docs/audit/REPORT_2026_04_21.md`.
+
+---
+
+## Unified Backlog (Pending Tasks & Fixes)
+
+### A. Unfinished Tasks from Sprints
+
+**Sprint 11 — Production & Deployment** (Status: `NOT STARTED`)
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| S11-1 | SSL & Domain Configuration | nginx | TODO |
+| S11-2 | Database Backup Jobs | cron | TODO |
+| S11-3 | Performance Monitoring | prometheus/grafana | TODO |
+
+**Performance & Testing** (from "Next Action")
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PERF-1 | Route-level chunk splitting for performance hardening | frontend bundler | TODO |
+| TEST-1 | Smoke test coverage | vitest + playwright | TODO |
+
+### B. Findings from Architectural Audit (2026-04-21)
+
+**Security** (Critical Priority)
+
+| ID | Task | Scope | Effort |
+|---|---|---|---|
+| SEC-1 | Add authentication guards to MCP Router | `backend/routers/mcp.py` — add `Depends(get_current_user)` to `/sse` and `/messages` endpoints | S |
+
+**Frontend Refactoring** (Medium Priority)
+
+| ID | Task | Scope | Effort |
+|---|---|---|---|
+| FE-1 | Refactor `OrderDetailPanel.tsx` — SRP Violation (439 lines) | Extract subcomponents: `OrderNotesPanel`, `ShippingPanel`, `OrderTimeline` | M |
+| FE-2 | Refactor `NewOrderDialog.tsx` — SRP Violation (320 lines) | Extract `useOrderForm` hook and `OrderItemsEditor` component | M |
+
+**Backend Resilience** (High Priority)
+
+| ID | Task | Scope | Effort |
+|---|---|---|---|
+| BE-1 | Implement timeouts (30s) and retries for Nova Poshta | `backend/services/nova_poshta.py` — add `timeout=30.0` to `httpx.AsyncClient()`, wrap `_post()` in retry decorator | M |
+| BE-2 | Implement timeouts (30s) and retries for Shopify Sync | `backend/services/shopify_sync.py` — same pattern as BE-1 | M |
+| BE-3 | Enhance `etsy_parser.py` with error thresholds and aggregate reporting | `backend/services/etsy_parser.py` — fail if >20% rows error, return detailed error report to frontend | M |
+
+**Audit Trail Enhancement** (Medium Priority)
+
+| ID | Task | Scope | Effort |
+|---|---|---|---|
+| AUDIT-1 | Extend `order_service.py` audit history to cover all mutations | Log financial fields and shipping data changes, not just status transitions | M |
+
+---
+
+**Total Backlog Items:** 13 tasks (3 from Sprint 11, 2 from Performance/Testing, 8 from Audit findings)
