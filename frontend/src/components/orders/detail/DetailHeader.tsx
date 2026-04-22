@@ -91,7 +91,7 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
               {Object.entries(ORDER_STATUS).map(([key, value]) => (
                 <DropdownMenuItem 
                   key={value} 
-                  onClick={() => onStatusChange(value)}
+                  onSelect={() => onStatusChange(value)}
                   className="text-[10px] font-bold uppercase tracking-widest focus:bg-zinc-800 focus:text-zinc-100"
                 >
                   {key.replace('_', ' ')}

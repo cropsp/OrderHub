@@ -22,6 +22,9 @@ from services.order_service import (
     get_orders_filtered, get_order_detail, 
     create_order, update_order, change_order_status
 )
+from logger import get_logger
+
+logger = get_logger("routers.orders")
 
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -111,7 +114,10 @@ async def create_new_order(
     if current_user.role == UserRole.DESIGNER:
         raise HTTPException(status_code=403, detail="Designers cannot create orders manually")
         
+    logger.info(f"Creating new order for user {current_user.email}")
     order = await create_order(db, body, current_user)
+    await db.commit()
+    logger.info(f"Order {order.id} created and committed")
     return await get_order(order.id, current_user, db)
 
 
@@ -132,7 +138,10 @@ async def update_existing_order(
         raise HTTPException(status_code=403, detail="Designers cannot modify order fields directly")
         
     # Security validations are inside update_order service
+    logger.info(f"Updating order {order_id} by user {current_user.email}")
     await update_order(db, order, body, current_user)
+    await db.commit()
+    logger.info(f"Order {order_id} update committed")
     return await get_order(order_id, current_user, db)
 
 
@@ -151,7 +160,10 @@ async def transition_order_status(
     if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not assigned to this order")
         
+    logger.info(f"Transitioning order {order_id} status to {body.new_status} by {current_user.email}")
     await change_order_status(db, order, body.new_status, current_user, body.comment)
+    await db.commit()
+    logger.info(f"Order {order_id} status transition committed")
     return await get_order(order_id, current_user, db)
 
 

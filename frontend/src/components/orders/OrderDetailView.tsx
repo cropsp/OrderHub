@@ -6,8 +6,9 @@ import {
   Plus
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
+import { useOrder, useUpdateOrder, useUpdateOrderStatus } from '@/hooks/useOrders';
 import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 import { useToastStore } from '@/components/ui/Toast';
 import { UserRole } from '@/types/user';
 import { useCreateTTN } from '@/hooks/useShipping';
@@ -38,7 +39,9 @@ interface OrderDetailViewProps {
 export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
   const { data: order, isLoading } = useOrder(orderId);
   const { user } = useAuth();
+  const navigate = useNavigate();
   const updateOrder = useUpdateOrder();
+  const updateStatus = useUpdateOrderStatus();
   const { addToast } = useToastStore();
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -86,7 +89,25 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
   return (
     <div className="flex flex-col min-h-full bg-zinc-950 pb-12">
       {/* 1. CLEAN HEADER */}
-      <DetailHeader order={order} />
+      <DetailHeader 
+        order={order} 
+        saveStatus={saveStatus}
+        onStatusChange={async (newStatus) => {
+          if (!order) return;
+          setSaveStatus('saving');
+          try {
+            await updateStatus.mutateAsync({ orderId: order.id, status: newStatus });
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 2000);
+          } catch (err) {
+            console.error('[StatusChange] Failed to update status:', err);
+            setSaveStatus('error');
+            addToast('Failed to update order status', 'error');
+            setTimeout(() => setSaveStatus('idle'), 3000);
+          }
+        }}
+        onClose={() => navigate('/orders')}
+      />
 
       {/* 2. MAIN CONTENT GRID */}
       <div className="flex-1">
@@ -160,7 +181,19 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
                       {Object.entries(ORDER_STATUS).map(([key, value]) => (
                         <DropdownMenuItem 
                           key={value} 
-                          onClick={() => handleUpdate({ status: value })}
+                          onSelect={async () => {
+                            if (!order) return;
+                            setSaveStatus('saving');
+                            try {
+                              await updateStatus.mutateAsync({ orderId: order.id, status: value });
+                              setSaveStatus('saved');
+                              setTimeout(() => setSaveStatus('idle'), 2000);
+                            } catch (err) {
+                              setSaveStatus('error');
+                              addToast('Failed to update status', 'error');
+                              setTimeout(() => setSaveStatus('idle'), 3000);
+                            }
+                          }}
                           className={cn(
                             "text-[9px] font-bold uppercase tracking-widest p-2 rounded-lg focus:bg-zinc-800 focus:text-white cursor-pointer mb-0.5 last:mb-0",
                             order.status === value ? "bg-teal-500/10 text-teal-400" : ""

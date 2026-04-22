@@ -132,3 +132,4 @@ frontend/src/
 | BE-2 | Shopify Sync Resilience | Timeouts/retries implemented | DONE |
 | BE-3 | Enhanced Etsy Parser | Detailed error reporting thresholds | DONE |
 | AUDIT-1 | Order Audit History | Log all status mutations | DONE |
+| BUG-1 | Order Status Persistence | Fixed frontend-backend sync in OrderDetailView | DONE |

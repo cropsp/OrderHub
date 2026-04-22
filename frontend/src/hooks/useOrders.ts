@@ -33,9 +33,10 @@ export function useUpdateOrderStatus() {
   return useMutation({
     mutationFn: ({ orderId, status }: { orderId: string; status: string }) => 
       ordersApi.updateStatus(orderId, status),
-    onSuccess: () => {
-      // Invalidate all orders queries to trigger a refetch
+    onSuccess: (_, { orderId }) => {
+      // Invalidate both the list and the specific order to trigger refetch
       void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
     },
   })
 }

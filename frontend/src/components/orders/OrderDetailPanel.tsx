@@ -8,7 +8,7 @@ import {
   DialogDescription
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
+import { useOrder, useUpdateOrder, useUpdateOrderStatus } from '@/hooks/useOrders';
 import { useAuth } from '@/hooks/useAuth';
 import { useToastStore } from '@/components/ui/Toast';
 import { UserRole } from '@/types/user';
@@ -32,6 +32,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
   const { data: order, isLoading } = useOrder(orderId);
   const { user } = useAuth();
   const updateOrder = useUpdateOrder();
+  const updateStatus = useUpdateOrderStatus();
   const { addToast } = useToastStore();
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -88,7 +89,22 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
             <DetailHeader 
               order={order} 
               saveStatus={saveStatus} 
-              onStatusChange={(status) => handleUpdate({ status })}
+              onStatusChange={async (newStatus) => {
+                if (!order) return;
+                console.log(`[StatusChange] Attempting transition for order ${order.id} to ${newStatus}`);
+                setSaveStatus('saving');
+                try {
+                  await updateStatus.mutateAsync({ orderId: order.id, status: newStatus });
+                  console.log(`[StatusChange] Successfully updated order ${order.id}`);
+                  setSaveStatus('saved');
+                  setTimeout(() => setSaveStatus('idle'), 2000);
+                } catch (err) {
+                  console.error('[StatusChange] Failed to update status:', err);
+                  setSaveStatus('error');
+                  addToast('Failed to update order status', 'error');
+                  setTimeout(() => setSaveStatus('idle'), 3000);
+                }
+              }}
               onClose={onClose}
             />
 
