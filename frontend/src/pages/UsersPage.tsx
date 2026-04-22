@@ -167,19 +167,19 @@ export default function UsersPage() {
           if (!open) resetCreateForm();
         }}
       >
-        <DialogContent className="max-w-md border-slate-800 bg-slate-950 text-slate-100">
+        <DialogContent className="max-w-md border-zinc-800 bg-zinc-950 text-zinc-100">
           <DialogHeader>
             <DialogTitle>Add Team Member</DialogTitle>
-            <DialogDescription className="text-slate-400">
+            <DialogDescription className="text-zinc-400">
               Create a user account and assign an initial role.
             </DialogDescription>
           </DialogHeader>
 
           <form className="space-y-4" onSubmit={handleCreateUser}>
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Full Name</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Full Name</p>
               <Input
-                className="border-slate-700 bg-slate-900/50"
+                className="border-zinc-700 bg-zinc-900/50"
                 placeholder="Team member name"
                 value={newUser.full_name}
                 onChange={(event) => setNewUser((prev) => ({ ...prev, full_name: event.target.value }))}
@@ -187,9 +187,9 @@ export default function UsersPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Email</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Email</p>
               <Input
-                className="border-slate-700 bg-slate-900/50"
+                className="border-zinc-700 bg-zinc-900/50"
                 placeholder="member@orderhub.dev"
                 type="email"
                 value={newUser.email}
@@ -198,15 +198,15 @@ export default function UsersPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Role</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Role</p>
               <Select
                 value={newUser.role}
                 onValueChange={(value) => setNewUser((prev) => ({ ...prev, role: value as UserRoleType }))}
               >
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
+                <SelectContent className="border-zinc-800 bg-zinc-900">
                   <SelectItem value="owner">OWNER</SelectItem>
                   <SelectItem value="manager">MANAGER</SelectItem>
                   <SelectItem value="designer">DESIGNER</SelectItem>
@@ -232,11 +232,11 @@ export default function UsersPage() {
               </p>
             )}
 
-            <DialogFooter className="border-slate-800 bg-slate-900/40">
+            <DialogFooter className="border-zinc-800 bg-zinc-900/40">
               <Button
                 type="button"
                 variant="outline"
-                className="border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
+                className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                 onClick={() => setIsCreateOpen(false)}
               >
                 Close
@@ -262,22 +262,22 @@ export default function UsersPage() {
           }
         }}
       >
-        <DialogContent className="max-w-md border-slate-800 bg-slate-950 text-slate-100">
+        <DialogContent className="max-w-md border-zinc-800 bg-zinc-950 text-zinc-100">
           <DialogHeader>
             <DialogTitle>Edit Permissions</DialogTitle>
-            <DialogDescription className="text-slate-400">
+            <DialogDescription className="text-zinc-400">
               Update role and account status for {editingUser?.full_name ?? 'user'}.
             </DialogDescription>
           </DialogHeader>
 
           <form className="space-y-4" onSubmit={handleUpdatePermissions}>
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Role</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Role</p>
               <Select value={editRole} onValueChange={(value) => setEditRole(value as UserRoleType)}>
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
+                <SelectContent className="border-zinc-800 bg-zinc-900">
                   <SelectItem value="owner">OWNER</SelectItem>
                   <SelectItem value="manager">MANAGER</SelectItem>
                   <SelectItem value="designer">DESIGNER</SelectItem>
@@ -286,15 +286,15 @@ export default function UsersPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Account Status</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Account Status</p>
               <Select
                 value={editIsActive ? 'active' : 'inactive'}
                 onValueChange={(value) => setEditIsActive(value === 'active')}
               >
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
+                <SelectContent className="border-zinc-800 bg-zinc-900">
                   <SelectItem value="active">Active</SelectItem>
                   <SelectItem value="inactive">Inactive</SelectItem>
                 </SelectContent>
@@ -307,11 +307,11 @@ export default function UsersPage() {
               </p>
             )}
 
-            <DialogFooter className="border-slate-800 bg-slate-900/40">
+            <DialogFooter className="border-zinc-800 bg-zinc-900/40">
               <Button
                 type="button"
                 variant="outline"
-                className="border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
+                className="border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
                 onClick={() => setEditingUser(null)}
               >
                 Cancel
@@ -330,7 +330,7 @@ export default function UsersPage() {
 
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-200">Team Members</h2>
+          <h2 className="text-lg font-semibold text-zinc-200">Team Members</h2>
           {isOwner && (
             <Button
               className="bg-sky-600 hover:bg-sky-500 text-white"
@@ -344,31 +344,31 @@ export default function UsersPage() {
         {isLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-16 w-full bg-slate-900/60" />
+              <Skeleton key={i} className="h-16 w-full bg-zinc-900/60" />
             ))}
           </div>
         ) : (
-          <Card className="border-slate-800/60 bg-slate-900/40 backdrop-blur-sm shadow-md">
+          <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm shadow-md">
             <CardContent className="p-0">
               <Table>
-                <TableHeader className="bg-slate-800/30">
-                  <TableRow className="border-slate-800/60 hover:bg-transparent">
-                    <TableHead className="text-slate-400">User</TableHead>
-                    <TableHead className="text-slate-400">Role</TableHead>
-                    <TableHead className="text-slate-400">Status</TableHead>
-                    <TableHead className="text-slate-400">Contact</TableHead>
-                    {isOwner && <TableHead className="text-right text-slate-400">Actions</TableHead>}
+                <TableHeader className="bg-zinc-800/30">
+                  <TableRow className="border-zinc-800/60 hover:bg-transparent">
+                    <TableHead className="text-zinc-400">User</TableHead>
+                    <TableHead className="text-zinc-400">Role</TableHead>
+                    <TableHead className="text-zinc-400">Status</TableHead>
+                    <TableHead className="text-zinc-400">Contact</TableHead>
+                    {isOwner && <TableHead className="text-right text-zinc-400">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {users?.map((u) => (
-                    <TableRow key={u.id} className="border-slate-800/60 hover:bg-slate-800/20">
+                    <TableRow key={u.id} className="border-zinc-800/60 hover:bg-zinc-800/20">
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-slate-100 border border-slate-700">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-100 border border-zinc-700">
                             {u.full_name?.charAt(0) || 'U'}
                           </div>
-                          <span className="text-slate-200">{u.full_name}</span>
+                          <span className="text-zinc-200">{u.full_name}</span>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -384,14 +384,14 @@ export default function UsersPage() {
                             Active
                           </div>
                         ) : (
-                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <div className="flex items-center gap-2 text-xs text-zinc-500">
                             <UserX className="h-4 w-4" />
                             Inactive
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <div className="flex items-center gap-2 text-xs text-zinc-400">
                           <Mail className="h-3 w-3" />
                           {u.email}
                         </div>
@@ -400,13 +400,13 @@ export default function UsersPage() {
                         <TableCell className="text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-100">
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-zinc-100">
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48 bg-slate-900 border-slate-800">
+                            <DropdownMenuContent align="end" className="w-48 bg-zinc-900 border-zinc-800">
                               <DropdownMenuItem
-                                className="text-slate-300 hover:bg-slate-800 cursor-pointer"
+                                className="text-zinc-300 hover:bg-zinc-800 cursor-pointer"
                                 onClick={() => openEditPermissions(u)}
                               >
                                 Edit Permissions
@@ -422,7 +422,7 @@ export default function UsersPage() {
                         </TableCell>
                       )}
                       {u.id === currentUser?.id && isOwner && (
-                        <TableCell className="text-right text-xs text-slate-500 italic pr-4">
+                        <TableCell className="text-right text-xs text-zinc-500 italic pr-4">
                           You
                         </TableCell>
                       )}

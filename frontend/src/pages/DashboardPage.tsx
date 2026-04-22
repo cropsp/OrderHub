@@ -81,15 +81,15 @@ export default function DashboardPage() {
       title="Dashboard Overview"
       actions={
         <div className="flex items-center gap-2">
-          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Filter by Shop:</span>
+          <span className="text-xs font-bold uppercase tracking-wider text-zinc-500">Filter by Shop:</span>
           <Select value={selectedShopId || 'all'} onValueChange={(val) => setSelectedShopId(val === 'all' ? undefined : val)}>
-            <SelectTrigger className="w-[200px] border-slate-800 bg-slate-900/50 backdrop-blur-md text-slate-100">
+            <SelectTrigger className="w-[200px] border-zinc-800 bg-zinc-900/50 backdrop-blur-md text-zinc-100">
               <SelectValue placeholder="All Shops" />
             </SelectTrigger>
-            <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
-              <SelectItem value="all" className="focus:bg-slate-800 focus:text-slate-100 text-slate-200">All Shops</SelectItem>
+            <SelectContent className="border-zinc-800 bg-zinc-900 text-zinc-100">
+              <SelectItem value="all" className="focus:bg-zinc-800 focus:text-zinc-100 text-zinc-200">All Shops</SelectItem>
               {shops?.map((shop) => (
-                <SelectItem key={shop.id} value={shop.id} className="focus:bg-slate-800 focus:text-slate-100 text-slate-200">
+                <SelectItem key={shop.id} value={shop.id} className="focus:bg-zinc-800 focus:text-zinc-100 text-zinc-200">
                   {shop.name}
                 </SelectItem>
               ))}
@@ -103,16 +103,16 @@ export default function DashboardPage() {
           <>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               {[1, 2, 3, 4].map((i) => (
-                <Skeleton key={i} className="h-32 w-full bg-slate-900/60" />
+                <Skeleton key={i} className="h-32 w-full bg-zinc-900/60" />
               ))}
             </div>
             <div className="grid gap-6 lg:grid-cols-6">
-              <Skeleton className="col-span-4 h-[400px] bg-slate-900/60" />
-              <Skeleton className="col-span-2 h-[400px] bg-slate-900/60" />
+              <Skeleton className="col-span-4 h-[400px] bg-zinc-900/60" />
+              <Skeleton className="col-span-2 h-[400px] bg-zinc-900/60" />
             </div>
             <div className="grid gap-6 lg:grid-cols-2">
-              <Skeleton className="h-[320px] bg-slate-900/60" />
-              <Skeleton className="h-[320px] bg-slate-900/60" />
+              <Skeleton className="h-[320px] bg-zinc-900/60" />
+              <Skeleton className="h-[320px] bg-zinc-900/60" />
             </div>
           </>
         ) : (
@@ -167,7 +167,7 @@ export default function DashboardPage() {
                           className="group relative flex items-center justify-between rounded-lg px-4 py-3 hover:bg-zinc-800/60 cursor-pointer transition-colors"
                           onClick={() => {/* handle navigation if needed */}}
                         >
-                          <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full", theme.dot)} />
+                          <div className={cn("absolute left-0 top-1/2 -tranzinc-y-1/2 w-0.5 h-8 rounded-full", theme.dot)} />
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                                <span className="text-zinc-500 text-xs font-mono">#{order.external_id}</span>

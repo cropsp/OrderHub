@@ -177,26 +177,26 @@ export default function ShopsPage() {
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
       >
-        <DialogContent className="max-w-2xl border-slate-800 bg-slate-950 text-slate-100">
+        <DialogContent className="max-w-2xl border-zinc-800 bg-zinc-950 text-zinc-100">
           <DialogHeader className="mb-4">
             <DialogTitle className="text-2xl font-bold tracking-tight">
               {editingShop.id ? 'Edit Store Settings' : 'Initialize New Store'}
             </DialogTitle>
-            <DialogDescription className="text-slate-400">
+            <DialogDescription className="text-zinc-400">
               Configure platform integration and logistics credentials.
             </DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleSaveShop} className="space-y-6">
             <Tabs defaultValue="general" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 bg-slate-900/50 p-1 border border-slate-800">
-                <TabsTrigger value="general" className="flex items-center gap-2 data-[state=active]:bg-slate-800">
+              <TabsList className="grid w-full grid-cols-3 bg-zinc-900/50 p-1 border border-zinc-800">
+                <TabsTrigger value="general" className="flex items-center gap-2 data-[state=active]:bg-zinc-800">
                   <Store className="size-3.5" /> General
                 </TabsTrigger>
-                <TabsTrigger value="platform" className="flex items-center gap-2 data-[state=active]:bg-slate-800">
+                <TabsTrigger value="platform" className="flex items-center gap-2 data-[state=active]:bg-zinc-800">
                   <Package2 className="size-3.5" /> Platform API
                 </TabsTrigger>
-                <TabsTrigger value="shipping" className="flex items-center gap-2 data-[state=active]:bg-slate-800">
+                <TabsTrigger value="shipping" className="flex items-center gap-2 data-[state=active]:bg-zinc-800">
                   <Truck className="size-3.5" /> Logistics (NP)
                 </TabsTrigger>
               </TabsList>
@@ -205,25 +205,25 @@ export default function ShopsPage() {
                 <TabsContent value="general" className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Store Name</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Store Name</p>
                       <Input
-                        className="border-slate-800 bg-slate-900/50"
+                        className="border-zinc-800 bg-zinc-900/50"
                         placeholder="LeatherCraft Boutique"
                         value={editingShop.name}
                         onChange={(e) => setEditingShop(p => ({ ...p, name: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Brand Color</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Brand Color</p>
                       <div className="flex gap-2">
                         <Input
-                          className="h-10 w-12 border-slate-800 bg-slate-900/50 p-1"
+                          className="h-10 w-12 border-zinc-800 bg-zinc-900/50 p-1"
                           type="color"
                           value={editingShop.color}
                           onChange={(e) => setEditingShop(p => ({ ...p, color: e.target.value }))}
                         />
                         <Input
-                          className="border-slate-800 bg-slate-900/50 font-mono text-xs"
+                          className="border-zinc-800 bg-zinc-900/50 font-mono text-xs"
                           value={editingShop.color}
                           onChange={(e) => setEditingShop(p => ({ ...p, color: e.target.value }))}
                         />
@@ -231,15 +231,15 @@ export default function ShopsPage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Sales Platform</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Sales Platform</p>
                     <Select
                       value={editingShop.platform}
                       onValueChange={(v) => setEditingShop(p => ({ ...p, platform: v as ShopPlatform }))}
                     >
-                      <SelectTrigger className="w-full border-slate-800 bg-slate-900/50">
+                      <SelectTrigger className="w-full border-zinc-800 bg-zinc-900/50">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="border-slate-800 bg-slate-950">
+                      <SelectContent className="border-zinc-800 bg-zinc-950">
                         <SelectItem value="etsy" className="focus:bg-orange-500/10 focus:text-orange-400">ETSY (Manual Sync)</SelectItem>
                         <SelectItem value="shopify" className="focus:bg-green-500/10 focus:text-green-400">SHOPIFY (Auto Sync)</SelectItem>
                         <SelectItem value="manual" className="focus:bg-teal-500/10 focus:text-teal-400">LOCAL / MANUAL ONLY</SelectItem>
@@ -252,18 +252,18 @@ export default function ShopsPage() {
                   {editingShop.platform === 'shopify' ? (
                     <>
                       <div className="space-y-2">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Shopify Store URL</p>
+                        <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Shopify Store URL</p>
                         <Input
-                          className="border-slate-800 bg-slate-900/50"
+                          className="border-zinc-800 bg-zinc-900/50"
                           placeholder="https://your-store.myshopify.com"
                           value={editingShop.shopify_store_url}
                           onChange={(e) => setEditingShop(p => ({ ...p, shopify_store_url: e.target.value }))}
                         />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Access Token (Admin API)</p>
+                        <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Access Token (Admin API)</p>
                         <Input
-                          className="border-slate-800 bg-slate-900/50"
+                          className="border-zinc-800 bg-zinc-900/50"
                           type="password"
                           placeholder={editingShop.id ? "Leave empty to keep existing" : "shpat_..."}
                           value={editingShop.shopify_access_token}
@@ -271,9 +271,9 @@ export default function ShopsPage() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Webhook Secret</p>
+                        <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Webhook Secret</p>
                         <Input
-                          className="border-slate-800 bg-slate-900/50"
+                          className="border-zinc-800 bg-zinc-900/50"
                           type="password"
                           placeholder={editingShop.id ? "Leave empty to keep existing" : "Shopify webhook secret"}
                           value={editingShop.shopify_webhook_secret}
@@ -282,55 +282,55 @@ export default function ShopsPage() {
                       </div>
                     </>
                   ) : (
-                    <div className="flex flex-col items-center justify-center p-8 border border-dashed border-slate-800 rounded-xl bg-slate-900/10">
-                      <Package2 className="size-12 text-slate-700 mb-2" />
-                      <p className="text-sm text-slate-500">No API configuration needed for {editingShop.platform.toUpperCase()}.</p>
+                    <div className="flex flex-col items-center justify-center p-8 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/10">
+                      <Package2 className="size-12 text-zinc-700 mb-2" />
+                      <p className="text-sm text-zinc-500">No API configuration needed for {editingShop.platform.toUpperCase()}.</p>
                     </div>
                   )}
                 </TabsContent>
 
                 <TabsContent value="shipping" className="space-y-4">
                   <div className="space-y-2">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Nova Poshta API Key</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Nova Poshta API Key</p>
                     <Input
-                      className="border-slate-800 bg-slate-900/50"
+                      className="border-zinc-800 bg-zinc-900/50"
                       type="password"
                       placeholder={editingShop.id ? "Leave empty to keep existing" : "API secret key"}
                       value={editingShop.np_api_key}
                       onChange={(e) => setEditingShop(p => ({ ...p, np_api_key: e.target.value }))}
                     />
                   </div>
-                  <Separator className="bg-slate-800" />
+                  <Separator className="bg-zinc-800" />
                   <p className="text-[10px] font-bold text-teal-500 uppercase tracking-widest">Sender Metadata</p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-slate-400">Sender Name</p>
+                       <p className="text-xs font-medium text-zinc-400">Sender Name</p>
                        <Input
-                         className="border-slate-800 bg-slate-900/50"
+                         className="border-zinc-800 bg-zinc-900/50"
                          value={editingShop.np_sender_name}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_name: e.target.value }))}
                        />
                     </div>
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-slate-400">Sender Phone</p>
+                       <p className="text-xs font-medium text-zinc-400">Sender Phone</p>
                        <Input
-                         className="border-slate-800 bg-slate-900/50"
+                         className="border-zinc-800 bg-zinc-900/50"
                          value={editingShop.np_sender_phone}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_phone: e.target.value }))}
                        />
                     </div>
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-slate-400">City REF (UUID)</p>
+                       <p className="text-xs font-medium text-zinc-400">City REF (UUID)</p>
                        <Input
-                         className="border-slate-800 bg-slate-900/50 font-mono text-[10px]"
+                         className="border-zinc-800 bg-zinc-900/50 font-mono text-[10px]"
                          value={editingShop.np_sender_city_ref}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_city_ref: e.target.value }))}
                        />
                     </div>
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-slate-400">Warehouse REF (UUID)</p>
+                       <p className="text-xs font-medium text-zinc-400">Warehouse REF (UUID)</p>
                        <Input
-                         className="border-slate-800 bg-slate-900/50 font-mono text-[10px]"
+                         className="border-zinc-800 bg-zinc-900/50 font-mono text-[10px]"
                          value={editingShop.np_sender_warehouse_ref}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_warehouse_ref: e.target.value }))}
                        />
@@ -347,11 +347,11 @@ export default function ShopsPage() {
               </div>
             )}
 
-            <DialogFooter className="bg-slate-900/20 p-6 -m-6 mt-6 border-t border-slate-800">
+            <DialogFooter className="bg-zinc-900/20 p-6 -m-6 mt-6 border-t border-zinc-800">
               <Button
                 type="button"
                 variant="ghost"
-                className="text-slate-400 hover:text-slate-100"
+                className="text-zinc-400 hover:text-zinc-100"
                 onClick={() => setIsDialogOpen(false)}
               >
                 Close
@@ -371,8 +371,8 @@ export default function ShopsPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
-             <h2 className="text-2xl font-bold text-slate-50 tracking-tight">Integrated Stores</h2>
-             <p className="text-sm text-slate-500">Manage API connections and brand aesthetics.</p>
+             <h2 className="text-2xl font-bold text-zinc-50 tracking-tight">Integrated Stores</h2>
+             <p className="text-sm text-zinc-500">Manage API connections and brand aesthetics.</p>
           </div>
           {isOwner && (
             <Button
@@ -387,20 +387,20 @@ export default function ShopsPage() {
         {isLoading ? (
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <Skeleton key={i} className="h-24 w-full bg-slate-900/40 rounded-2xl" />
+              <Skeleton key={i} className="h-24 w-full bg-zinc-900/40 rounded-2xl" />
             ))}
           </div>
         ) : (
-          <Card className="border-slate-800/60 bg-slate-900/20 backdrop-blur-md shadow-2xl overflow-hidden rounded-2xl">
+          <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md shadow-2xl overflow-hidden rounded-2xl">
             <CardContent className="p-0">
               <Table>
                 <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                   <TableRow className="border-none hover:bg-transparent">
-                    <TableHead className="w-[300px] text-[10px] font-bold uppercase tracking-widest text-slate-500 px-8 py-5">Store Identity</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-slate-500 py-5">Platform</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-slate-500 py-5 text-center">Status</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-slate-500 py-5">Connectivity</TableHead>
-                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-slate-500 px-8 py-5">Management</TableHead>}
+                    <TableHead className="w-[300px] text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Store Identity</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Platform</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5 text-center">Status</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Connectivity</TableHead>
+                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Management</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -419,13 +419,13 @@ export default function ShopsPage() {
                             <Store className="size-5" />
                           </div>
                           <div className="space-y-1">
-                             <p className="text-sm font-bold text-slate-100 tracking-tight">{shop.name}</p>
-                             <p className="text-[10px] text-slate-500 font-mono">ID: {shop.id.slice(0, 8)}...</p>
+                             <p className="text-sm font-bold text-zinc-100 tracking-tight">{shop.name}</p>
+                             <p className="text-[10px] text-zinc-500 font-mono">ID: {shop.id.slice(0, 8)}...</p>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="border-slate-800 bg-slate-900/50 text-slate-400 font-mono text-[10px] tracking-widest py-0.5">
+                        <Badge variant="outline" className="border-zinc-800 bg-zinc-900/50 text-zinc-400 font-mono text-[10px] tracking-widest py-0.5">
                           {String(shop.platform || '').toUpperCase()}
                         </Badge>
                       </TableCell>
@@ -447,7 +447,7 @@ export default function ShopsPage() {
                             <Badge className="bg-red-500/10 text-red-400 border-red-500/20 text-[9px] uppercase tracking-tighter">NovaPoshta Live</Badge>
                           )}
                           {!shop.has_shopify_token && !shop.has_np_token && (
-                            <span className="text-[10px] text-slate-600 font-medium">No active connections</span>
+                            <span className="text-[10px] text-zinc-600 font-medium">No active connections</span>
                           )}
                         </div>
                       </TableCell>
@@ -473,7 +473,7 @@ export default function ShopsPage() {
                               variant="ghost" 
                               size="icon" 
                               title="Config"
-                              className="h-9 w-9 text-slate-400 hover:text-slate-100 hover:bg-white/[0.05] rounded-xl"
+                              className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] rounded-xl"
                               onClick={() => handleOpenEdit(shop)}
                             >
                               <Settings2 className="h-4 w-4" />
@@ -482,7 +482,7 @@ export default function ShopsPage() {
                               variant="ghost" 
                               size="icon" 
                               title="Delete"
-                              className="h-9 w-9 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-xl"
+                              className="h-9 w-9 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-xl"
                               onClick={() => {
                                 if (window.confirm(`Are you sure you want to deactivate ${shop.name}?`)) {
                                   deleteShop.mutate(shop.id);
@@ -500,8 +500,8 @@ export default function ShopsPage() {
                     <TableRow>
                       <TableCell colSpan={5} className="h-32 text-center">
                         <div className="flex flex-col items-center justify-center gap-2">
-                           <Store className="size-8 text-slate-800" />
-                           <p className="text-sm text-slate-500 italic">No stores initialized in this workspace.</p>
+                           <Store className="size-8 text-zinc-800" />
+                           <p className="text-sm text-zinc-500 italic">No stores initialized in this workspace.</p>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -519,7 +519,7 @@ export default function ShopsPage() {
             </div>
             <div className="space-y-1.5 pt-1">
               <h4 className="text-sm font-bold text-amber-500 uppercase tracking-widest">Security Audit Context</h4>
-              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+              <p className="text-xs text-zinc-500 leading-relaxed font-medium">
                 Cryptographic tokens and NP secret keys are processed through AES-256 server-side encryption. 
                 Managers and Designers can trigger sync actions but are strictly barred from retrieving raw API credentials.
               </p>

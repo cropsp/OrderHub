@@ -8,7 +8,7 @@ function GuardLoading() {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="glass rounded-xl p-8 animate-fade-in text-center">
-        <p className="text-sm text-slate-300">Checking session...</p>
+        <p className="text-sm text-zinc-300">Checking session...</p>
       </div>
     </div>
   )

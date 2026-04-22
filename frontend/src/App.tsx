@@ -17,8 +17,8 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 
 function RouteLoadingFallback() {
   return (
-    <div className="flex min-h-[45vh] items-center justify-center rounded-xl border border-slate-800/60 bg-slate-900/30">
-      <p className="text-sm text-slate-400">Loading page...</p>
+    <div className="flex min-h-[45vh] items-center justify-center rounded-xl border border-zinc-800/60 bg-zinc-900/30">
+      <p className="text-sm text-zinc-400">Loading page...</p>
     </div>
   )
 }

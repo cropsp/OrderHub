@@ -13,8 +13,8 @@ type PipelineBoardProps = {
 export default function PipelineBoard({ orders, columnStatuses, isLoading, onSelectOrder }: PipelineBoardProps) {
   if (isLoading) {
     return (
-      <div className="flex h-[500px] items-center justify-center rounded-lg border border-slate-800/50 bg-slate-900/20">
-        <p className="text-sm text-slate-400 animate-pulse">Loading board...</p>
+      <div className="flex h-[500px] items-center justify-center rounded-lg border border-zinc-800/50 bg-zinc-900/20">
+        <p className="text-sm text-zinc-400 animate-pulse">Loading board...</p>
       </div>
     );
   }

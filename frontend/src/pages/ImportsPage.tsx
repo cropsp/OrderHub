@@ -59,22 +59,22 @@ export default function ImportsPage() {
         {!importMutation.isSuccess ? (
           <div className="grid gap-8 lg:grid-cols-5">
             {/* Step 1: Select Shop */}
-            <Card className="lg:col-span-2 border-slate-800/60 bg-slate-900/40 backdrop-blur-sm shadow-xl">
+            <Card className="lg:col-span-2 border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm shadow-xl">
               <CardContent className="p-6 space-y-6">
                 <div className="flex items-center gap-3">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-500/10 text-teal-400 font-bold text-sm">1</div>
-                  <h2 className="text-lg font-semibold text-slate-100">Target Shop</h2>
+                  <h2 className="text-lg font-semibold text-zinc-100">Target Shop</h2>
                 </div>
                 
-                <p className="text-sm text-slate-400 leading-relaxed">
+                <p className="text-sm text-zinc-400 leading-relaxed">
                   Select the Etsy store associated with the CSV file you are importing.
                 </p>
 
                 <Select value={selectedShopId} onValueChange={setSelectedShopId}>
-                  <SelectTrigger className="w-full bg-slate-950/50 border-slate-800">
+                  <SelectTrigger className="w-full bg-zinc-950/50 border-zinc-800">
                     <SelectValue placeholder={isLoadingShops ? "Loading shops..." : "Select an Etsy shop"} />
                   </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-slate-800">
+                  <SelectContent className="bg-zinc-900 border-zinc-800">
                     {etsyShops.map(shop => (
                       <SelectItem key={shop.id} value={shop.id}>
                         <div className="flex items-center gap-2">
@@ -97,19 +97,19 @@ export default function ImportsPage() {
 
             {/* Step 2: Upload */}
             <Card className={cn(
-              "lg:col-span-3 border-slate-800/60 transition-all duration-300",
-              selectedShopId ? "bg-slate-900/40 opacity-100" : "bg-slate-900/20 opacity-50 grayscale pointer-events-none"
+              "lg:col-span-3 border-zinc-800/60 transition-all duration-300",
+              selectedShopId ? "bg-zinc-900/40 opacity-100" : "bg-zinc-900/20 opacity-50 grayscale pointer-events-none"
             )}>
               <CardContent className="p-6 h-full flex flex-col">
                 <div className="flex items-center gap-3 mb-6">
                   <div className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-500/10 text-teal-400 font-bold text-sm">2</div>
-                  <h2 className="text-lg font-semibold text-slate-100">Upload CSV</h2>
+                  <h2 className="text-lg font-semibold text-zinc-100">Upload CSV</h2>
                 </div>
 
                 <div 
                   className={cn(
                     "flex-1 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center p-8 transition-all gap-4",
-                    file ? "border-teal-500/40 bg-teal-500/5" : "border-slate-800 bg-slate-950/30 hover:border-slate-700 hover:bg-slate-900/40 cursor-pointer"
+                    file ? "border-teal-500/40 bg-teal-500/5" : "border-zinc-800 bg-zinc-950/30 hover:border-zinc-700 hover:bg-zinc-900/40 cursor-pointer"
                   )}
                   onClick={() => !file && fileInputRef.current?.click()}
                 >
@@ -123,16 +123,16 @@ export default function ImportsPage() {
                   
                   <div className={cn(
                     "h-16 w-16 rounded-2xl flex items-center justify-center mb-2",
-                    file ? "bg-teal-500/20 text-teal-400" : "bg-slate-800 text-slate-500"
+                    file ? "bg-teal-500/20 text-teal-400" : "bg-zinc-800 text-zinc-500"
                   )}>
                     {file ? <FileText className="h-8 w-8" /> : <Upload className="h-8 w-8" />}
                   </div>
 
                   <div className="text-center">
-                    <p className="text-sm font-medium text-slate-200">
+                    <p className="text-sm font-medium text-zinc-200">
                       {file ? file.name : "Drag and drop your Etsy CSV file here"}
                     </p>
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-zinc-500 mt-1">
                       {file ? `${(file.size / 1024).toFixed(1)} KB` : "Supports standard Etsy Orders CSV format"}
                     </p>
                   </div>
@@ -141,7 +141,7 @@ export default function ImportsPage() {
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="text-slate-400 hover:text-red-400 hover:bg-red-400/5"
+                      className="text-zinc-400 hover:text-red-400 hover:bg-red-400/5"
                       onClick={(e) => {
                         e.stopPropagation();
                         setFile(null);
@@ -179,19 +179,19 @@ export default function ImportsPage() {
                 <CheckCircle2 className="h-10 w-10 text-teal-400" />
               </div>
               
-              <h2 className="text-3xl font-heading text-slate-100 mb-2">Import Successful!</h2>
-              <p className="text-slate-400 max-w-md mb-10">
+              <h2 className="text-3xl font-heading text-zinc-100 mb-2">Import Successful!</h2>
+              <p className="text-zinc-400 max-w-md mb-10">
                 The CSV file has been processed. New records have been added to your order pool.
               </p>
 
               <div className="grid grid-cols-2 gap-8 w-full max-w-lg mb-10">
-                <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800">
+                <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800">
                   <p className="text-3xl font-bold text-teal-400">{importMutation.data?.imported || 0}</p>
-                  <p className="text-xs uppercase tracking-widest font-bold text-slate-500 mt-1">New Orders Created</p>
+                  <p className="text-xs uppercase tracking-widest font-bold text-zinc-500 mt-1">New Orders Created</p>
                 </div>
-                <div className="bg-slate-900/50 p-6 rounded-2xl border border-slate-800">
-                  <p className="text-3xl font-bold text-slate-400">{importMutation.data?.skipped || 0}</p>
-                  <p className="text-xs uppercase tracking-widest font-bold text-slate-500 mt-1">Skipped (Duplicates)</p>
+                <div className="bg-zinc-900/50 p-6 rounded-2xl border border-zinc-800">
+                  <p className="text-3xl font-bold text-zinc-400">{importMutation.data?.skipped || 0}</p>
+                  <p className="text-xs uppercase tracking-widest font-bold text-zinc-500 mt-1">Skipped (Duplicates)</p>
                 </div>
               </div>
 
@@ -209,7 +209,7 @@ export default function ImportsPage() {
               <div className="flex flex-col sm:flex-row gap-4 w-full justify-center">
                 <Button 
                   variant="outline" 
-                  className="border-slate-800 bg-slate-900 hover:bg-slate-800"
+                  className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
                   onClick={handleReset}
                 >
                   Import another file
@@ -227,25 +227,25 @@ export default function ImportsPage() {
 
         <section className="pt-10">
           <div className="flex items-center gap-3 mb-6">
-            <Database className="h-5 w-5 text-slate-500" />
-            <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">Related Activity</h3>
+            <Database className="h-5 w-5 text-zinc-500" />
+            <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500">Related Activity</h3>
           </div>
           
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="p-4 rounded-xl border border-slate-800/40 bg-slate-900/20 flex items-center justify-between group cursor-pointer hover:bg-slate-900/40 transition-colors">
+            <div className="p-4 rounded-xl border border-zinc-800/40 bg-zinc-900/20 flex items-center justify-between group cursor-pointer hover:bg-zinc-900/40 transition-colors">
               <div className="flex items-center gap-3">
-                 <Store className="h-4 w-4 text-slate-500 group-hover:text-teal-400 transition-colors" />
-                 <span className="text-sm text-slate-300">Shop Configurations</span>
+                 <Store className="h-4 w-4 text-zinc-500 group-hover:text-teal-400 transition-colors" />
+                 <span className="text-sm text-zinc-300">Shop Configurations</span>
               </div>
-              <ChevronRight className="h-4 w-4 text-slate-700" />
+              <ChevronRight className="h-4 w-4 text-zinc-700" />
             </div>
             
-            <div className="p-4 rounded-xl border border-slate-800/40 bg-slate-900/20 flex items-center justify-between group cursor-pointer hover:bg-slate-900/40 transition-colors">
+            <div className="p-4 rounded-xl border border-zinc-800/40 bg-zinc-900/20 flex items-center justify-between group cursor-pointer hover:bg-zinc-900/40 transition-colors">
               <div className="flex items-center gap-3">
-                 <FileText className="h-4 w-4 text-slate-500 group-hover:text-teal-400 transition-colors" />
-                 <span className="text-sm text-slate-300">View Recent Audit Log</span>
+                 <FileText className="h-4 w-4 text-zinc-500 group-hover:text-teal-400 transition-colors" />
+                 <span className="text-sm text-zinc-300">View Recent Audit Log</span>
               </div>
-              <ChevronRight className="h-4 w-4 text-slate-700" />
+              <ChevronRight className="h-4 w-4 text-zinc-700" />
             </div>
           </div>
         </section>

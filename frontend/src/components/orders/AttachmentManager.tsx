@@ -88,24 +88,24 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
           "relative border-2 border-dashed rounded-2xl p-8 transition-all cursor-pointer group",
           isDragActive 
             ? "border-teal-500 bg-teal-500/5" 
-            : "border-slate-800 bg-slate-900/20 hover:border-slate-700 hover:bg-slate-900/30",
+            : "border-zinc-800 bg-zinc-900/20 hover:border-zinc-700 hover:bg-zinc-900/30",
           isUploading && "pointer-events-none opacity-60"
         )}
       >
         <input {...getInputProps()} />
         <div className="flex flex-col items-center justify-center text-center gap-3">
-          <div className="size-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+          <div className="size-12 rounded-full bg-zinc-800 flex items-center justify-center group-hover:scale-110 transition-transform">
             {isUploading ? (
               <Loader2 className="size-6 text-teal-400 animate-spin" />
             ) : (
-              <UploadCloud className="size-6 text-slate-400 group-hover:text-teal-400" />
+              <UploadCloud className="size-6 text-zinc-400 group-hover:text-teal-400" />
             )}
           </div>
           <div className="space-y-1">
-            <p className="text-sm font-bold text-slate-200">
+            <p className="text-sm font-bold text-zinc-200">
               {isDragActive ? 'Drop to upload' : 'Drag & drop production files'}
             </p>
-            <p className="text-xs text-slate-500">SVG, DXF, PNG or PDF (No size limit)</p>
+            <p className="text-xs text-zinc-500">SVG, DXF, PNG or PDF (No size limit)</p>
           </div>
         </div>
       </div>
@@ -114,11 +114,11 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
       <div className="space-y-3">
         {isFetching ? (
           <div className="flex items-center justify-center py-6">
-            <Loader2 className="size-6 text-slate-700 animate-spin" />
+            <Loader2 className="size-6 text-zinc-700 animate-spin" />
           </div>
         ) : attachments?.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-xs text-slate-600 font-medium italic">No files attached to this order yet.</p>
+            <p className="text-xs text-zinc-600 font-medium italic">No files attached to this order yet.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3">
@@ -130,22 +130,22 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
                   className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/[0.03] hover:border-white/[0.08] hover:bg-white/[0.04] transition-all group/item"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="size-10 rounded-lg bg-slate-800/50 flex items-center justify-center border border-white/[0.03]">
-                      <Icon className="size-5 text-slate-400 group-hover/item:text-teal-400" />
+                    <div className="size-10 rounded-lg bg-zinc-800/50 flex items-center justify-center border border-white/[0.03]">
+                      <Icon className="size-5 text-zinc-400 group-hover/item:text-teal-400" />
                     </div>
                     <div className="space-y-0.5">
-                      <p className="text-sm font-bold text-slate-200 truncate max-w-[200px]" title={file.file_name}>
+                      <p className="text-sm font-bold text-zinc-200 truncate max-w-[200px]" title={file.file_name}>
                         {file.file_name}
                       </p>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-slate-500 font-mono">
+                        <span className="text-[10px] text-zinc-500 font-mono">
                           {(file.file_size / 1024).toFixed(1)} KB
                         </span>
-                        <span className="text-slate-700">•</span>
-                        <span className="text-[10px] text-slate-500">
+                        <span className="text-zinc-700">•</span>
+                        <span className="text-[10px] text-zinc-500">
                           {format(new Date(file.created_at), 'MMM dd, HH:mm')}
                         </span>
-                        <Badge variant="outline" className="h-4 px-1 text-[8px] bg-slate-800/40 text-slate-500 border-none uppercase">
+                        <Badge variant="outline" className="h-4 px-1 text-[8px] bg-zinc-800/40 text-zinc-500 border-none uppercase">
                           {file.attachment_type}
                         </Badge>
                       </div>
@@ -156,7 +156,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
                     <Button 
                       size="icon-sm" 
                       variant="ghost" 
-                      className="size-8 rounded-lg text-slate-400 hover:text-teal-400 hover:bg-teal-400/10"
+                      className="size-8 rounded-lg text-zinc-400 hover:text-teal-400 hover:bg-teal-400/10"
                       onClick={(e) => handleDownload(file.id, file.file_name, e)}
                     >
                       <Download className="size-4" />
@@ -164,7 +164,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
                     <Button 
                       size="icon-sm" 
                       variant="ghost" 
-                      className="size-8 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10"
+                      className="size-8 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-400/10"
                       onClick={(e) => handleDelete(file.id, e)}
                     >
                       <X className="size-4" />

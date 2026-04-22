@@ -16,7 +16,7 @@ function SessionLoading() {
   return (
     <div className="min-h-screen flex items-center justify-center">
       <div className="glass rounded-xl p-8 animate-fade-in text-center">
-        <p className="text-sm text-slate-300">Preparing workspace...</p>
+        <p className="text-sm text-zinc-300">Preparing workspace...</p>
       </div>
     </div>
   )

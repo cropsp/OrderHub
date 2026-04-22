@@ -18,17 +18,17 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
           <div className="size-10 rounded-xl bg-sky-500/10 flex items-center justify-center border border-sky-500/10 mt-1 shrink-0">
             <MapPin className="size-5 text-sky-500" />
           </div>
-          <div className="text-sm text-slate-300 leading-relaxed space-y-1">
-            <p className="font-bold text-slate-100">{order.shipping_name}</p>
+          <div className="text-sm text-zinc-300 leading-relaxed space-y-1">
+            <p className="font-bold text-zinc-100">{order.shipping_name}</p>
             <p>{order.shipping_street_1}</p>
             {order.shipping_street_2 && <p>{order.shipping_street_2}</p>}
             <p>{order.shipping_city}, {order.shipping_state} {order.shipping_zip}</p>
-            <p className="font-bold text-slate-600 uppercase tracking-[0.3em] mt-2 text-[10px]">{order.shipping_country}</p>
+            <p className="font-bold text-zinc-600 uppercase tracking-[0.3em] mt-2 text-[10px]">{order.shipping_country}</p>
           </div>
         </div>
         
         {order.shipping_phone && (
-          <div className="flex items-center gap-3 pl-14 text-xs text-slate-400">
+          <div className="flex items-center gap-3 pl-14 text-xs text-zinc-400">
             <Phone className="size-3.5" />
             <span>{order.shipping_phone}</span>
           </div>
@@ -41,12 +41,12 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                 <p className="text-[10px] font-bold text-teal-500 uppercase tracking-widest">Tracking (TTN)</p>
                 <ClipboardList className="size-3 text-teal-500/40" />
               </div>
-              <p className="font-mono text-xl text-slate-100 font-bold tracking-tighter">{order.ttn_number}</p>
+              <p className="font-mono text-xl text-zinc-100 font-bold tracking-tighter">{order.ttn_number}</p>
             </div>
           ) : (
             order.shipping_country === 'UA' && canManageShipping && (
               <Button 
-                className="w-full py-6 rounded-2xl bg-slate-900 border-slate-800 hover:bg-slate-800 text-teal-500 font-bold tracking-tight"
+                className="w-full py-6 rounded-2xl bg-zinc-900 border-zinc-800 hover:bg-zinc-800 text-teal-500 font-bold tracking-tight"
                 variant="outline"
                 disabled={isPending}
                 onClick={onGenerateTTN}

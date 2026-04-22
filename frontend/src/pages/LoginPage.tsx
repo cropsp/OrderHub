@@ -68,7 +68,7 @@ export default function LoginPage() {
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_15%_20%,rgba(20,184,166,0.15),transparent_35%),radial-gradient(circle_at_80%_10%,rgba(251,146,60,0.15),transparent_30%),linear-gradient(180deg,#0b1020_0%,#111827_100%)] px-4 py-10">
       <div className="pointer-events-none absolute inset-0 opacity-60 [background:linear-gradient(115deg,transparent_0%,rgba(148,163,184,0.08)_30%,transparent_65%)]" />
       <section className="relative z-10 w-full max-w-md animate-fade-in">
-        <Card className="border border-white/10 bg-slate-950/70 text-slate-100 shadow-2xl shadow-black/30 backdrop-blur-xl">
+        <Card className="border border-white/10 bg-zinc-950/70 text-zinc-100 shadow-2xl shadow-black/30 backdrop-blur-xl">
           <CardHeader className="space-y-2">
             <p className="text-xs font-semibold tracking-[0.24em] uppercase text-teal-300/90">
               OrderHub CRM
@@ -76,7 +76,7 @@ export default function LoginPage() {
             <CardTitle className="font-heading text-3xl leading-tight">
               Welcome back
             </CardTitle>
-            <CardDescription className="text-slate-300">
+            <CardDescription className="text-zinc-300">
               Sign in to manage orders, customers, and production flow.
             </CardDescription>
           </CardHeader>
@@ -84,13 +84,13 @@ export default function LoginPage() {
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
               <div className="space-y-2">
-                <label className="block text-xs font-medium tracking-wide text-slate-300 uppercase" htmlFor="email">
+                <label className="block text-xs font-medium tracking-wide text-zinc-300 uppercase" htmlFor="email">
                   Email
                 </label>
                 <Input
                   id="email"
                   autoComplete="email"
-                  className="h-10 border-slate-700/80 bg-slate-900/70 text-slate-100 placeholder:text-slate-400"
+                  className="h-10 border-zinc-700/80 bg-zinc-900/70 text-zinc-100 placeholder:text-zinc-400"
                   disabled={isSubmitting}
                   onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
                   placeholder="owner@orderhub.dev"
@@ -101,13 +101,13 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <label className="block text-xs font-medium tracking-wide text-slate-300 uppercase" htmlFor="password">
+                <label className="block text-xs font-medium tracking-wide text-zinc-300 uppercase" htmlFor="password">
                   Password
                 </label>
                 <Input
                   id="password"
                   autoComplete="current-password"
-                  className="h-10 border-slate-700/80 bg-slate-900/70 text-slate-100 placeholder:text-slate-400"
+                  className="h-10 border-zinc-700/80 bg-zinc-900/70 text-zinc-100 placeholder:text-zinc-400"
                   disabled={isSubmitting}
                   onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
                   placeholder="Enter your password"
@@ -123,12 +123,12 @@ export default function LoginPage() {
                 </p>
               ) : null}
 
-              <Button className="h-10 w-full bg-teal-500 text-slate-950 hover:bg-teal-400" disabled={isSubmitting} type="submit">
+              <Button className="h-10 w-full bg-teal-500 text-zinc-950 hover:bg-teal-400" disabled={isSubmitting} type="submit">
                 {isSubmitting ? 'Signing in...' : 'Sign in'}
               </Button>
             </form>
 
-            <div className="mt-6 flex items-center justify-between text-xs text-slate-400">
+            <div className="mt-6 flex items-center justify-between text-xs text-zinc-400">
               <span>Need access from owner?</span>
               <Link className="text-teal-300 hover:text-teal-200" to="/dashboard">
                 Open preview

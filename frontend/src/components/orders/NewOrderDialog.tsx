@@ -51,16 +51,16 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl border-slate-800 bg-slate-950 p-0 overflow-hidden rounded-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]">
+      <DialogContent className="max-w-3xl border-zinc-800 bg-zinc-950 p-0 overflow-hidden rounded-3xl shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]">
         <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh]">
-          <DialogHeader className="p-8 pb-4 bg-slate-900/20">
+          <DialogHeader className="p-8 pb-4 bg-zinc-900/20">
             <div className="flex items-center gap-3 mb-2">
                <div className="size-10 rounded-2xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400">
                   <PackagePlus className="size-6" />
                </div>
                <div>
-                  <DialogTitle className="text-2xl font-bold text-slate-50 tracking-tight">Create Manual Order</DialogTitle>
-                  <DialogDescription className="text-slate-400">Entry point for local marketplaces and custom sales.</DialogDescription>
+                  <DialogTitle className="text-2xl font-bold text-zinc-50 tracking-tight">Create Manual Order</DialogTitle>
+                  <DialogDescription className="text-zinc-400">Entry point for local marketplaces and custom sales.</DialogDescription>
                </div>
             </div>
           </DialogHeader>
@@ -74,15 +74,15 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <p className="text-[10px] font-bold uppercase text-slate-500 px-1">Target Shop</p>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500 px-1">Target Shop</p>
                   <Select
                     value={orderData.shop_id}
                     onValueChange={(val) => setOrderData(p => ({ ...p, shop_id: val }))}
                   >
-                    <SelectTrigger className="border-slate-800 bg-slate-900/50 rounded-xl">
+                    <SelectTrigger className="border-zinc-800 bg-zinc-900/50 rounded-xl">
                       <SelectValue placeholder="Select destination store" />
                     </SelectTrigger>
-                    <SelectContent className="bg-slate-950 border-slate-800 text-slate-100">
+                    <SelectContent className="bg-zinc-950 border-zinc-800 text-zinc-100">
                       {shops?.map(shop => (
                         <SelectItem key={shop.id} value={shop.id}>{shop.name}</SelectItem>
                       ))}
@@ -90,9 +90,9 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-[10px] font-bold uppercase text-slate-500 px-1">Order # (External ID)</p>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500 px-1">Order # (External ID)</p>
                   <Input 
-                    className="border-slate-800 bg-slate-900/50 rounded-xl text-slate-100"
+                    className="border-zinc-800 bg-zinc-900/50 rounded-xl text-zinc-100"
                     placeholder="e.g. WH-2024-001"
                     value={orderData.external_id}
                     onChange={e => setOrderData(p => ({ ...p, external_id: e.target.value }))}
@@ -101,24 +101,24 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="sm:col-span-2 space-y-2">
-                  <p className="text-[10px] font-bold uppercase text-slate-500 px-1">Brief Description / Title</p>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500 px-1">Brief Description / Title</p>
                   <Input 
-                    className="border-slate-800 bg-slate-900/50 rounded-xl text-slate-100"
+                    className="border-zinc-800 bg-zinc-900/50 rounded-xl text-zinc-100"
                     placeholder="Custom leather wallet order"
                     value={orderData.title}
                     onChange={e => setOrderData(p => ({ ...p, title: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-[10px] font-bold uppercase text-slate-500 px-1">Currency</p>
+                  <p className="text-[10px] font-bold uppercase text-zinc-500 px-1">Currency</p>
                   <Select
                     value={orderData.currency}
                     onValueChange={(val) => setOrderData(p => ({ ...p, currency: val }))}
                   >
-                    <SelectTrigger className="border-slate-800 bg-slate-900/50 rounded-xl text-slate-100">
+                    <SelectTrigger className="border-zinc-800 bg-zinc-900/50 rounded-xl text-zinc-100">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent className="bg-slate-950 border-slate-800 text-slate-100">
+                    <SelectContent className="bg-zinc-950 border-zinc-800 text-zinc-100">
                       <SelectItem value="USD">🇺🇸 USD</SelectItem>
                       <SelectItem value="UAH">🇺🇦 UAH</SelectItem>
                       <SelectItem value="EUR">🇪🇺 EUR</SelectItem>
@@ -134,21 +134,21 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
                  <User className="size-4" />
                  <h3 className="text-xs font-bold uppercase tracking-widest">Customer Information</h3>
               </div>
-              <Card className="border-slate-800/60 bg-slate-900/20 rounded-2xl overflow-hidden shadow-inner">
+              <Card className="border-zinc-800/60 bg-zinc-900/20 rounded-2xl overflow-hidden shadow-inner">
                 <CardContent className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <p className="text-[10px] font-bold uppercase text-slate-500 px-1">Contact Email</p>
+                    <p className="text-[10px] font-bold uppercase text-zinc-500 px-1">Contact Email</p>
                     <Input 
-                      className="border-slate-800 bg-slate-900/50 rounded-xl text-slate-100"
+                      className="border-zinc-800 bg-zinc-900/50 rounded-xl text-zinc-100"
                       placeholder="customer@example.com"
                       value={orderData.email}
                       onChange={e => setOrderData(p => ({ ...p, email: e.target.value }))}
                     />
                   </div>
                   <div className="space-y-2">
-                    <p className="text-[10px] font-bold uppercase text-slate-500 px-1">Full Name</p>
+                    <p className="text-[10px] font-bold uppercase text-zinc-500 px-1">Full Name</p>
                     <Input 
-                      className="border-slate-800 bg-slate-900/50 rounded-xl text-slate-100"
+                      className="border-zinc-800 bg-zinc-900/50 rounded-xl text-zinc-100"
                       placeholder="Serhii Kovalenko"
                       value={orderData.full_name}
                       onChange={e => setOrderData(p => ({ ...p, full_name: e.target.value }))}
@@ -175,11 +175,11 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
             </div>
           )}
 
-          <DialogFooter className="p-8 bg-slate-900/40 border-t border-slate-800/60 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <DialogFooter className="p-8 bg-zinc-900/40 border-t border-zinc-800/60 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="text-center sm:text-left">
-               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Order Revenue</p>
+               <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Order Revenue</p>
                <div className="flex items-baseline justify-center sm:justify-start gap-1.5">
-                  <span className="text-3xl font-black text-slate-50 tracking-tighter">{totalPrice.toFixed(2)}</span>
+                  <span className="text-3xl font-black text-zinc-50 tracking-tighter">{totalPrice.toFixed(2)}</span>
                   <span className="text-sm font-bold text-teal-500 uppercase">{orderData.currency}</span>
                </div>
             </div>
@@ -187,7 +187,7 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
               <Button
                 type="button"
                 variant="ghost"
-                className="flex-1 sm:flex-none text-slate-400 hover:text-slate-100 rounded-xl"
+                className="flex-1 sm:flex-none text-zinc-400 hover:text-zinc-100 rounded-xl"
                 onClick={() => onOpenChange(false)}
               >
                 Discard

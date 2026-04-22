@@ -81,37 +81,37 @@ export default function SettingsPage() {
       description="Account profile and access settings."
     >
       <div className="mx-auto grid w-full max-w-3xl gap-6">
-        <Card className="border-slate-800/60 bg-slate-900/40 backdrop-blur-sm">
+        <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle className="text-slate-100">Profile</CardTitle>
+            <CardTitle className="text-zinc-100">Profile</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
-            <div className="flex items-center gap-3 text-slate-200">
-              <UserCircle2 className="h-5 w-5 text-slate-400" />
+            <div className="flex items-center gap-3 text-zinc-200">
+              <UserCircle2 className="h-5 w-5 text-zinc-400" />
               <span>{user?.full_name ?? 'Unknown user'}</span>
             </div>
 
-            <div className="flex items-center gap-3 text-slate-300">
-              <Mail className="h-5 w-5 text-slate-500" />
+            <div className="flex items-center gap-3 text-zinc-300">
+              <Mail className="h-5 w-5 text-zinc-500" />
               <span>{user?.email ?? 'No email'}</span>
             </div>
 
             <div className="flex items-center gap-3">
-              <Shield className="h-5 w-5 text-slate-500" />
-              <Badge variant="outline" className="border-slate-700 bg-slate-800/40 text-slate-200">
+              <Shield className="h-5 w-5 text-zinc-500" />
+              <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-200">
                 {roleLabel(user?.role ?? 'unknown')}
               </Badge>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-slate-800/60 bg-slate-900/40 backdrop-blur-sm">
+        <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle className="text-slate-100">System Preferences</CardTitle>
+            <CardTitle className="text-zinc-100">System Preferences</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                 Dashboard Refresh Interval
               </p>
               <Select
@@ -123,10 +123,10 @@ export default function SettingsPage() {
                   }))
                 }
               >
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
+                <SelectContent className="border-zinc-800 bg-zinc-900">
                   <SelectItem value="60">Every 1 minute</SelectItem>
                   <SelectItem value="300">Every 5 minutes</SelectItem>
                 </SelectContent>
@@ -134,7 +134,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
                 Default Orders View
               </p>
               <Select
@@ -146,10 +146,10 @@ export default function SettingsPage() {
                   }))
                 }
               >
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
+                <SelectContent className="border-zinc-800 bg-zinc-900">
                   <SelectItem value="table">Table</SelectItem>
                   <SelectItem value="board">Pipeline Board</SelectItem>
                 </SelectContent>
@@ -157,7 +157,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Date Display</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Date Display</p>
               <Select
                 value={preferences.date_display}
                 onValueChange={(value) =>
@@ -167,10 +167,10 @@ export default function SettingsPage() {
                   }))
                 }
               >
-                <SelectTrigger className="w-full border-slate-700 bg-slate-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="border-slate-800 bg-slate-900">
+                <SelectContent className="border-zinc-800 bg-zinc-900">
                   <SelectItem value="local">Local Time</SelectItem>
                   <SelectItem value="utc">UTC</SelectItem>
                 </SelectContent>
@@ -178,9 +178,9 @@ export default function SettingsPage() {
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Preferred Timezone</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">Preferred Timezone</p>
               <Input
-                className="border-slate-700 bg-slate-900/50"
+                className="border-zinc-700 bg-zinc-900/50"
                 placeholder="Etc/UTC"
                 value={preferences.default_timezone}
                 onChange={(event) =>
@@ -193,7 +193,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-zinc-500">
                 These preferences are synced across all your devices.
               </p>
               <Button 
@@ -211,9 +211,9 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-slate-800/60 bg-slate-900/40 backdrop-blur-sm">
+        <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
           <CardHeader>
-            <CardTitle className="text-slate-100">Session</CardTitle>
+            <CardTitle className="text-zinc-100">Session</CardTitle>
           </CardHeader>
           <CardContent>
             <Button

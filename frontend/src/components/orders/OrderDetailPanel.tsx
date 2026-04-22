@@ -73,18 +73,18 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="w-[95vw] sm:w-[90vw] sm:max-w-none max-w-7xl h-[90vh] border-slate-800 bg-slate-950 p-0 shadow-[0_0_50px_-12px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col rounded-3xl">
+      <DialogContent className="w-[95vw] sm:w-[90vw] sm:max-w-none max-w-7xl h-[90vh] border-zinc-800 bg-zinc-950 p-0 shadow-[0_0_50px_-12px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col rounded-3xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Order Management Console</DialogTitle>
           <DialogDescription>Full view of order {orderId}</DialogDescription>
         </DialogHeader>
 
         {!order || isLoading ? (
-          <div className="p-12 space-y-8 h-full bg-slate-950">
-            <Skeleton className="h-12 w-1/3 bg-slate-900 rounded-xl" />
+          <div className="p-12 space-y-8 h-full bg-zinc-950">
+            <Skeleton className="h-12 w-1/3 bg-zinc-900 rounded-xl" />
             <div className="grid grid-cols-12 gap-8 h-full">
-              <Skeleton className="col-span-8 h-[600px] bg-slate-900 rounded-3xl" />
-              <Skeleton className="col-span-4 h-[600px] bg-slate-900 rounded-3xl" />
+              <Skeleton className="col-span-8 h-[600px] bg-zinc-900 rounded-3xl" />
+              <Skeleton className="col-span-4 h-[600px] bg-zinc-900 rounded-3xl" />
             </div>
           </div>
         ) : (

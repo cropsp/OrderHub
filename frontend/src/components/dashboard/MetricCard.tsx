@@ -27,7 +27,7 @@ export function MetricCard({
 
   return (
     <div className={cn(
-      "bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-5 flex flex-col gap-3 transition-all hover:-translate-y-px hover:shadow-lg hover:shadow-black/20",
+      "bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-5 flex flex-col gap-3 transition-all hover:-tranzinc-y-px hover:shadow-lg hover:shadow-black/20",
       className
     )}>
       <div className="flex items-center gap-2">
