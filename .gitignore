@@ -32,3 +32,4 @@ backend/logs/
 *.log
 *.db
 *.sqlite3
+scratch/
