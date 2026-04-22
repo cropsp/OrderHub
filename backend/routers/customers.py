@@ -78,3 +78,22 @@ async def get_customer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
         
     return customer
+
+@router.get("/by-email/{email}", response_model=CustomerResponse)
+async def get_customer_by_email(
+    email: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find a customer by exact email."""
+    result = await db.execute(select(Customer).where(Customer.email == email.lower().strip()))
+    customer = result.scalar_one_or_none()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    
+    # Also get order count
+    count_result = await db.execute(
+        select(func.count()).select_from(Order).where(Order.customer_id == customer.id)
+    )
+    customer.order_count = count_result.scalar() or 0
+    return customer

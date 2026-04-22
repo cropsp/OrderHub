@@ -11,9 +11,16 @@ from models.order import Order
 
 
 async def upsert_customer(
-    db: AsyncSession, email: str, full_name: str, country: str | None = None
+    db: AsyncSession, 
+    email: str, 
+    full_name: str, 
+    country: str | None = None,
+    phone: str | None = None,
+    shipping_city: str | None = None,
+    shipping_city_ref: str | None = None,
+    shipping_warehouse_ref: str | None = None
 ) -> Customer:
-    """Finds a customer by email, updates name/country, or creates a new one."""
+    """Finds a customer by email, updates name/country/shipping, or creates a new one."""
     email = email.lower().strip()
     
     result = await db.execute(select(Customer).where(Customer.email == email))
@@ -22,8 +29,11 @@ async def upsert_customer(
     if customer:
         # Update existing
         customer.full_name = full_name
-        if country:
-            customer.country = country
+        if country: customer.country = country
+        if phone: customer.phone = phone
+        if shipping_city: customer.shipping_city = shipping_city
+        if shipping_city_ref: customer.shipping_city_ref = shipping_city_ref
+        if shipping_warehouse_ref: customer.shipping_warehouse_ref = shipping_warehouse_ref
     else:
         # Create new
         customer = Customer(
@@ -31,6 +41,10 @@ async def upsert_customer(
             email=email,
             full_name=full_name,
             country=country,
+            phone=phone,
+            shipping_city=shipping_city,
+            shipping_city_ref=shipping_city_ref,
+            shipping_warehouse_ref=shipping_warehouse_ref
         )
         db.add(customer)
         

@@ -123,6 +123,8 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     shipping_state: Mapped[str | None] = mapped_column(String(255), nullable=True)
     shipping_zip: Mapped[str | None] = mapped_column(String(20), nullable=True)
     shipping_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    shipping_city_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    shipping_warehouse_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Designer assignment
     assigned_designer_id: Mapped[uuid.UUID | None] = mapped_column(

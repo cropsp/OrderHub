@@ -154,7 +154,16 @@ async def change_order_status(
 async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order:
     """Manual order creation."""
     # Customupsert -> Create order -> Default History
-    customer = await upsert_customer(db, data.email, data.full_name, data.shipping_country)
+    customer = await upsert_customer(
+        db, 
+        data.email, 
+        data.full_name, 
+        data.shipping_country,
+        phone=data.shipping_phone,
+        shipping_city=data.shipping_city,
+        shipping_city_ref=data.shipping_city_ref,
+        shipping_warehouse_ref=data.shipping_warehouse_ref
+    )
     
     order = Order(
         id=uuid.uuid4(),
@@ -173,7 +182,9 @@ async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order
         shipping_city=data.shipping_city,
         shipping_state=data.shipping_state,
         shipping_zip=data.shipping_zip,
-        shipping_country=data.shipping_country
+        shipping_country=data.shipping_country,
+        shipping_city_ref=data.shipping_city_ref,
+        shipping_warehouse_ref=data.shipping_warehouse_ref
     )
     db.add(order)
     await db.flush()
@@ -234,6 +245,23 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
             setattr(order, key, value)
             
     if changes:
+        # If shipping fields changed, update the customer record as well
+        shipping_fields = {"shipping_phone", "shipping_city", "shipping_city_ref", "shipping_warehouse_ref"}
+        if any(k in update_data for k in shipping_fields):
+            # Map order field names to customer field names
+            customer_updates = {}
+            if "shipping_phone" in update_data: customer_updates["phone"] = update_data["shipping_phone"]
+            if "shipping_city" in update_data: customer_updates["shipping_city"] = update_data["shipping_city"]
+            if "shipping_city_ref" in update_data: customer_updates["shipping_city_ref"] = update_data["shipping_city_ref"]
+            if "shipping_warehouse_ref" in update_data: customer_updates["shipping_warehouse_ref"] = update_data["shipping_warehouse_ref"]
+            
+            if customer_updates:
+                await db.execute(
+                    update(Customer)
+                    .where(Customer.id == order.customer_id)
+                    .values(**customer_updates)
+                )
+
         # Create history entry for field mutations
         history = OrderStatusHistory(
             id=uuid.uuid4(),

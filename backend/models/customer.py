@@ -19,6 +19,10 @@ class Customer(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    shipping_city: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    shipping_city_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    shipping_warehouse_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Relationships
     orders = relationship("Order", back_populates="customer", lazy="selectin")

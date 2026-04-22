@@ -12,4 +12,9 @@ export const customersApi = {
     const { data } = await client.get<CustomerListItem>(`/customers/${customerId}`);
     return data;
   },
+
+  getByEmail: async (email: string): Promise<CustomerListItem> => {
+    const { data } = await client.get<CustomerListItem>(`/customers/by-email/${email}`);
+    return data;
+  },
 };

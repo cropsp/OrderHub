@@ -63,6 +63,8 @@ class OrderBase(BaseModel):
     shipping_state: str | None = None
     shipping_zip: str | None = None
     shipping_country: str | None = Field(None, max_length=2)
+    shipping_city_ref: str | None = None
+    shipping_warehouse_ref: str | None = None
 
     # Notes
     customer_note: str | None = None
@@ -136,6 +138,8 @@ class OrderCreate(BaseModel):
     shipping_state: str | None = None
     shipping_zip: str | None = None
     shipping_country: str | None = None
+    shipping_city_ref: str | None = None
+    shipping_warehouse_ref: str | None = None
 
 
 class OrderUpdate(BaseModel):
@@ -166,6 +170,8 @@ class OrderUpdate(BaseModel):
     shipping_state: str | None = None
     shipping_zip: str | None = None
     shipping_country: str | None = None
+    shipping_city_ref: str | None = None
+    shipping_warehouse_ref: str | None = None
 
 
 class StatusChangeRequest(BaseModel):

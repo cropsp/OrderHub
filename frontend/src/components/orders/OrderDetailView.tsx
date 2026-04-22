@@ -222,6 +222,7 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
               canManageShipping={canManageShipping}
               isPending={createTTN.isPending}
               onGenerateTTN={handleGenerateTTN}
+              onUpdate={handleUpdate}
             />
             {isOwner && <DetailFinance order={order} />}
           </aside>

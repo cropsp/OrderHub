@@ -19,6 +19,10 @@ class CustomerResponse(BaseModel):
     email: str
     full_name: str
     country: str | None
+    phone: str | None = None
+    shipping_city: str | None = None
+    shipping_city_ref: str | None = None
+    shipping_warehouse_ref: str | None = None
     created_at: datetime
     updated_at: datetime
     

@@ -6,7 +6,7 @@
 
 export type UserRole = 'owner' | 'manager' | 'designer'
 
-export type ShopPlatform = 'etsy' | 'shopify'
+export type ShopPlatform = 'etsy' | 'shopify' | 'manual'
 
 export type OrderStatus =
   | 'new'
@@ -104,6 +104,8 @@ export interface Order {
   shipping_state: string | null
   shipping_zip: string | null
   shipping_country: string | null
+  shipping_city_ref: string | null
+  shipping_warehouse_ref: string | null
   assigned_designer_id: string | null
   assigned_at: string | null
   ttn_number: string | null

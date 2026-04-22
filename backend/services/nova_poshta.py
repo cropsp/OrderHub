@@ -30,14 +30,16 @@ class NovaPoshtaClient:
             "calledMethod": called_method,
             "methodProperties": method_properties
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.post(NP_API_URL, json=payload)
             response.raise_for_status()
             data = response.json()
             if not data.get("success"):
                 errors = data.get("errors", [])
-                raise Exception(f"Nova Poshta API Error: {errors}")
-            return data["data"]
+                error_data = data.get("errorCodes", [])
+                logger.error(f"Nova Poshta API Error response: {data}")
+                raise Exception(f"NP Error: {errors} (Codes: {error_data})")
+            return data.get("data", [])
 
     async def get_cities(self, query: str = "") -> list:
         props = {"FindByString": query} if query else {}
@@ -50,14 +52,44 @@ class NovaPoshtaClient:
         return await self._post("Address", "getWarehouses", props)
 
     async def create_internet_document(self, props: dict) -> dict:
-        """
-        Create a TTN (waybill).
-        Expects properties like PayerType, PaymentMethod, DateTime, CargoType, Weight, etc.
-        """
+        """Create a TTN (waybill)."""
         data = await self._post("InternetDocument", "save", props)
         if not data:
             raise Exception("Failed to create InternetDocument: empty response")
         return data[0]
+
+    async def get_counterparties(self, counterparty_property: str = "Recipient", find_by_string: str = "") -> list:
+        """Get counterparties (Sender/Recipient)."""
+        props = {"CounterpartyProperty": counterparty_property}
+        if find_by_string:
+            props["FindByString"] = find_by_string
+        return await self._post("Counterparty", "getCounterparties", props)
+
+    async def create_counterparty(self, first_name: str, middle_name: str, last_name: str, phone: str, counterparty_property: str = "Recipient") -> dict:
+        """Create a new counterparty."""
+        props = {
+            "FirstName": first_name,
+            "MiddleName": middle_name,
+            "LastName": last_name,
+            "Phone": phone,
+            "Email": "",
+            "CounterpartyType": "PrivatePerson",
+            "CounterpartyProperty": counterparty_property
+        }
+        data = await self._post("Counterparty", "save", props)
+        if not data:
+            raise Exception("Failed to create counterparty")
+        return data[0]
+
+    async def get_contact_persons(self, counterparty_ref: str) -> list:
+        """Get contact persons for a counterparty."""
+        props = {"Ref": counterparty_ref}
+        return await self._post("Counterparty", "getCounterpartyContactPersons", props)
+
+    async def get_counterparty_addresses(self, counterparty_ref: str) -> list:
+        """Get addresses (warehouses) for a counterparty."""
+        props = {"Ref": counterparty_ref, "CounterpartyProperty": "Sender"}
+        return await self._post("Counterparty", "getCounterpartyAddresses", props)
 
 # --- Helper functions for the CRM ---
 

@@ -15,6 +15,15 @@ export function useOrderForm(onSuccess: () => void) {
     currency: 'USD',
     email: '',
     full_name: '',
+    shipping_name: '',
+    shipping_phone: '',
+    shipping_street_1: '',
+    shipping_city: '',
+    shipping_city_ref: '',
+    shipping_warehouse_ref: '',
+    shipping_state: '',
+    shipping_zip: '',
+    shipping_country: 'UA',
   });
 
   const [items, setItems] = useState([INITIAL_ITEM]);
@@ -37,6 +46,15 @@ export function useOrderForm(onSuccess: () => void) {
       currency: 'USD',
       email: '',
       full_name: '',
+      shipping_name: '',
+      shipping_phone: '',
+      shipping_street_1: '',
+      shipping_city: '',
+      shipping_city_ref: '',
+      shipping_warehouse_ref: '',
+      shipping_state: '',
+      shipping_zip: '',
+      shipping_country: 'UA',
     });
     setItems([{ ...INITIAL_ITEM }]);
     setError(null);
