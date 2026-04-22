@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { MoreHorizontal, Eye, Archive, RefreshCw } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { getShopTheme } from '@/utils/shopTheme';
 import { getInitials, getAvatarColor } from '@/utils/avatar';
 import { cn } from '@/lib/utils';
@@ -39,10 +40,12 @@ export default function OrdersTable({ orders, isLoading, onSelectOrder }: Orders
 
   if (orders.length === 0) {
     return (
-      <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-900/40">
-        <p className="text-sm font-medium text-zinc-400">No orders found</p>
-        <p className="text-xs text-zinc-600 mt-1">Try adjusting your filters.</p>
-      </div>
+      <EmptyState 
+        icon={Archive}
+        title="No orders found"
+        description="Try adjusting your filters or search query to find what you're looking for."
+        className="h-64 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/40"
+      />
     );
   }
 
@@ -87,7 +90,7 @@ export default function OrdersTable({ orders, isLoading, onSelectOrder }: Orders
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-sm font-medium text-zinc-100 truncate">{order.customer_name}</span>
-                      <span className="text-[10px] text-zinc-500 truncate">@{order.platform_user_id || 'unknown'}</span>
+                      <span className="text-[10px] text-zinc-500 truncate">ID: {order.customer_id.substring(0, 8)}</span>
                     </div>
                   </div>
                 </TableCell>
