@@ -23,8 +23,19 @@ interface DetailHeaderProps {
 
 export function DetailHeader({ order, saveStatus, dataUpdatedAt, onStatusChange, onClose }: DetailHeaderProps) {
   return (
-    <header className="px-10 py-8 flex items-center justify-between border-b border-white/[0.03] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
-      <div className="space-y-1">
+    <header className="px-10 py-8 flex flex-col gap-4 border-b border-white/[0.03] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
+      <div className="flex items-center justify-between w-full">
+        <button 
+          onClick={onClose}
+          className="text-sm text-zinc-400 hover:text-zinc-100 flex items-center gap-1.5 transition-colors"
+        >
+          <span>←</span> Back to Orders
+          <span className="ml-2 text-zinc-500 font-mono">#{order.external_id}</span>
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
         <div className="flex items-center gap-3">
           <Select 
             defaultValue={order.status} 
@@ -80,6 +91,7 @@ export function DetailHeader({ order, saveStatus, dataUpdatedAt, onStatusChange,
           Close Console
         </Button>
       </div>
+    </div>
     </header>
   );
 }
