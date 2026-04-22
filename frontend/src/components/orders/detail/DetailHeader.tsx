@@ -1,16 +1,20 @@
 import { format } from 'date-fns';
-import { Clock, CheckCircle2 } from 'lucide-react';
 import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
-import { Separator } from '@/components/ui/separator';
+  Check, 
+  Loader2, 
+  ChevronDown 
+} from 'lucide-react';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+import { getShopTheme } from '@/utils/shopTheme';
 import { cn } from '@/lib/utils';
-import { ORDER_STATUS, getCategoryByStatus, type OrderStatusValue } from '@/lib/order-status';
+import { ORDER_STATUS } from '@/lib/order-status';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailHeaderProps {
@@ -22,76 +26,76 @@ interface DetailHeaderProps {
 }
 
 export function DetailHeader({ order, saveStatus, dataUpdatedAt, onStatusChange, onClose }: DetailHeaderProps) {
+  const shopTheme = getShopTheme(order.shop_name ?? '');
+
   return (
-    <header className="px-10 py-8 flex flex-col gap-4 border-b border-white/[0.03] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
+    <header className="px-10 py-8 flex flex-col gap-6 border-b border-zinc-800 bg-zinc-950/50 backdrop-blur-md shrink-0">
       <div className="flex items-center justify-between w-full">
         <button 
           onClick={onClose}
           className="text-sm text-zinc-400 hover:text-zinc-100 flex items-center gap-1.5 transition-colors"
         >
           <span>←</span> Back to Orders
-          <span className="ml-2 text-zinc-500 font-mono">#{order.external_id}</span>
         </button>
+
+        <div className="flex items-center gap-4">
+          <div className={cn(
+            "flex items-center gap-1.5 transition-opacity duration-300",
+            saveStatus === 'idle' ? "opacity-0" : "opacity-100"
+          )}>
+            {saveStatus === 'saving' ? (
+              <>
+                <Loader2 className="size-3 text-zinc-500 animate-spin" />
+                <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Saving...</span>
+              </>
+            ) : saveStatus === 'saved' ? (
+              <>
+                <Check className="size-3 text-teal-500" />
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Saved</span>
+              </>
+            ) : null}
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold text-zinc-50 tracking-tight leading-tight max-w-2xl">
+            {order.title}
+          </h2>
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <div className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider", shopTheme.bg, shopTheme.text)}>
+              {order.shop_name}
+            </div>
+            <span className="font-mono">#{order.external_id}</span>
+            <span>·</span>
+            <span>{format(new Date(order.ordered_at), 'MMM dd, HH:mm')}</span>
+          </div>
+        </div>
+
         <div className="flex items-center gap-3">
-          <Select 
-            defaultValue={order.status} 
-            onValueChange={onStatusChange}
-          >
-            <SelectTrigger className={cn(
-              "h-7 px-3 text-[10px] font-bold uppercase tracking-widest rounded-full border-none ring-offset-slate-950 focus:ring-teal-500/20",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'teal' && "bg-teal-500/10 text-teal-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'sky' && "bg-sky-500/10 text-sky-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'indigo' && "bg-indigo-500/10 text-indigo-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'amber' && "bg-amber-500/10 text-amber-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'orange' && "bg-orange-500/10 text-orange-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'violet' && "bg-violet-500/10 text-violet-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'blue' && "bg-blue-500/10 text-blue-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'emerald' && "bg-emerald-500/10 text-emerald-400",
-              getCategoryByStatus(order.status as OrderStatusValue)?.color === 'slate' && "bg-slate-500/10 text-slate-400",
-            )}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-slate-950 border-slate-800 text-slate-200">
+          <StatusBadge status={order.status} size="md" className="h-9 px-4 rounded-lg" />
+          
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="h-9 border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 font-bold uppercase text-[10px] tracking-widest gap-2">
+                Change Status <ChevronDown className="size-3 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800 text-zinc-300 w-48">
               {Object.entries(ORDER_STATUS).map(([key, value]) => (
-                <SelectItem key={value} value={value} className="text-[10px] uppercase tracking-widest focus:bg-teal-500/20 focus:text-teal-100">
+                <DropdownMenuItem 
+                  key={value} 
+                  onClick={() => onStatusChange(value)}
+                  className="text-[10px] font-bold uppercase tracking-widest focus:bg-zinc-800 focus:text-zinc-100"
+                >
                   {key.replace('_', ' ')}
-                </SelectItem>
+                </DropdownMenuItem>
               ))}
-            </SelectContent>
-          </Select>
-          <span className="text-slate-600 font-medium">/</span>
-          <span className="font-mono text-sm font-bold text-teal-400">#{order.external_id}</span>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        <h2 className="text-3xl font-heading font-bold text-slate-50 tracking-tight">{order.title}</h2>
       </div>
-
-      <div className="flex items-center gap-4">
-        <div className="flex flex-col items-end gap-1 px-4">
-           <div className="flex items-center gap-2">
-             {saveStatus === 'saving' && <Clock className="size-3 text-amber-400 animate-spin" />}
-             {saveStatus === 'saved' && <CheckCircle2 className="size-3 text-teal-400" />}
-             <span className={cn(
-               "text-[10px] font-bold uppercase tracking-widest",
-               saveStatus === 'saving' ? "text-amber-400" : 
-               saveStatus === 'saved' ? "text-teal-400" : "text-slate-500"
-             )}>
-               {saveStatus === 'saving' ? 'Syncing...' : saveStatus === 'saved' ? 'Updates Saved' : 'All Changes Persisted'}
-             </span>
-           </div>
-           <p className="text-[10px] text-slate-600 font-medium">
-             Last refetched at {format(dataUpdatedAt, 'HH:mm:ss')}
-           </p>
-        </div>
-        <Separator orientation="vertical" className="h-10 bg-white/[0.05]" />
-        <Button onClick={onClose} variant="ghost" className="rounded-full hover:bg-white/[0.03]">
-          Close Console
-        </Button>
-      </div>
-    </div>
     </header>
   );
 }

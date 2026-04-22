@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { debounce } from 'lodash-es';
 import { ClipboardList, Info } from 'lucide-react';
-import { Textarea } from '@/components/ui/textarea';
 import { BentoCard } from './BentoCard';
 import type { OrderDetail } from '@/types/order';
 
@@ -14,7 +13,6 @@ export function DetailNotes({ order, onUpdate }: DetailNotesProps) {
   const [internalNote, setInternalNote] = useState(order.internal_note || '');
   const [customInfo, setCustomInfo] = useState(order.custom_info || '');
 
-  // Update local state when order changes (e.g. on manual refetch)
   useEffect(() => {
     setInternalNote(order.internal_note || '');
     setCustomInfo(order.custom_info || '');
@@ -40,20 +38,20 @@ export function DetailNotes({ order, onUpdate }: DetailNotesProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
       <BentoCard title="Internal Notes" icon={ClipboardList}>
-        <Textarea 
+        <textarea 
           value={internalNote}
           onChange={(e) => handleNoteChange(e.target.value)}
           placeholder="Add private team-only notes about this order..."
-          className="bg-transparent border-none p-0 focus-visible:ring-0 resize-none min-h-[140px] text-slate-300 leading-relaxed placeholder:text-slate-600"
+          className="w-full bg-transparent border-none p-0 focus:outline-none resize-none min-h-[140px] text-zinc-300 text-sm leading-relaxed placeholder:text-zinc-700"
         />
       </BentoCard>
 
       <BentoCard title="Customization Info" icon={Info}>
-        <Textarea 
+        <textarea 
           value={customInfo}
           onChange={(e) => handleCustomInfoChange(e.target.value)}
           placeholder="Special instructions or custom data for production..."
-          className="bg-transparent border-none p-0 focus-visible:ring-0 resize-none min-h-[140px] text-teal-100 font-medium leading-relaxed placeholder:text-slate-600"
+          className="w-full bg-transparent border-none p-0 focus:outline-none resize-none min-h-[140px] text-teal-400 font-medium text-sm leading-relaxed placeholder:text-zinc-700"
         />
       </BentoCard>
     </div>

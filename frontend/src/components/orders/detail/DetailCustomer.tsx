@@ -1,6 +1,8 @@
-import { User, Mail } from 'lucide-react';
+import { User, Mail, Globe, ExternalLink } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { BentoCard } from './BentoCard';
+import { getInitials, getAvatarColor } from '@/utils/avatar';
+import { cn } from '@/lib/utils';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailCustomerProps {
@@ -8,41 +10,53 @@ interface DetailCustomerProps {
 }
 
 export function DetailCustomer({ order }: DetailCustomerProps) {
+  const avatarColor = getAvatarColor(order.customer_name ?? '');
+  const initials = getInitials(order.customer_name ?? '??');
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <BentoCard title="Customer Profile" icon={User}>
         <div className="space-y-6">
           <div className="flex items-center gap-4">
-            <div className="size-12 rounded-2xl bg-teal-500/10 flex items-center justify-center border border-teal-500/10">
-              <User className="size-6 text-teal-500" />
+            <div className={cn("size-14 rounded-full flex items-center justify-center text-lg font-bold text-white shadow-lg shadow-black/20 shrink-0", avatarColor)}>
+              {initials}
             </div>
-            <div>
-              <p className="text-lg font-bold text-slate-100">{order.customer_name}</p>
-              <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5 mt-1">
-                <Mail className="size-3" />
-                {order.customer?.email || 'No assigned email'}
-              </p>
+            <div className="min-w-0">
+              <p className="text-xl font-bold text-zinc-50 truncate">{order.customer_name}</p>
+              <div className="flex items-center gap-2 mt-1">
+                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">@{order.platform_user_id || 'guest'}</span>
+                 <a href="#" className="text-zinc-500 hover:text-teal-400 transition-colors">
+                   <ExternalLink className="size-3" />
+                 </a>
+              </div>
             </div>
           </div>
-          <Separator className="bg-white/[0.03]" />
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-500 font-medium">Source Shop</span>
-            <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-bold uppercase tracking-wider text-[9px]">{order.shop_name}</span>
+
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500 font-medium flex items-center gap-2">
+                <Mail className="size-3.5" /> Email
+              </span>
+              <span className="text-zinc-300 font-medium">{order.customer?.email || 'N/A'}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-500 font-medium flex items-center gap-2">
+                <Globe className="size-3.5" /> Country
+              </span>
+              <span className="text-zinc-300 font-medium uppercase tracking-wider">{order.shipping_country || 'N/A'}</span>
+            </div>
           </div>
         </div>
       </BentoCard>
 
       {order.customer_note && (
-        <div className="relative overflow-hidden rounded-3xl bg-sky-500/5 p-8 border border-sky-500/10 shadow-[inset_0_2px_40px_rgba(14,165,233,0.03)]">
-          <div className="absolute top-0 right-0 p-8 text-sky-500/10">
-            <Mail className="size-24 scale-150 rotate-12" />
-          </div>
-          <div className="relative">
-            <div className="flex items-center gap-2 mb-4">
-              <Mail className="size-4 text-sky-500" />
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-sky-500/60">Raw Customer Message</h3>
+        <div className="relative overflow-hidden rounded-2xl bg-teal-500/5 p-6 border border-teal-500/10">
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-3">
+              <Mail className="size-3.5 text-teal-400" />
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-teal-400/60">Customer Message</h3>
             </div>
-            <p className="text-lg text-slate-300 italic font-medium leading-relaxed max-w-2xl">
+            <p className="text-sm text-zinc-300 italic leading-relaxed">
               "{order.customer_note}"
             </p>
           </div>
