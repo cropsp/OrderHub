@@ -1,0 +1,50 @@
+
+@theme {
+  /* === Order Status Colors === */
+  --color-status-new: var(--color-blue-500);
+  --color-status-waiting: var(--color-amber-500);
+  --color-status-info-received: var(--color-violet-500);
+  --color-status-design-pending: var(--color-pink-500);
+  --color-status-design-ready: var(--color-cyan-500);
+  --color-status-in-production: var(--color-orange-500);
+  --color-status-shipped: var(--color-emerald-500);
+  --color-status-completed: var(--color-green-500);
+  --color-status-cancelled: var(--color-zinc-500);
+
+  /* === Surface Colors === */
+  --color-surface: var(--color-zinc-900);
+  --color-surface-hover: var(--color-zinc-800);
+  --color-surface-elevated: var(--color-zinc-800);
+
+  /* === Accent === */
+  --color-accent: var(--color-teal-400);
+  --color-accent-hover: var(--color-teal-300);
+
+  /* === Typography Scale === */
+  --font-size-metric: 2rem;
+  --font-size-heading: 1.25rem;
+  --font-size-body: 0.875rem;
+  --font-size-caption: 0.75rem;
+}
+
+@layer base {
+  *, *::before, *::after {
+    transition-property: background-color, border-color, color, opacity, box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: ease;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s infinite;
+}
