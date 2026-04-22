@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
 import { useAuth } from '@/hooks/useAuth';
+import { useToastStore } from '@/components/ui/Toast';
 import { UserRole } from '@/types/user';
 import { useCreateTTN } from '@/hooks/useShipping';
 
@@ -36,6 +37,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
   const { data: order, isLoading, dataUpdatedAt } = useOrder(orderId);
   const { user } = useAuth();
   const updateOrder = useUpdateOrder();
+  const { addToast } = useToastStore();
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const isOwner = user?.role === UserRole.OWNER;
@@ -52,6 +54,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch {
       setSaveStatus('error');
+      addToast('Failed to save changes. Please try again.', 'error');
     }
   };
 

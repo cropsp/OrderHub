@@ -23,9 +23,13 @@ function RouteLoadingFallback() {
   )
 }
 
+import { Toaster } from '@/components/ui/Toast'
+
 function App() {
   return (
-    <Routes>
+    <>
+      <Toaster />
+      <Routes>
       <Route element={<LoginPage />} path="/login" />
 
       <Route element={<RequireAuth />}>
@@ -91,6 +95,7 @@ function App() {
 
       <Route element={<Navigate replace to="/dashboard" />} path="*" />
     </Routes>
+    </>
   )
 }
 
