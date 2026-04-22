@@ -16,6 +16,7 @@ import { useAttachments, useUploadAttachment, useDeleteAttachment } from '@/hook
 import { attachmentsApi } from '@/api/attachments';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { useToastStore } from '@/components/ui/Toast';
 
 type AttachmentManagerProps = {
   orderId: string;
@@ -33,6 +34,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
   const uploadMutation = useUploadAttachment();
   const deleteMutation = useDeleteAttachment();
   const [isUploading, setIsUploading] = useState(false);
+  const { addToast } = useToastStore();
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     setIsUploading(true);
@@ -40,14 +42,15 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
       for (const file of acceptedFiles) {
         await uploadMutation.mutateAsync({ orderId, file, type: 'mockup' });
       }
-      // Force refresh the list after all uploads
+      addToast('Files uploaded successfully', 'success');
       await refetch();
     } catch (error) {
       console.error('Upload failed:', error);
+      addToast('Failed to upload files', 'error');
     } finally {
       setIsUploading(false);
     }
-  }, [orderId, uploadMutation, refetch]);
+  }, [orderId, uploadMutation, refetch, addToast]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
@@ -56,8 +59,13 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('Are you sure you want to delete this file?')) {
-      await deleteMutation.mutateAsync(id);
+    if (window.confirm('Are you sure you want to delete this file?')) {
+      try {
+        await deleteMutation.mutateAsync(id);
+        addToast('File deleted', 'success');
+      } catch (error) {
+        addToast('Failed to delete file', 'error');
+      }
     }
   };
 
@@ -75,7 +83,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Download failed:', error);
-      alert('Failed to download file. Please try again.');
+      addToast('Failed to download file', 'error');
     }
   };
 

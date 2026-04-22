@@ -30,7 +30,7 @@ export const STATUS_CATEGORIES: StatusCategory[] = [
     id: 'all',
     label: 'All',
     statuses: [],
-    color: 'slate',
+    color: 'zinc',
   },
   {
     id: 'new',
@@ -84,7 +84,7 @@ export const STATUS_CATEGORIES: StatusCategory[] = [
     id: 'cancelled',
     label: 'Cancelled',
     statuses: [ORDER_STATUS.CANCELLED],
-    color: 'slate',
+    color: 'zinc',
   },
 ];
 

@@ -11,8 +11,8 @@
 - Sprint 8 status: `DONE` (Full Persistence)
 - Sprint 9 status: `DONE` (Attachments & Designer Workflow)
 - Sprint 10 status: `DONE` (Shop Management & Manual Entry)
-- UI Modernization (v1.1) status: `DONE` (See [UI Improvement Plan](docs/UI_IMPROVEMENT_PLAN.md))
-- Sprint 11 status: `NOT STARTED`
+- UI Modernization (Block 11) status: `DONE` (Customers, Users, Imports, Dashboard unified)
+- Sprint 11 status: `NOT STARTED` (Production & Deployment)
 
 ## Architecture Schematic
 
@@ -60,8 +60,10 @@ Verified against the current tree (See [Audit Report 2026-04-21](docs/audit/REPO
 - **NEW**: Persistent rotating file logging system implemented (backend/logs/server.log).
 
 **Frontend:**
-- Completed all primary feature pages (Orders, Dashboard, Customers, Imports, Archive, Shops, Users, Settings).
-- **NEW**: Modular Order Detail view with 8 specialized sub-components.
+- **NEW**: Full-page `CreateOrderPage.tsx` replaces restrictive modal dialog.
+- **NEW**: Modernized directory pages (`CustomersPage`, `UsersPage`) with deterministic avatars.
+- **NEW**: Strategic `DashboardPage` with high-contrast intelligence widgets.
+- **NEW**: Extraction-focused `ImportsPage` with step-based sync workflow.
 
 ### Component Hierarchy (Frontend)
 ```
@@ -109,35 +111,24 @@ frontend/src/
 | PERF-1 | Route-level chunk splitting | frontend bundler | TODO |
 | TEST-1 | Smoke test coverage | vitest + playwright | TODO |
 
-### B. Post-Audit Achievements (Completed 2026-04-21)
+### B. Post-Audit Achievements (Completed 2026-04-22)
 
 **Frontend & Architecture**
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| FE-1 | Refactor `OrderDetailPanel.tsx` — SRP Violation | Extracted 8 sub-components to `detail/` | DONE |
-| FE-3 | Advanced Dashboard Analytics | Shop filtering, multi-currency, expanded attention list | DONE |
-| INFRA-1 | Implement Backend Logging System | Rotating logs with 25MB safety cap | DONE |
+| FE-1 | Refactor `OrderDetailPanel.tsx` | Extracted 8 sub-components to `detail/` | DONE |
+| FE-2 | Modernize `CreateOrderPage.tsx` | Replaced modal with spacious full-page form | DONE |
+| FE-3 | Advanced Dashboard Analytics | Shop filtering & premium telemetry widgets | DONE |
+| FE-4 | Unified CRM Visuals | Modernized Customers, Users, and Imports pages | DONE |
+| SEC-1 | MCP Security Guards | Added auth protection to /sse and /messages | DONE |
+| INFRA-1 | Backend Logging System | Rotating logs with 25MB safety cap | DONE |
 
 **Backend Resilience & Business Logic**
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| BE-1 | Implement timeouts/retries for Nova Poshta | `nova_poshta.py` | DONE |
-| BE-2 | Implement timeouts/retries for Shopify Sync | `shopify_sync.py` | DONE |
-| BE-3 | Enhance `etsy_parser.py` error thresholds | Detailed error reports | DONE |
-| AUDIT-1 | Extend `order_service.py` audit history | Log all mutations | DONE |
-
-### C. Remaining Technical Debt
-
-**Security** (Critical Priority)
-
-| ID | Task | Scope | Effort |
-|---|---|---|---|
-| SEC-1 | Add authentication guards to MCP Router | `mcp.py` — /sse and /messages | S |
-
-**Frontend Refactoring** (Medium Priority)
-
-| ID | Task | Scope | Effort |
-|---|---|---|---|
-| FE-2 | Refactor `NewOrderDialog.tsx` — SRP Violation | Extract logic to hook | M |
+| BE-1 | Nova Poshta Resilience | Timeouts/retries implemented | DONE |
+| BE-2 | Shopify Sync Resilience | Timeouts/retries implemented | DONE |
+| BE-3 | Enhanced Etsy Parser | Detailed error reporting thresholds | DONE |
+| AUDIT-1 | Order Audit History | Log all status mutations | DONE |

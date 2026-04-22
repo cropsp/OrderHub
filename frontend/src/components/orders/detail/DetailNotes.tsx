@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { debounce } from 'lodash-es';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailNotesProps {
@@ -13,9 +14,17 @@ export function DetailCustomizationInfo({ order, onUpdate }: DetailNotesProps) {
     setVal(order.custom_info || '');
   }, [order.custom_info]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const debouncedUpdate = useCallback(
+    debounce((data: Partial<OrderDetail>) => {
+      onUpdate(data);
+    }, 1000),
+    [onUpdate]
+  );
+
   const handleChange = (newVal: string) => {
     setVal(newVal);
-    onUpdate({ custom_info: newVal });
+    debouncedUpdate({ custom_info: newVal });
   };
 
   return (
@@ -41,9 +50,17 @@ export function DetailInternalNotes({ order, onUpdate }: DetailNotesProps) {
     setVal(order.internal_note || '');
   }, [order.internal_note]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const debouncedUpdate = useCallback(
+    debounce((data: Partial<OrderDetail>) => {
+      onUpdate(data);
+    }, 1000),
+    [onUpdate]
+  );
+
   const handleChange = (newVal: string) => {
     setVal(newVal);
-    onUpdate({ internal_note: newVal });
+    debouncedUpdate({ internal_note: newVal });
   };
 
   return (
