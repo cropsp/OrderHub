@@ -15,22 +15,38 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 @router.get("", response_model=DashboardResponse)
 async def get_dashboard_stats(
+    shop_id: str | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Get dashboard statistics and revenue (revenue only shown to owners)."""
+    import logging
+    logger = logging.getLogger("dashboard")
+    logger.info(f"Fetching dashboard stats for shop_id: {shop_id}, user: {current_user.email}")
     
-    # 1. Orders by Status
-    status_query = select(Order.status, func.count()).group_by(Order.status)
+    # Base filter
+    base_filter = []
+    if shop_id and shop_id != "all" and shop_id != "undefined":
+        try:
+            import uuid
+            shop_uuid = uuid.UUID(shop_id)
+            base_filter.append(Order.shop_id == shop_uuid)
+        except ValueError:
+            logger.error(f"Invalid shop_id format: {shop_id}")
+
     if current_user.role == UserRole.DESIGNER:
-        status_query = status_query.where(Order.assigned_designer_id == current_user.id)
+        base_filter.append(Order.assigned_designer_id == current_user.id)
+
+    # 1. Orders by Status
+    status_query = select(Order.status, func.count()).where(*base_filter).group_by(Order.status)
         
     status_result = await db.execute(status_query)
     orders_by_status = {status.value: count for status, count in status_result.all()}
     
     total_orders = sum(orders_by_status.values())
     attention_needed_count = orders_by_status.get(OrderStatus.NEW.value, 0) + \
-                             orders_by_status.get(OrderStatus.WAITING_INFO.value, 0)
+                             orders_by_status.get(OrderStatus.WAITING_INFO.value, 0) + \
+                             orders_by_status.get(OrderStatus.INFO_RECEIVED.value, 0)
     
     stats = DashboardStats(
         orders_by_status=orders_by_status,
@@ -42,7 +58,7 @@ async def get_dashboard_stats(
     revenue_data = []
     daily_trend = []
     if current_user.role == UserRole.OWNER:
-        # Summary Revenue
+        # Summary Revenue (Shipped + Completed)
         rev_query = (
             select(
                 Order.currency,
@@ -51,7 +67,8 @@ async def get_dashboard_stats(
                 func.sum(Order.platform_fee).label("tot_fee"),
                 func.sum(Order.shipping_np_cost).label("tot_ship"),
             )
-            .where(Order.status == OrderStatus.COMPLETED)
+            .where(Order.status.in_([OrderStatus.COMPLETED, OrderStatus.SHIPPED]))
+            .where(*base_filter)
             .group_by(Order.currency)
         )
         rev_result = await db.execute(rev_query)
@@ -73,8 +90,9 @@ async def get_dashboard_stats(
                 day_col.label("day"),
                 func.sum(Order.total_price).label("daily_rev")
             )
-            .where(Order.status == OrderStatus.COMPLETED)
+            .where(Order.status.in_([OrderStatus.COMPLETED, OrderStatus.SHIPPED]))
             .where(Order.ordered_at >= thirty_days_ago)
+            .where(*base_filter)
             .group_by(day_col)
             .order_by(day_col)
         )
@@ -87,6 +105,7 @@ async def get_dashboard_stats(
     shop_query = (
         select(Shop.name, func.count(Order.id))
         .join(Order, Order.shop_id == Shop.id)
+        .where(*base_filter)
         .group_by(Shop.name)
     )
     if current_user.role == UserRole.DESIGNER:

@@ -5,11 +5,14 @@ import { Button } from '@/components/ui/button'
 import type { User, UserRoleType } from '@/types/user'
 import { UserRole } from '@/types/user'
 
+import type { ReactNode } from 'react'
+
 type TopbarProps = {
   title: string
   description?: string
   user: User | null
   onLogout?: () => void | Promise<void>
+  actions?: ReactNode
 }
 
 function roleLabel(role: UserRoleType | undefined): string {
@@ -26,11 +29,11 @@ function roleClass(role: UserRoleType | undefined): string {
   return 'border-slate-500/40 bg-slate-300/10 text-slate-300'
 }
 
-export default function Topbar({ title, description, user, onLogout }: TopbarProps) {
+export default function Topbar({ title, description, user, onLogout, actions }: TopbarProps) {
   return (
     <header className="border-b border-slate-800/90 bg-slate-950/80 px-4 py-4 backdrop-blur md:px-6">
       <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.18em] uppercase text-slate-400">
             <Sparkles className="size-3.5 text-teal-300" />
             Sprint 3 shell
@@ -38,6 +41,8 @@ export default function Topbar({ title, description, user, onLogout }: TopbarPro
           <h1 className="mt-1 truncate text-xl font-semibold text-slate-100">{title}</h1>
           {description ? <p className="mt-1 truncate text-sm text-slate-400">{description}</p> : null}
         </div>
+
+        {actions && <div className="hidden items-center gap-2 lg:flex">{actions}</div>}
 
         <div className="flex items-center gap-2.5">
           <Badge className={roleClass(user?.role)} variant="outline">

@@ -10,24 +10,36 @@ import StatCards from '@/components/dashboard/StatCards';
 import RevenueChart from '@/components/dashboard/RevenueChart';
 import ShopDistributionChart from '@/components/dashboard/ShopChart';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useShops } from '@/hooks/useShops';
+import { useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function DashboardPage() {
-  const { data, isLoading, error } = useDashboard();
-  const { data: recentOrders, isLoading: isRecentLoading } = useOrders({ page: 1, limit: 10 });
+  const [selectedShopId, setSelectedShopId] = useState<string | undefined>(undefined);
+  const { data: shops } = useShops();
+  const { data, isLoading, error } = useDashboard(selectedShopId);
+  const { data: recentOrders, isLoading: isRecentLoading } = useOrders({ 
+    page: 1, 
+    limit: 10,
+    shop_id: selectedShopId 
+  });
   const { data: attentionNew, isLoading: isNewAttentionLoading } = useOrders({
     page: 1,
     limit: 10,
     status: 'new',
+    shop_id: selectedShopId
   });
   const { data: attentionWaitingInfo, isLoading: isWaitingAttentionLoading } = useOrders({
     page: 1,
     limit: 10,
     status: 'waiting_info',
+    shop_id: selectedShopId
   });
   const { data: attentionInfoReceived, isLoading: isInfoAttentionLoading } = useOrders({
     page: 1,
     limit: 10,
     status: 'info_received',
+    shop_id: selectedShopId
   });
 
   const isAttentionLoading = isNewAttentionLoading || isWaitingAttentionLoading || isInfoAttentionLoading;
@@ -64,6 +76,24 @@ export default function DashboardPage() {
     <ShellPage
       description="Real-time overview of your order pipeline and financial performance."
       title="Dashboard Overview"
+      actions={
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-500">Filter by Shop:</span>
+          <Select value={selectedShopId || 'all'} onValueChange={(val) => setSelectedShopId(val === 'all' ? undefined : val)}>
+            <SelectTrigger className="w-[200px] border-slate-800 bg-slate-900/50 backdrop-blur-md text-slate-100">
+              <SelectValue placeholder="All Shops" />
+            </SelectTrigger>
+            <SelectContent className="border-slate-800 bg-slate-900 text-slate-100">
+              <SelectItem value="all" className="focus:bg-slate-800 focus:text-slate-100 text-slate-200">All Shops</SelectItem>
+              {shops?.map((shop) => (
+                <SelectItem key={shop.id} value={shop.id} className="focus:bg-slate-800 focus:text-slate-100 text-slate-200">
+                  {shop.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      }
     >
       <div className="space-y-8 animate-fade-in">
         {isLoading || !data ? (

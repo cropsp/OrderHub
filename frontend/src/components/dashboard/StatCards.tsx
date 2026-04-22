@@ -14,14 +14,16 @@ type StatCardsProps = {
 export default function StatCards({ data }: StatCardsProps) {
   const { stats, revenue_by_currency } = data;
   
-  // Get primary revenue (assume first currency for now or USD)
-  const primaryRevenue = revenue_by_currency.find(r => r.currency === 'USD') || revenue_by_currency[0];
+  // Show all currencies in profit card
+  const profitDisplay = revenue_by_currency.length > 0 
+    ? revenue_by_currency.map(r => `${r.net_profit.toLocaleString()} ${r.currency}`).join(' / ')
+    : '0 USD';
 
   const cards = [
     {
       title: 'Net Profit',
-      value: primaryRevenue ? `${primaryRevenue.net_profit.toLocaleString()} ${primaryRevenue.currency}` : '0',
-      description: 'Estimated net profit (Completed)',
+      value: profitDisplay,
+      description: 'Estimated profit (Shipped + Completed)',
       icon: DollarSign,
       color: 'text-teal-400',
     },
@@ -35,13 +37,13 @@ export default function StatCards({ data }: StatCardsProps) {
     {
       title: 'Attention Needed',
       value: stats.attention_needed_count.toString(),
-      description: 'New or missing info',
+      description: 'New, Waiting or Info Received',
       icon: AlertCircle,
       color: 'text-amber-400',
     },
     {
       title: 'Success Rate',
-      value: '98.5%', // Mock for now, could be calculated
+      value: '98.5%', // Mock for now
       description: 'Satisfaction score',
       icon: CheckCircle2,
       color: 'text-indigo-400',

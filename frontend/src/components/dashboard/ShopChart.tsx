@@ -83,8 +83,8 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
              <p className="text-xs font-bold uppercase tracking-widest text-slate-500">No data yet</p>
           </div>
         ) : (
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-[300px] min-h-[300px] w-full">
+            <ResponsiveContainer width="100%" height="100%" minHeight={300}>
               <PieChart>
                 <AnyPie
                   data={data}

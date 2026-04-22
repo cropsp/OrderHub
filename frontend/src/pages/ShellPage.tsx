@@ -9,6 +9,7 @@ type ShellPageProps = {
   title: string
   description?: string
   children: ReactNode
+  actions?: ReactNode
 }
 
 function SessionLoading() {
@@ -38,7 +39,7 @@ function toLayoutShops(items: { id: string; name: string }[]): LayoutShop[] {
   ]
 }
 
-export default function ShellPage({ title, description, children }: ShellPageProps) {
+export default function ShellPage({ title, description, children, actions }: ShellPageProps) {
   const { isLoading, logout, user } = useAuth()
   const shopsQuery = useShops({ enabled: Boolean(user) })
 
@@ -55,6 +56,7 @@ export default function ShellPage({ title, description, children }: ShellPagePro
       shops={layoutShops}
       title={title}
       user={user}
+      actions={actions}
     >
       {children}
     </AppLayout>

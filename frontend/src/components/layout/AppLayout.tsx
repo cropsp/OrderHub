@@ -12,9 +12,18 @@ type AppLayoutProps = {
   shops?: LayoutShop[]
   onLogout?: () => void | Promise<void>
   children: ReactNode
+  actions?: ReactNode
 }
 
-export default function AppLayout({ title, description, user, shops = [], onLogout, children }: AppLayoutProps) {
+export default function AppLayout({ 
+  title, 
+  description, 
+  user, 
+  shops = [], 
+  onLogout, 
+  children,
+  actions 
+}: AppLayoutProps) {
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_85%_10%,rgba(20,184,166,0.12),transparent_30%),radial-gradient(circle_at_5%_90%,rgba(251,146,60,0.12),transparent_25%),#020617] text-slate-100">
       <div className="mx-auto flex min-h-screen w-full max-w-[1600px]">
@@ -23,7 +32,13 @@ export default function AppLayout({ title, description, user, shops = [], onLogo
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar description={description} onLogout={onLogout} title={title} user={user} />
+          <Topbar 
+            description={description} 
+            onLogout={onLogout} 
+            title={title} 
+            user={user} 
+            actions={actions}
+          />
           <div className="border-b border-slate-800/90 bg-slate-950/70 lg:hidden">
             <Sidebar compact shops={shops} user={user} />
           </div>
