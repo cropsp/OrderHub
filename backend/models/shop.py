@@ -17,6 +17,7 @@ from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class ShopPlatform(str, enum.Enum):
     ETSY = "etsy"
     SHOPIFY = "shopify"
+    MANUAL = "manual"
 
 
 class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
