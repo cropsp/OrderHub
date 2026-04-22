@@ -1,17 +1,10 @@
 import { format } from 'date-fns';
-import { Store, User, Clock } from 'lucide-react';
-import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card';
-
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { ORDER_STATUS } from '@/lib/order-status';
+import { Clock } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { getShopTheme } from '@/utils/shopTheme';
+import { getInitials, getAvatarColor } from '@/utils/avatar';
+import { cn } from '@/lib/utils';
 import type { OrderListItem } from '@/types/order';
-import { useUpdateOrderStatus } from '@/hooks/useOrders';
 
 type PipelineCardProps = {
   order: OrderListItem;
@@ -19,61 +12,49 @@ type PipelineCardProps = {
 };
 
 export default function PipelineCard({ order, onClick }: PipelineCardProps) {
-  const { mutate: updateStatus, isPending } = useUpdateOrderStatus();
-
-  const handleStatusChange = (newStatus: string) => {
-    updateStatus({ orderId: order.id, status: newStatus });
-  };
+  const shopTheme = getShopTheme(order.shop_name ?? '');
+  const avatarColor = getAvatarColor(order.customer_name ?? '');
+  const initials = getInitials(order.customer_name ?? '??');
 
   return (
+    /* TODO: implement D&D in future sprint */
     <Card 
-      className="group border-slate-800/80 bg-slate-900/60 transition-all hover:border-teal-500/30 hover:bg-slate-900/90 shadow-sm shadow-black/20 cursor-pointer"
+      className="group bg-zinc-900 border-zinc-800 transition-all hover:border-teal-500/30 hover:bg-zinc-800/80 shadow-sm shadow-black/20 cursor-pointer"
       onClick={onClick}
     >
-      <CardHeader className="space-y-1.5 p-3">
+      <CardHeader className="space-y-2 p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] font-bold tracking-wider text-teal-400">
+          <span className="font-mono text-[10px] font-bold tracking-wider text-zinc-500">
             #{order.external_id}
           </span>
-          <div className="flex items-center gap-1 text-[10px] text-slate-500">
-            <Clock className="size-3" />
-            {format(new Date(order.ordered_at), 'MMM dd')}
+          <div className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider", shopTheme.bg, shopTheme.text)}>
+            {order.shop_name}
           </div>
         </div>
-        <h4 className="line-clamp-2 text-sm font-medium leading-tight text-slate-200">
+        <h4 className="line-clamp-2 text-sm font-medium leading-tight text-zinc-100">
           {order.title}
         </h4>
       </CardHeader>
       
-      <CardContent className="space-y-2 p-3 pt-0">
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          <Store className="size-3.5 shrink-0 text-slate-500" />
-          <span className="truncate">{order.shop_name}</span>
+      <CardContent className="space-y-3 p-4 pt-0">
+        <div className="flex items-center gap-2">
+          <div className={cn("size-6 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0", avatarColor)}>
+            {initials}
+          </div>
+          <span className="text-xs text-zinc-300 truncate font-medium">{order.customer_name}</span>
         </div>
-        <div className="flex items-center gap-1.5 text-xs text-slate-300 font-medium">
-          <User className="size-3.5 shrink-0 text-slate-500" />
-          <span className="truncate">{order.customer_name}</span>
+        
+        <div className="flex items-center justify-between mt-auto pt-2 border-t border-zinc-800/60">
+          <div className="flex items-baseline gap-1">
+            <span className="text-sm font-bold text-zinc-100">{order.total_price}</span>
+            <span className="text-[10px] font-medium text-zinc-500 uppercase">{order.currency}</span>
+          </div>
+          <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+            <Clock className="size-3" />
+            {format(new Date(order.ordered_at), 'MMM dd')}
+          </div>
         </div>
       </CardContent>
-
-      <CardFooter className="border-t border-slate-800/40 p-2 bg-slate-950/20">
-        <Select 
-          defaultValue={order.status} 
-          onValueChange={handleStatusChange}
-          disabled={isPending}
-        >
-          <SelectTrigger className="h-7 w-full border-transparent bg-transparent px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200 focus:ring-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-slate-950 border-slate-800 text-slate-200">
-            {Object.entries(ORDER_STATUS).map(([key, value]) => (
-              <SelectItem key={value} value={value} className="text-[10px] uppercase font-bold tracking-widest focus:bg-teal-500/20 focus:text-teal-100">
-                {key.replace('_', ' ')}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </CardFooter>
     </Card>
   );
 }

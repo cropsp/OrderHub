@@ -25,7 +25,7 @@ export default function PipelineBoard({ orders, columnStatuses, isLoading, onSel
   };
 
   return (
-    <ScrollArea className="w-full whitespace-nowrap rounded-md border border-slate-800/60 bg-slate-900/40 backdrop-blur-sm">
+    <ScrollArea className="w-full whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-900/40 backdrop-blur-sm">
       <div className="flex w-max min-h-[600px] p-6 gap-6">
         {columnStatuses.map((status) => {
           const columnOrders = orders.filter((o) => o.status === status);
@@ -33,9 +33,9 @@ export default function PipelineBoard({ orders, columnStatuses, isLoading, onSel
           return (
             <div key={status} className="flex h-full w-[300px] flex-col shrink-0">
               <div className="mb-4 flex items-center justify-between px-1">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
                   {getStatusLabel(status)}
-                  <span className="ml-2 text-[10px] tabular-nums text-slate-600">
+                  <span className="ml-2 text-[10px] tabular-nums text-zinc-600 bg-zinc-800/50 px-1.5 py-0.5 rounded-full">
                     {columnOrders.length}
                   </span>
                 </h3>
@@ -43,8 +43,8 @@ export default function PipelineBoard({ orders, columnStatuses, isLoading, onSel
               
               <div className="flex flex-col gap-3">
                 {columnOrders.length === 0 ? (
-                  <div className="flex aspect-[4/1] items-center justify-center rounded-lg border border-dashed border-slate-800/50 bg-slate-950/20">
-                    <p className="text-[10px] font-medium text-slate-600">Empty</p>
+                  <div className="flex aspect-[4/1] items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/20">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-700">Empty</p>
                   </div>
                 ) : (
                   columnOrders.map((order) => (
@@ -56,7 +56,7 @@ export default function PipelineBoard({ orders, columnStatuses, isLoading, onSel
           );
         })}
       </div>
-      <ScrollBar orientation="horizontal" className="bg-slate-950/50" />
+      <ScrollBar orientation="horizontal" className="bg-zinc-950/50" />
     </ScrollArea>
   );
 }
