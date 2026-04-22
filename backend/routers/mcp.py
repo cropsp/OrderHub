@@ -13,7 +13,8 @@ from sqlalchemy.orm import selectinload
 
 from database import get_db, async_session_factory
 from models.order import Order, OrderStatus
-from routers.auth import get_current_active_user
+from models.user import User
+from routers.dependencies import get_current_user
 import mcp.types as types
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
@@ -97,15 +98,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[
 
 
 @router.get("/sse")
-async def handle_sse(request: Request):
+async def handle_sse(request: Request, current_user: User = Depends(get_current_user)):
     """
     Endpoint for AI agent to connect to MCP via Server-Sent Events.
     Connect here with the Claude Desktop SSE transport.
     """
     global sse_transport
-    
-    # Verify authentication
-    current_user = await get_current_active_user(request)
     
     # Standard MCP flow uses a single URL for POST messages relative to the SSE URL
     transport = SseServerTransport("/api/mcp/messages")
@@ -123,12 +121,9 @@ async def handle_sse(request: Request):
 
 
 @router.post("/messages")
-async def handle_messages(request: Request):
+async def handle_messages(request: Request, current_user: User = Depends(get_current_user)):
     """Endpoint for AI agent to send JSON-RPC requests to the MCP server."""
     global sse_transport
-    
-    # Verify authentication
-    await get_current_active_user(request)
     
     if not sse_transport:
         raise HTTPException(status_code=400, detail="SSE transport not initialized. Connect to /sse first.")
