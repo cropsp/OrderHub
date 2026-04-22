@@ -1,10 +1,10 @@
-import { LogOut, Sparkles } from 'lucide-react'
-
+import { LogOut, Layout } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { getInitials, getAvatarColor } from '@/utils/avatar'
+import { cn } from '@/lib/utils'
 import type { User, UserRoleType } from '@/types/user'
 import { UserRole } from '@/types/user'
-
 import type { ReactNode } from 'react'
 
 type TopbarProps = {
@@ -23,45 +23,53 @@ function roleLabel(role: UserRoleType | undefined): string {
 }
 
 function roleClass(role: UserRoleType | undefined): string {
-  if (role === UserRole.OWNER) return 'border-amber-400/40 bg-amber-300/15 text-amber-200'
-  if (role === UserRole.MANAGER) return 'border-sky-400/40 bg-sky-300/15 text-sky-200'
-  if (role === UserRole.DESIGNER) return 'border-teal-400/40 bg-teal-300/15 text-teal-200'
-  return 'border-slate-500/40 bg-slate-300/10 text-slate-300'
+  if (role === UserRole.OWNER) return 'border-teal-500/20 bg-teal-500/5 text-teal-400'
+  if (role === UserRole.MANAGER) return 'border-zinc-700 bg-zinc-800 text-zinc-300'
+  if (role === UserRole.DESIGNER) return 'border-zinc-700 bg-zinc-800 text-zinc-300'
+  return 'border-zinc-800 bg-zinc-900 text-zinc-500'
 }
 
 export default function Topbar({ title, description, user, onLogout, actions }: TopbarProps) {
+  const initials = getInitials(user?.full_name ?? 'Guest');
+  const avatarColor = getAvatarColor(user?.full_name ?? '');
+
   return (
-    <header className="border-b border-slate-800/90 bg-slate-950/80 px-4 py-4 backdrop-blur md:px-6">
-      <div className="flex items-center justify-between gap-4">
+    <header className="border-b border-zinc-800 bg-zinc-950/50 px-4 py-6 backdrop-blur-md md:px-10">
+      <div className="flex items-center justify-between gap-6">
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-2 text-[11px] font-semibold tracking-[0.18em] uppercase text-slate-400">
-            <Sparkles className="size-3.5 text-teal-300" />
-            Sprint 3 shell
-          </p>
-          <h1 className="mt-1 truncate text-xl font-semibold text-slate-100">{title}</h1>
-          {description ? <p className="mt-1 truncate text-sm text-slate-400">{description}</p> : null}
+          <div className="flex items-center gap-2 mb-1">
+             <Layout className="size-3.5 text-zinc-500" />
+             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">OrderHub Console</span>
+          </div>
+          <h1 className="truncate text-2xl font-bold text-zinc-50 tracking-tight">{title}</h1>
+          {description ? <p className="mt-1 truncate text-xs text-zinc-500 font-medium">{description}</p> : null}
         </div>
 
-        {actions && <div className="hidden items-center gap-2 lg:flex">{actions}</div>}
+        <div className="flex items-center gap-6">
+          {actions && <div className="hidden items-center gap-3 lg:flex">{actions}</div>}
 
-        <div className="flex items-center gap-2.5">
-          <Badge className={roleClass(user?.role)} variant="outline">
-            {roleLabel(user?.role)}
-          </Badge>
-          <span className="hidden text-sm text-slate-300 sm:inline">{user?.full_name ?? 'Guest'}</span>
-          <Button
-            disabled={!onLogout}
-            onClick={() => {
-              if (onLogout) {
-                void onLogout()
-              }
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <LogOut className="size-4" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-4 pl-6 border-l border-zinc-800">
+            <div className="flex flex-col items-end mr-1">
+              <span className="text-sm font-bold text-zinc-200">{user?.full_name ?? 'Guest'}</span>
+              <Badge className={cn("mt-1 text-[9px] h-4 uppercase tracking-wider font-bold px-1.5", roleClass(user?.role))} variant="outline">
+                {roleLabel(user?.role)}
+              </Badge>
+            </div>
+            
+            <div className={cn("size-10 rounded-xl flex items-center justify-center text-xs font-bold text-white shadow-lg", avatarColor)}>
+              {initials}
+            </div>
+
+            <Button
+              disabled={!onLogout}
+              onClick={() => onLogout?.()}
+              size="icon"
+              variant="ghost"
+              className="size-10 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-zinc-500"
+            >
+              <LogOut className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </header>
