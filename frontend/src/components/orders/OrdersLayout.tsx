@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Filter } from 'lucide-react';
 import { useOrders } from '@/hooks/useOrders';
 import { useShops } from '@/hooks/useShops';
@@ -7,7 +8,6 @@ import StatusTabs from './StatusTabs';
 import ViewToggle from './ViewToggle';
 import OrdersTable from './OrdersTable';
 import PipelineBoard from './PipelineBoard';
-import NewOrderDialog from './NewOrderDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
@@ -27,6 +27,7 @@ type OrdersLayoutProps = {
 };
 
 export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersLayoutProps) {
+  const navigate = useNavigate();
   // 1. View State
   const [view, setView] = useState<'table' | 'board'>('table');
   
@@ -36,9 +37,6 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
   const [selectedShopId, setSelectedShopId] = useState<string | undefined>(fixedShopId);
 
   const { data: shops } = useShops();
-  
-  // 3. Selection & Modal State
-  const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   
   // 4. Fetch data
   const filters: OrderListFilters = {
@@ -98,8 +96,8 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
           <div className="flex items-center gap-3 shrink-0">
             {!isArchive && (
               <Button 
-                onClick={() => setIsNewOrderOpen(true)}
-                className="bg-teal-500 hover:bg-teal-400 text-zinc-950 font-bold h-10 px-6 rounded-xl shadow-lg shadow-teal-500/20 border-none"
+                onClick={() => navigate('/orders/new')}
+                className="bg-teal-500 hover:bg-teal-400 text-zinc-950 font-bold h-10 px-6 rounded-xl shadow-lg shadow-teal-500/20 border-none transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 <Plus className="mr-2 size-4" /> New Order
               </Button>
@@ -132,11 +130,6 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
           />
         )}
       </div>
-
-      <NewOrderDialog 
-        open={isNewOrderOpen} 
-        onOpenChange={setIsNewOrderOpen} 
-      />
     </div>
   );
 }
