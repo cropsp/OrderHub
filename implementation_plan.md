@@ -133,3 +133,6 @@ frontend/src/
 | BE-3 | Enhanced Etsy Parser | Detailed error reporting thresholds | DONE |
 | AUDIT-1 | Order Audit History | Log all status mutations | DONE |
 | BUG-1 | Order Status Persistence | Fixed frontend-backend sync in OrderDetailView | DONE |
+| BE-4 | Manual Shop Creation | Fixed Enum conflict in DB and backend (MANUAL) | DONE |
+| FE-5 | Navigation & Dropdowns | Fixed Back button history and Status dropdown UX | DONE |
+| FE-6 | Shops UI Polish | Fixed null checks and ID display in ShopsPage | DONE |

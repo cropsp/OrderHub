@@ -75,6 +75,7 @@ async def create_shop(
     db.add(shop)
     await db.flush()
     await db.refresh(shop)
+    await db.commit()
     
     resp = ShopDetailResponse.model_validate({
         **shop.__dict__,
@@ -155,6 +156,7 @@ async def update_shop(
              shop.np_api_key_encrypted = encrypt_value(body.np_api_key)
              
     await db.flush()
+    await db.commit()
     
     return await get_shop(shop_id, current_user, db)
 
@@ -174,6 +176,7 @@ async def delete_shop(
         
     shop.is_active = False
     await db.flush()
+    await db.commit()
 
 
 @router.post("/{shop_id}/sync")

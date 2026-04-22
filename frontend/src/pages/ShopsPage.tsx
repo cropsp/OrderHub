@@ -45,10 +45,21 @@ import { useAuth } from '@/hooks/useAuth';
 import type { ShopPlatform } from '@/types/common';
 import { cn } from '@/lib/utils';
 
-function getErrorMessage(error: unknown) {
+function getErrorMessage(error: unknown): string {
   if (error && typeof error === 'object' && 'response' in error) {
-    const response = (error as { response?: { data?: { detail?: string } } }).response;
-    return response?.data?.detail ?? 'Request failed';
+    const data = (error as any).response?.data;
+    
+    // Handle FastAPI validation errors (array of objects)
+    if (data?.detail && Array.isArray(data.detail)) {
+      return data.detail.map((err: any) => `${err.loc.join('.')}: ${err.msg}`).join(', ');
+    }
+    
+    // Handle standard string detail
+    if (data?.detail && typeof data.detail === 'string') {
+      return data.detail;
+    }
+
+    return 'Request failed';
   }
 
   if (error instanceof Error) return error.message;
@@ -418,10 +429,10 @@ export default function ShopsPage() {
                           >
                             <Store className="size-5" />
                           </div>
-                          <div className="space-y-1">
-                             <p className="text-sm font-bold text-zinc-100 tracking-tight">{shop.name}</p>
-                             <p className="text-[10px] text-zinc-500 font-mono">ID: {shop.id.slice(0, 8)}...</p>
-                          </div>
+                           <div className="space-y-1">
+                              <p className="text-sm font-bold text-zinc-100 tracking-tight">{shop?.name || 'Unnamed Store'}</p>
+                              <p className="text-[10px] text-zinc-500 font-mono">ID: {shop?.id?.slice(0, 8) || 'unknown'}...</p>
+                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -484,7 +495,7 @@ export default function ShopsPage() {
                               title="Delete"
                               className="h-9 w-9 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-xl"
                               onClick={() => {
-                                if (window.confirm(`Are you sure you want to deactivate ${shop.name}?`)) {
+                                if (window.confirm(`Are you sure you want to deactivate ${shop?.name || 'this store'}?`)) {
                                   deleteShop.mutate(shop.id);
                                 }
                               }}
