@@ -106,7 +106,7 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
             setTimeout(() => setSaveStatus('idle'), 3000);
           }
         }}
-        onClose={() => navigate('/orders')}
+        onClose={() => navigate(-1)}
       />
 
       {/* 2. MAIN CONTENT GRID */}
@@ -163,48 +163,45 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
               </h3>
               
               <div className="space-y-4">
-                <div className="flex items-center justify-between bg-zinc-950/40 p-3 rounded-lg border border-zinc-800/50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[11px] text-zinc-500 font-medium leading-none">Current status</span>
-                    <div className="mt-1">
-                      <StatusBadge status={order.status} size="sm" />
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <div className="flex items-center justify-between bg-zinc-950/40 p-3 rounded-lg border border-zinc-800/50 cursor-pointer hover:bg-zinc-900/60 transition-all group">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-zinc-500 font-medium leading-none">Current status</span>
+                        <div className="mt-1">
+                          <StatusBadge status={order.status} size="sm" />
+                        </div>
+                      </div>
+                      <ChevronDown size={14} className="text-zinc-500 group-hover:text-zinc-300 transition-colors" />
                     </div>
-                  </div>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 bg-zinc-900 border border-zinc-800 rounded hover:bg-zinc-800 transition-all">
-                        <ChevronDown size={14} className="text-zinc-500" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800 text-zinc-300 w-48 p-1.5 rounded-xl shadow-2xl">
-                      {Object.entries(ORDER_STATUS).map(([key, value]) => (
-                        <DropdownMenuItem 
-                          key={value} 
-                          onSelect={async () => {
-                            if (!order) return;
-                            setSaveStatus('saving');
-                            try {
-                              await updateStatus.mutateAsync({ orderId: order.id, status: value });
-                              setSaveStatus('saved');
-                              setTimeout(() => setSaveStatus('idle'), 2000);
-                            } catch (err) {
-                              setSaveStatus('error');
-                              addToast('Failed to update status', 'error');
-                              setTimeout(() => setSaveStatus('idle'), 3000);
-                            }
-                          }}
-                          className={cn(
-                            "text-[9px] font-bold uppercase tracking-widest p-2 rounded-lg focus:bg-zinc-800 focus:text-white cursor-pointer mb-0.5 last:mb-0",
-                            order.status === value ? "bg-teal-500/10 text-teal-400" : ""
-                          )}
-                        >
-                          {key.replace(/_/g, ' ')}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" sideOffset={4} className="bg-zinc-900 border-zinc-800 text-zinc-300 w-[240px] p-1.5 rounded-xl shadow-2xl">
+                    {Object.entries(ORDER_STATUS).map(([key, value]) => (
+                      <DropdownMenuItem 
+                        key={value} 
+                        onSelect={async () => {
+                          if (!order) return;
+                          setSaveStatus('saving');
+                          try {
+                            await updateStatus.mutateAsync({ orderId: order.id, status: value });
+                            setSaveStatus('saved');
+                            setTimeout(() => setSaveStatus('idle'), 2000);
+                          } catch (err) {
+                            setSaveStatus('error');
+                            addToast('Failed to update status', 'error');
+                            setTimeout(() => setSaveStatus('idle'), 3000);
+                          }
+                        }}
+                        className={cn(
+                          "text-[9px] font-bold uppercase tracking-widest p-2 rounded-lg focus:bg-zinc-800 focus:text-white cursor-pointer mb-0.5 last:mb-0",
+                          order.status === value ? "bg-teal-500/10 text-teal-400" : ""
+                        )}
+                      >
+                        {key.replace(/_/g, ' ')}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <div className="flex items-center justify-between px-1">
                   <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-widest flex items-center gap-2">
