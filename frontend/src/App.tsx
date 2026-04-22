@@ -14,6 +14,7 @@ const CustomersPage = lazy(() => import('@/pages/CustomersPage'))
 const ShopsPage = lazy(() => import('@/pages/ShopsPage'))
 const UsersPage = lazy(() => import('@/pages/UsersPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const OrderDetailPage = lazy(() => import('@/pages/OrderDetailPage'))
 
 function RouteLoadingFallback() {
   return (
@@ -49,6 +50,14 @@ function App() {
             </Suspense>
           }
           path="/orders"
+        />
+        <Route
+          element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <OrderDetailPage />
+            </Suspense>
+          }
+          path="/orders/:id"
         />
         <Route
           element={

@@ -1,6 +1,5 @@
 import { MapPin, Phone, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { BentoCard } from './BentoCard';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailLogisticsProps {
@@ -12,51 +11,54 @@ interface DetailLogisticsProps {
 
 export function DetailLogistics({ order, canManageShipping, isPending, onGenerateTTN }: DetailLogisticsProps) {
   return (
-    <BentoCard title="Shipping & Logistics" icon={MapPin}>
-      <div className="space-y-6">
-        <div className="flex items-start gap-4">
-          <div className="size-10 rounded-xl bg-sky-500/10 flex items-center justify-center border border-sky-500/10 mt-1 shrink-0">
-            <MapPin className="size-5 text-sky-500" />
-          </div>
-          <div className="text-sm text-zinc-300 leading-relaxed space-y-1">
-            <p className="font-bold text-zinc-100">{order.shipping_name}</p>
-            <p>{order.shipping_street_1}</p>
-            {order.shipping_street_2 && <p>{order.shipping_street_2}</p>}
-            <p>{order.shipping_city}, {order.shipping_state} {order.shipping_zip}</p>
-            <p className="font-bold text-zinc-600 uppercase tracking-[0.3em] mt-2 text-[10px]">{order.shipping_country}</p>
-          </div>
-        </div>
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
+      <div className="p-3.5">
+        <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-3.5 px-0.5">
+          Shipping & Logistics
+        </h3>
         
-        {order.shipping_phone && (
-          <div className="flex items-center gap-3 pl-14 text-xs text-zinc-400">
-            <Phone className="size-3.5" />
-            <span>{order.shipping_phone}</span>
-          </div>
-        )}
-
-        <div className="pt-2">
-          {order.ttn_number ? (
-            <div className="p-4 rounded-2xl bg-teal-500/10 border border-teal-500/20 group cursor-pointer hover:bg-teal-500/15 transition-colors">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[10px] font-bold text-teal-500 uppercase tracking-widest">Tracking (TTN)</p>
-                <ClipboardList className="size-3 text-teal-500/40" />
-              </div>
-              <p className="font-mono text-xl text-zinc-100 font-bold tracking-tighter">{order.ttn_number}</p>
+        <div className="space-y-2.5 px-0.5">
+          <div className="flex items-start gap-3">
+            <div className="text-[10px] text-zinc-400 leading-tight space-y-0">
+              <p className="font-bold text-zinc-200">{order.shipping_name || 'No recipient'}</p>
+              <p>{order.shipping_street_1}</p>
+              {order.shipping_street_2 && <p>{order.shipping_street_2}</p>}
+              <p>{order.shipping_city}, {order.shipping_state} {order.shipping_zip}</p>
+              <p className="font-black text-zinc-600 uppercase tracking-widest mt-1 text-[8px]">{order.shipping_country}</p>
             </div>
-          ) : (
-            order.shipping_country === 'UA' && canManageShipping && (
-              <Button 
-                className="w-full py-6 rounded-2xl bg-zinc-900 border-zinc-800 hover:bg-zinc-800 text-teal-500 font-bold tracking-tight"
-                variant="outline"
-                disabled={isPending}
-                onClick={onGenerateTTN}
-              >
-                {isPending ? 'Connecting NP...' : 'Generate Shipping Label (NP)'}
-              </Button>
-            )
+          </div>
+          
+          {order.shipping_phone && (
+            <div className="flex items-center gap-1.5 text-[9px] text-zinc-500 font-bold uppercase tracking-widest pt-1">
+              <Phone className="size-2.5 text-zinc-700" />
+              <span>{order.shipping_phone}</span>
+            </div>
+          )}
+
+          {order.ttn_number && (
+            <div className="mt-2 p-2.5 rounded-lg bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-colors cursor-pointer group">
+              <div className="flex items-center justify-between mb-0.5">
+                <p className="text-[8px] font-black text-teal-500/70 uppercase tracking-widest">Tracking (TTN)</p>
+                <ClipboardList className="size-2.5 text-teal-500/40" />
+              </div>
+              <p className="font-mono text-xs text-zinc-100 font-bold tracking-tight">{order.ttn_number}</p>
+            </div>
           )}
         </div>
       </div>
-    </BentoCard>
+
+      {!order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
+        <div className="p-2 border-t border-zinc-800/50 bg-zinc-950/20">
+          <Button 
+            className="w-full h-8 rounded-lg bg-zinc-800 border border-zinc-800 hover:bg-zinc-800/80 hover:border-zinc-700 text-teal-400 font-bold text-[9px] uppercase tracking-widest transition-all"
+            variant="ghost"
+            disabled={isPending}
+            onClick={onGenerateTTN}
+          >
+            {isPending ? 'Connecting...' : 'Generate NP Label'}
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

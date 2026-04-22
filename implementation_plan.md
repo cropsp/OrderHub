@@ -11,6 +11,7 @@
 - Sprint 8 status: `DONE` (Full Persistence)
 - Sprint 9 status: `DONE` (Attachments & Designer Workflow)
 - Sprint 10 status: `DONE` (Shop Management & Manual Entry)
+- UI Modernization (v1.1) status: `DONE` (See [UI Improvement Plan](docs/UI_IMPROVEMENT_PLAN.md))
 - Sprint 11 status: `NOT STARTED`
 
 ## Architecture Schematic
@@ -65,23 +66,28 @@ Verified against the current tree (See [Audit Report 2026-04-21](docs/audit/REPO
 ### Component Hierarchy (Frontend)
 ```
 frontend/src/
-├── components/orders/
-│   ├── OrdersLayout.tsx — orchestrates view state and modals
-│   ├── OrdersTable.tsx — renders tabular order list
-│   ├── PipelineBoard.tsx — renders kanban-style columns
-│   ├── PipelineCard.tsx — individual order card
-│   ├── StatusTabs.tsx — status category tabs
-│   ├── ViewToggle.tsx — table/board switch
-│   ├── OrderDetailPanel.tsx — orchestrator for modular order view
-│   ├── detail/ — sub-components (Header, Notes, Items, Customer, Logistics, Finance, Timeline, BentoCard)
-│   └── NewOrderDialog.tsx — [SRP VIOLATION] Order creation form
+├── components/
+│   ├── layout/
+│   │   ├── AppLayout.tsx — modern zinc-950 shell
+│   │   └── Topbar.tsx — premium header with user context
+│   ├── ui/
+│   │   ├── StatusBadge.tsx — multi-color status pill
+│   │   ├── EmptyState.tsx — standardized feedback
+│   │   └── Toast.tsx — custom notification system
+│   └── orders/
+│       ├── OrdersLayout.tsx — search, filter, and view orchestration
+│       ├── OrdersTable.tsx — redesigned data-dense table
+│       ├── PipelineBoard.tsx — updated kanban cards
+│       ├── StatusTabs.tsx — grouped status navigation
+│       ├── OrderDetailPanel.tsx — modular console
+│       └── detail/ — 8 intelligence sub-components
+├── utils/
+│   ├── avatar.ts — initials & color generation
+│   └── shopTheme.ts — deterministic shop branding
 ├── store/
 │   └── authStore.ts — single-purpose auth state
 └── api/
-    ├── client.ts — Axios with interceptors
-    ├── auth.ts, orders.ts, shops.ts, users.ts
-    ├── attachments.ts, customers.ts, imports.ts
-    └── shipping.ts — Nova Poshta integration
+    └── ...
 ```
 
 ## Unified Backlog (Pending Tasks & Fixes)

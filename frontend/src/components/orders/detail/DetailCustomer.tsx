@@ -1,8 +1,6 @@
-import { User, Mail, Globe, ExternalLink } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
-import { BentoCard } from './BentoCard';
-import { getInitials, getAvatarColor } from '@/utils/avatar';
+import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getInitials, getAvatarColor } from '@/utils/avatar';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailCustomerProps {
@@ -10,56 +8,50 @@ interface DetailCustomerProps {
 }
 
 export function DetailCustomer({ order }: DetailCustomerProps) {
-  const avatarColor = getAvatarColor(order.customer_name ?? '');
-  const initials = getInitials(order.customer_name ?? '??');
+  const avatarColor = getAvatarColor(order.customer_name || '??');
+  const initials = getInitials(order.customer_name || '??');
 
   return (
-    <div className="space-y-6">
-      <BentoCard title="Customer Profile" icon={User}>
-        <div className="space-y-6">
-          <div className="flex items-center gap-4">
-            <div className={cn("size-14 rounded-full flex items-center justify-center text-lg font-bold text-white shadow-lg shadow-black/20 shrink-0", avatarColor)}>
-              {initials}
-            </div>
-            <div className="min-w-0">
-              <p className="text-xl font-bold text-zinc-50 truncate">{order.customer_name}</p>
-              <div className="flex items-center gap-2 mt-1">
-                 <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">@{order.platform_user_id || 'guest'}</span>
-                 <a href="#" className="text-zinc-500 hover:text-teal-400 transition-colors">
-                   <ExternalLink className="size-3" />
-                 </a>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-500 font-medium flex items-center gap-2">
-                <Mail className="size-3.5" /> Email
-              </span>
-              <span className="text-zinc-300 font-medium">{order.customer?.email || 'N/A'}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-zinc-500 font-medium flex items-center gap-2">
-                <Globe className="size-3.5" /> Country
-              </span>
-              <span className="text-zinc-300 font-medium uppercase tracking-wider">{order.shipping_country || 'N/A'}</span>
-            </div>
-          </div>
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-3.5">
+      <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-3.5 px-0.5">
+        Customer Profile
+      </h3>
+      
+      <div className="flex items-center gap-2.5 px-0.5 mb-3.5">
+        <div className={cn("size-7 rounded-full flex items-center justify-center text-[9px] font-bold text-white shadow-lg", avatarColor)}>
+          {initials}
         </div>
-      </BentoCard>
+        <div className="flex flex-col min-w-0">
+          <p className="text-xs font-bold text-zinc-100 truncate leading-none">{order.customer_name}</p>
+          <p className="text-[8px] font-mono text-zinc-600 uppercase tracking-tighter mt-0.5">ID: {order.external_id || 'N/A'}</p>
+        </div>
+      </div>
+
+      <div className="space-y-1.5 border-t border-zinc-800/50 pt-3.5 px-0.5">
+        <div className="flex items-center justify-between group">
+          <span className="text-[8px] font-bold text-zinc-700 uppercase tracking-widest">Email</span>
+          {order.customer?.email ? (
+            <span className="text-[11px] text-zinc-400 font-medium truncate max-w-[130px] text-right">{order.customer.email}</span>
+          ) : (
+            <button className="text-[8px] font-bold text-teal-500/60 hover:text-teal-400 uppercase tracking-widest flex items-center gap-1 transition-colors">
+              <Plus size={8} /> Add Email
+            </button>
+          )}
+        </div>
+        
+        <div className="flex items-center justify-between">
+          <span className="text-[8px] font-bold text-zinc-700 uppercase tracking-widest">Country</span>
+          <span className="text-[11px] text-zinc-500 font-bold uppercase">{order.shipping_country || 'N/A'}</span>
+        </div>
+      </div>
 
       {order.customer_note && (
-        <div className="relative overflow-hidden rounded-2xl bg-teal-500/5 p-6 border border-teal-500/10">
-          <div className="relative z-10">
-            <div className="flex items-center gap-2 mb-3">
-              <Mail className="size-3.5 text-teal-400" />
-              <h3 className="text-[10px] font-bold uppercase tracking-wider text-teal-400/60">Customer Message</h3>
-            </div>
-            <p className="text-sm text-zinc-300 italic leading-relaxed">
+        <div className="mt-4 pt-4 border-t border-zinc-800/50">
+          <blockquote className="relative pl-3 border-l-2 border-teal-500/30 py-0.5">
+            <p className="text-[11px] text-zinc-500 italic leading-snug">
               "{order.customer_note}"
             </p>
-          </div>
+          </blockquote>
         </div>
       )}
     </div>

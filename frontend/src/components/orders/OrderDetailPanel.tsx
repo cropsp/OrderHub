@@ -1,7 +1,4 @@
 import { useState } from 'react';
-import { 
-  UploadCloud,
-} from 'lucide-react';
 
 import { 
   Dialog, 
@@ -10,7 +7,6 @@ import {
   DialogTitle,
   DialogDescription
 } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,9 +15,8 @@ import { UserRole } from '@/types/user';
 import { useCreateTTN } from '@/hooks/useShipping';
 
 import AttachmentManager from './AttachmentManager';
-import { BentoCard } from './detail/BentoCard';
 import { DetailHeader } from './detail/DetailHeader';
-import { DetailNotes } from './detail/DetailNotes';
+import { DetailCustomizationInfo, DetailInternalNotes } from './detail/DetailNotes';
 import { DetailItems } from './detail/DetailItems';
 import { DetailCustomer } from './detail/DetailCustomer';
 import { DetailLogistics } from './detail/DetailLogistics';
@@ -34,7 +29,7 @@ type OrderDetailPanelProps = {
 };
 
 export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
-  const { data: order, isLoading, dataUpdatedAt } = useOrder(orderId);
+  const { data: order, isLoading } = useOrder(orderId);
   const { user } = useAuth();
   const updateOrder = useUpdateOrder();
   const { addToast } = useToastStore();
@@ -88,48 +83,59 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
             </div>
           </div>
         ) : (
-          <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex flex-col h-full overflow-hidden bg-zinc-950">
+            {/* 1. COMPACT HEADER */}
             <DetailHeader 
               order={order} 
               saveStatus={saveStatus} 
-              dataUpdatedAt={dataUpdatedAt || 0}
               onStatusChange={(status) => handleUpdate({ status })}
               onClose={onClose}
             />
 
-            <ScrollArea className="flex-1">
-              <main className="px-10 py-10">
-                <div className="grid grid-cols-12 gap-10">
-                  
-                  {/* MAIN CONTENT ZONE (Left) */}
-                  <div className="col-span-12 lg:col-span-8 space-y-10">
-                    <DetailNotes order={order} onUpdate={handleUpdate} />
+            {/* 2. SCROLLABLE BODY GRID */}
+            <div className="flex-1 overflow-y-auto bg-zinc-950">
+              <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 p-6 items-start">
+                
+                {/* LEFT COLUMN: Primary Content */}
+                <div className="space-y-6 min-w-0">
+                  {/* 1. PRODUCT INVENTORY */}
+                  <DetailItems order={order} />
 
-                    <BentoCard title="Production Assets" icon={UploadCloud} className="bg-teal-500/[0.02] border-teal-500/10">
-                       <AttachmentManager orderId={order.id} />
-                    </BentoCard>
+                  {/* 2. CUSTOMIZATION INFO */}
+                  <DetailCustomizationInfo 
+                    order={order} 
+                    onUpdate={handleUpdate} 
+                  />
 
-                    <DetailItems order={order} />
+                  {/* 3. PRODUCTION ASSETS */}
+                  <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-5">
+                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4 px-1">
+                      Production Assets
+                    </h3>
+                    <AttachmentManager orderId={order.id} />
                   </div>
 
-                  {/* SIDEBAR ZONE (Right) */}
-                  <div className="col-span-12 lg:col-span-4 space-y-8">
-                    <DetailCustomer order={order} />
-
-                    <DetailLogistics 
-                      order={order} 
-                      canManageShipping={canManageShipping}
-                      isPending={createTTN.isPending}
-                      onGenerateTTN={handleGenerateTTN}
-                    />
-
-                    {isOwner && <DetailFinance order={order} />}
-
-                    <DetailTimeline order={order} />
-                  </div>
+                  {/* 4. INTERNAL NOTES */}
+                  <DetailInternalNotes 
+                    order={order} 
+                    onUpdate={handleUpdate} 
+                  />
                 </div>
-              </main>
-            </ScrollArea>
+
+                {/* RIGHT COLUMN: Sticky Sidebar */}
+                <aside className="sticky top-6 flex flex-col gap-4 max-h-[calc(100vh-8rem)] overflow-y-auto overflow-x-hidden pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
+                  <DetailCustomer order={order} />
+                  <DetailLogistics 
+                    order={order} 
+                    canManageShipping={canManageShipping}
+                    isPending={createTTN.isPending}
+                    onGenerateTTN={handleGenerateTTN}
+                  />
+                  {isOwner && <DetailFinance order={order} />}
+                  <DetailTimeline order={order} />
+                </aside>
+              </div>
+            </div>
           </div>
         )}
       </DialogContent>

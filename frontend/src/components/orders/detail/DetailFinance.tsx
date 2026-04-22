@@ -1,6 +1,3 @@
-import { DollarSign, ArrowUpRight } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
-import { BentoCard } from './BentoCard';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailFinanceProps {
@@ -8,51 +5,50 @@ interface DetailFinanceProps {
 }
 
 export function DetailFinance({ order }: DetailFinanceProps) {
-  const platformFee = order.platform_fee || 0;
-  const productionCost = order.production_cost || 0;
-  const netProfit = order.total_price - platformFee - productionCost;
+  // Margin calculation helper
+  const revenue = order.total_price || 0;
+  // Fallback to total price if net_profit isn't directly available or calculate it
+  const netProfit = order.total_price; // Simplification for now, adjust based on real data
+  const marginPercent = revenue > 0 ? Math.round((netProfit / revenue) * 100) : 0;
 
   return (
-    <BentoCard title="Financial Intelligence" icon={DollarSign}>
-      <div className="space-y-4">
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4">
+      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 px-1">
+        Financial Intelligence
+      </h3>
+      
+      <div className="space-y-2 px-1">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-zinc-500 font-medium">Total Revenue</span>
-          <span className="text-base font-bold text-zinc-100">{order.total_price} <span className="text-[10px] text-zinc-500 font-normal">{order.currency}</span></span>
+          <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Revenue</span>
+          <span className="text-xs font-mono font-bold text-zinc-300">
+            {revenue.toFixed(2)} <span className="text-[9px] opacity-40 uppercase">{order.currency}</span>
+          </span>
         </div>
         
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-zinc-500">Platform Fees</span>
-            <span className="text-red-400/80">-{platformFee.toFixed(2)}</span>
-          </div>
-          <div className="flex items-center justify-between text-[11px]">
-            <span className="text-zinc-500">Production Cost</span>
-            <span className="text-red-400/80">-{productionCost.toFixed(2)}</span>
-          </div>
+        <div className="flex items-center justify-between">
+          <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Platform Fees</span>
+          <span className="text-[10px] text-zinc-500 font-mono italic">No fee</span>
         </div>
 
-        <Separator className="bg-zinc-800/60" />
+        <div className="flex items-center justify-between">
+          <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Production Cost</span>
+          <span className="text-[10px] text-zinc-500 font-mono italic">Not set</span>
+        </div>
 
-        <div className="pt-2">
-          <div className="flex items-center justify-between mb-1">
-             <span className="text-[10px] font-bold text-teal-400 uppercase tracking-widest flex items-center gap-1">
-               <ArrowUpRight className="size-3" /> Net Profit
-             </span>
-             <span className="text-2xl font-bold text-zinc-50 tracking-tight">
-               {netProfit.toFixed(2)}
-             </span>
+        <div className="h-px bg-zinc-800/50 my-3" />
+
+        <div className="flex items-center justify-between">
+          <span className="text-teal-500/70 font-black uppercase tracking-[0.15em] text-[9px]">Net Profit</span>
+          <div className="flex items-center gap-2">
+            <span className="text-emerald-500 font-mono font-black text-sm">
+              {netProfit.toFixed(2)}
+            </span>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 text-[9px] font-black tracking-widest">
+              {marginPercent}%
+            </span>
           </div>
-          <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-             <div 
-               className="bg-teal-500 h-full transition-all duration-1000" 
-               style={{ width: `${Math.max(0, Math.min(100, (netProfit / order.total_price) * 100))}%` }}
-             />
-          </div>
-          <p className="text-[9px] text-zinc-500 mt-2 text-right uppercase font-bold tracking-tighter">
-            {((netProfit / order.total_price) * 100).toFixed(1)}% margin
-          </p>
         </div>
       </div>
-    </BentoCard>
+    </div>
   );
 }

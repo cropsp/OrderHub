@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { 
   Table, 
@@ -21,13 +22,14 @@ import { getInitials, getAvatarColor } from '@/utils/avatar';
 import { cn } from '@/lib/utils';
 import type { OrderListItem } from '@/types/order';
 
-type OrdersTableProps = {
+interface OrdersTableProps {
   orders: OrderListItem[];
   isLoading?: boolean;
-  onSelectOrder: (id: string) => void;
-};
+}
 
-export default function OrdersTable({ orders, isLoading, onSelectOrder }: OrdersTableProps) {
+export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
+  const navigate = useNavigate();
+
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -73,7 +75,7 @@ export default function OrdersTable({ orders, isLoading, onSelectOrder }: Orders
               <TableRow 
                 key={order.id} 
                 className="border-zinc-800/60 hover:bg-zinc-800/40 transition-colors cursor-pointer group h-14"
-                onClick={() => onSelectOrder(order.id)}
+                onClick={() => navigate(`/orders/${order.id}`)}
               >
                 <TableCell>
                   <div className="flex flex-col gap-1">
@@ -120,9 +122,12 @@ export default function OrdersTable({ orders, isLoading, onSelectOrder }: Orders
                         <MoreHorizontal className="size-4" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800 text-zinc-300">
-                      <DropdownMenuItem onClick={() => onSelectOrder(order.id)} className="gap-2 focus:bg-zinc-800 focus:text-zinc-100">
-                        <Eye className="size-3.5" /> View Details
+                    <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800 text-zinc-300 w-48 p-2 rounded-xl">
+                      <DropdownMenuItem 
+                        onClick={() => navigate(`/orders/${order.id}`)}
+                        className="text-[10px] font-bold uppercase tracking-widest gap-3 px-3 py-2 rounded-lg focus:bg-zinc-800 focus:text-white cursor-pointer"
+                      >
+                        <Eye size={14} className="text-zinc-500" /> View Details
                       </DropdownMenuItem>
                       <DropdownMenuItem className="gap-2 focus:bg-zinc-800 focus:text-zinc-100">
                         <RefreshCw className="size-3.5" /> Change Status

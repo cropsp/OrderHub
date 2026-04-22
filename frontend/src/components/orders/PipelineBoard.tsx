@@ -7,10 +7,9 @@ type PipelineBoardProps = {
   orders: OrderListItem[];
   columnStatuses: OrderStatusValue[];
   isLoading?: boolean;
-  onSelectOrder: (id: string) => void;
 };
 
-export default function PipelineBoard({ orders, columnStatuses, isLoading, onSelectOrder }: PipelineBoardProps) {
+export default function PipelineBoard({ orders, columnStatuses, isLoading }: PipelineBoardProps) {
   if (isLoading) {
     return (
       <div className="flex h-[500px] items-center justify-center rounded-lg border border-zinc-800/50 bg-zinc-900/20">
@@ -48,7 +47,7 @@ export default function PipelineBoard({ orders, columnStatuses, isLoading, onSel
                   </div>
                 ) : (
                   columnOrders.map((order) => (
-                    <PipelineCard key={order.id} order={order} onClick={() => onSelectOrder(order.id)} />
+                    <PipelineCard key={order.id} order={order} />
                   ))
                 )}
               </div>

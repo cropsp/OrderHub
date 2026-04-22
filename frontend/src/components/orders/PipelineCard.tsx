@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -8,10 +9,10 @@ import type { OrderListItem } from '@/types/order';
 
 type PipelineCardProps = {
   order: OrderListItem;
-  onClick: () => void;
 };
 
-export default function PipelineCard({ order, onClick }: PipelineCardProps) {
+export default function PipelineCard({ order }: PipelineCardProps) {
+  const navigate = useNavigate();
   const shopTheme = getShopTheme(order.shop_name ?? '');
   const avatarColor = getAvatarColor(order.customer_name ?? '');
   const initials = getInitials(order.customer_name ?? '??');
@@ -20,7 +21,7 @@ export default function PipelineCard({ order, onClick }: PipelineCardProps) {
     /* TODO: implement D&D in future sprint */
     <Card 
       className="group bg-zinc-900 border-zinc-800 transition-all hover:border-teal-500/30 hover:bg-zinc-800/80 shadow-sm shadow-black/20 cursor-pointer"
-      onClick={onClick}
+      onClick={() => navigate(`/orders/${order.id}`)}
     >
       <CardHeader className="space-y-2 p-4">
         <div className="flex items-center justify-between gap-2">

@@ -7,7 +7,6 @@ import StatusTabs from './StatusTabs';
 import ViewToggle from './ViewToggle';
 import OrdersTable from './OrdersTable';
 import PipelineBoard from './PipelineBoard';
-import OrderDetailPanel from './OrderDetailPanel';
 import NewOrderDialog from './NewOrderDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,7 +38,6 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
   const { data: shops } = useShops();
   
   // 3. Selection & Modal State
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   
   // 4. Fetch data
@@ -117,7 +115,6 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
           <OrdersTable 
             isLoading={isLoading} 
             orders={orders} 
-            onSelectOrder={setSelectedOrderId}
           />
         ) : (
           <PipelineBoard 
@@ -132,15 +129,9 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
             ] : [activeCategoryId as any]} 
             isLoading={isLoading} 
             orders={orders} 
-            onSelectOrder={setSelectedOrderId}
           />
         )}
       </div>
-
-      <OrderDetailPanel 
-        orderId={selectedOrderId} 
-        onClose={() => setSelectedOrderId(null)} 
-      />
 
       <NewOrderDialog 
         open={isNewOrderOpen} 

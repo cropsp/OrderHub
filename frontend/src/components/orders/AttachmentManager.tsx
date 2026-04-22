@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   FileIcon, 
-  UploadCloud, 
+  Upload, 
   X, 
   Download, 
   FileText, 
@@ -80,34 +80,35 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Upload Zone */}
+    <div className="space-y-3">
+      {/* Ultra-Compact Horizontal Upload Zone */}
       <div 
         {...getRootProps()} 
         className={cn(
-          "relative border-2 border-dashed rounded-2xl p-8 transition-all cursor-pointer group",
-          isDragActive 
-            ? "border-teal-500 bg-teal-500/5" 
-            : "border-zinc-800 bg-zinc-900/20 hover:border-zinc-700 hover:bg-zinc-900/30",
+          "border border-dashed border-zinc-700 rounded-lg p-3 flex items-center justify-between gap-4 hover:border-teal-500/50 hover:bg-teal-500/5 transition-colors cursor-pointer group",
+          isDragActive && "border-teal-500 bg-teal-500/5",
           isUploading && "pointer-events-none opacity-60"
         )}
       >
         <input {...getInputProps()} />
-        <div className="flex flex-col items-center justify-center text-center gap-3">
-          <div className="size-12 rounded-full bg-zinc-800 flex items-center justify-center group-hover:scale-110 transition-transform">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center group-hover:bg-teal-500/10 transition-colors shrink-0">
             {isUploading ? (
-              <Loader2 className="size-6 text-teal-400 animate-spin" />
+              <Loader2 className="size-4 text-teal-400 animate-spin" />
             ) : (
-              <UploadCloud className="size-6 text-zinc-400 group-hover:text-teal-400" />
+              <Upload size={16} className="text-zinc-500 group-hover:text-teal-400" />
             )}
           </div>
-          <div className="space-y-1">
-            <p className="text-sm font-bold text-zinc-200">
-              {isDragActive ? 'Drop to upload' : 'Drag & drop production files'}
-            </p>
-            <p className="text-xs text-zinc-500">SVG, DXF, PNG or PDF (No size limit)</p>
+          <div className="flex flex-col">
+            <span className="text-sm text-zinc-300 font-medium leading-none mb-1">
+              {isDragActive ? 'Drop to upload' : 'Upload Production Files'}
+            </span>
+            <span className="text-xs text-zinc-500 leading-none">
+              SVG, DXF, PNG or PDF
+            </span>
           </div>
         </div>
+        <span className="text-xs text-zinc-600 hidden sm:block">No size limit</span>
       </div>
 
       {/* File List */}
