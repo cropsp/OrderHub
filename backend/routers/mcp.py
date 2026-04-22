@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from database import get_db, async_session_factory
 from models.order import Order, OrderStatus
+from routers.auth import get_current_active_user
 import mcp.types as types
 from mcp.server import Server
 from mcp.server.sse import SseServerTransport
@@ -103,6 +104,9 @@ async def handle_sse(request: Request):
     """
     global sse_transport
     
+    # Verify authentication
+    current_user = await get_current_active_user(request)
+    
     # Standard MCP flow uses a single URL for POST messages relative to the SSE URL
     transport = SseServerTransport("/api/mcp/messages")
     sse_transport = transport
@@ -122,6 +126,10 @@ async def handle_sse(request: Request):
 async def handle_messages(request: Request):
     """Endpoint for AI agent to send JSON-RPC requests to the MCP server."""
     global sse_transport
+    
+    # Verify authentication
+    await get_current_active_user(request)
+    
     if not sse_transport:
         raise HTTPException(status_code=400, detail="SSE transport not initialized. Connect to /sse first.")
         

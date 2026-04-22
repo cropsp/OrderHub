@@ -1,15 +1,11 @@
-import { useState } from 'react';
 import { 
-  Plus, 
-  Trash2, 
   User, 
-  ShoppingCart, 
   Globe,
   Loader2,
   PackagePlus,
-  AlertCircle
+  AlertCircle,
+  Plus
 } from 'lucide-react';
-import { useCreateOrder } from '@/hooks/useOrders';
 import { useShops } from '@/hooks/useShops';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,77 +26,28 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 
+import { useOrderForm } from './useOrderForm';
+import { OrderItemsEditor } from './OrderItemsEditor';
+
 type NewOrderDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 };
 
-const INITIAL_ITEM = { title: '', quantity: 1, unit_price: 0 };
-
 export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogProps) {
   const { data: shops } = useShops();
-  const createOrder = useCreateOrder();
-  
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  const [orderData, setOrderData] = useState({
-    shop_id: '',
-    external_id: '',
-    title: '',
-    currency: 'USD',
-    email: '',
-    full_name: '',
-  });
-
-  const [items, setItems] = useState([INITIAL_ITEM]);
-
-  const addItem = () => setItems([...items, { ...INITIAL_ITEM }]);
-  const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
-  const updateItem = (index: number, field: string, value: any) => {
-    const newItems = [...items];
-    (newItems[index] as any)[field] = value;
-    setItems(newItems);
-  };
-
-  const totalPrice = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!orderData.shop_id) return setError('Please select a shop.');
-    if (!orderData.email) return setError('Customer email is required.');
-    if (items.length === 0 || !items[0].title) return setError('At least one item is required.');
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      await createOrder.mutateAsync({
-        ...orderData,
-        ordered_at: new Date().toISOString(),
-        total_price: totalPrice,
-        items: items.map(it => ({
-          ...it,
-          currency: orderData.currency
-        }))
-      });
-      onOpenChange(false);
-      // Reset form
-      setOrderData({
-        shop_id: '',
-        external_id: '',
-        title: '',
-        currency: 'USD',
-        email: '',
-        full_name: '',
-      });
-      setItems([{ ...INITIAL_ITEM }]);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create order');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  const {
+    orderData,
+    setOrderData,
+    items,
+    addItem,
+    removeItem,
+    updateItem,
+    totalPrice,
+    error,
+    isSubmitting,
+    handleSubmit
+  } = useOrderForm(() => onOpenChange(false));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -119,7 +66,7 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto p-8 pt-2 space-y-8">
-            {/* Section 1: Core Info */}
+            {/* Section 1: Origin & Identity */}
             <section className="space-y-4">
               <div className="flex items-center gap-2 text-teal-500">
                  <Globe className="size-4" />
@@ -181,7 +128,7 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
               </div>
             </section>
 
-            {/* Section 2: Customer */}
+            {/* Section 2: Customer Information */}
             <section className="space-y-4">
               <div className="flex items-center gap-2 text-indigo-400">
                  <User className="size-4" />
@@ -211,72 +158,14 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
               </Card>
             </section>
 
-            {/* Section 3: Items */}
-            <section className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-amber-500">
-                   <ShoppingCart className="size-4" />
-                   <h3 className="text-xs font-bold uppercase tracking-widest">Order Composition</h3>
-                </div>
-                <Button 
-                  type="button" 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={addItem}
-                  className="h-8 text-teal-400 hover:text-teal-300 hover:bg-teal-500/10 rounded-lg text-xs"
-                >
-                  <Plus className="mr-1.5 size-3.5" /> Add Item
-                </Button>
-              </div>
-
-              <div className="space-y-3">
-                {items.map((item, idx) => (
-                  <div key={idx} className="group relative flex flex-wrap sm:flex-nowrap items-end gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex-1 min-w-[200px] space-y-2">
-                       <p className="text-[10px] font-bold uppercase text-slate-600 px-1">Product Title</p>
-                       <Input 
-                        className="h-9 border-slate-800 bg-slate-900/40 rounded-lg text-slate-100"
-                        placeholder="Item name..."
-                        value={item.title}
-                        onChange={e => updateItem(idx, 'title', e.target.value)}
-                      />
-                    </div>
-                    <div className="w-20 space-y-2">
-                       <p className="text-[10px] font-bold uppercase text-slate-600 px-1 text-center">Qty</p>
-                       <Input 
-                        type="number"
-                        className="h-9 border-slate-800 bg-slate-900/40 rounded-lg text-center text-slate-100"
-                        value={item.quantity}
-                        onChange={e => updateItem(idx, 'quantity', parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-                    <div className="w-32 space-y-2">
-                       <p className="text-[10px] font-bold uppercase text-slate-600 px-1 text-right">Price</p>
-                       <div className="relative">
-                          <Input 
-                            type="number"
-                            step="0.01"
-                            className="h-9 border-slate-800 bg-slate-900/40 rounded-lg text-right pr-10 text-slate-100"
-                            value={item.unit_price}
-                            onChange={e => updateItem(idx, 'unit_price', parseFloat(e.target.value) || 0)}
-                          />
-                          <span className="absolute right-2.5 top-2.5 text-[10px] font-bold text-slate-600 uppercase">{orderData.currency}</span>
-                       </div>
-                    </div>
-                    <Button 
-                      type="button"
-                      variant="ghost" 
-                      size="icon" 
-                      className="size-9 text-slate-600 hover:text-red-400 rounded-lg"
-                      onClick={() => removeItem(idx)}
-                      disabled={items.length === 1}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </section>
+            {/* Section 3: Order Composition (Items) */}
+            <OrderItemsEditor 
+              items={items}
+              currency={orderData.currency}
+              onAddItem={addItem}
+              onRemoveItem={removeItem}
+              onUpdateItem={updateItem}
+            />
           </div>
 
           {error && (
