@@ -31,11 +31,13 @@ async def get_dashboard_stats(
             import uuid
             shop_uuid = uuid.UUID(shop_id)
             base_filter.append(Order.shop_id == shop_uuid)
+            logger.info(f"Adding shop filter: {shop_uuid}")
         except ValueError:
             logger.error(f"Invalid shop_id format: {shop_id}")
 
     if current_user.role == UserRole.DESIGNER:
         base_filter.append(Order.assigned_designer_id == current_user.id)
+        logger.info(f"Adding designer filter: {current_user.id}")
 
     # 1. Orders by Status
     status_query = select(Order.status, func.count()).where(*base_filter).group_by(Order.status)

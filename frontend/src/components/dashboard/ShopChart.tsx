@@ -84,7 +84,7 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
           </div>
         ) : (
           <div className="h-[300px] min-h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%" minHeight={300}>
+            <ResponsiveContainer width="100%" height="100%" minHeight={300} debounce={50}>
               <PieChart>
                 <AnyPie
                   data={data}
@@ -92,7 +92,7 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
                   cy="50%"
                   innerRadius={65}
                   outerRadius={85}
-                  paddingAngle={5}
+                  paddingAngle={data.length > 1 ? 5 : 0}
                   dataKey="order_count"
                   nameKey="shop_name"
                   stroke="none"
@@ -101,7 +101,7 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
                   onMouseEnter={(_: any, index: number) => setActiveIndex(index)}
                   onMouseLeave={() => setActiveIndex(-1)}
                   animationBegin={0}
-                  animationDuration={1500}
+                  animationDuration={800}
                 >
                   {data.map((_, index) => (
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

@@ -110,6 +110,7 @@ frontend/src/
 | ID | Task | Scope | Status |
 |---|---|---|---|
 | FE-1 | Refactor `OrderDetailPanel.tsx` — SRP Violation | Extracted 8 sub-components to `detail/` | DONE |
+| FE-3 | Advanced Dashboard Analytics | Shop filtering, multi-currency, expanded attention list | DONE |
 | INFRA-1 | Implement Backend Logging System | Rotating logs with 25MB safety cap | DONE |
 
 **Backend Resilience & Business Logic**

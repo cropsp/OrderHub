@@ -30,3 +30,5 @@ backend/logs/
 
 # Logs
 *.log
+*.db
+*.sqlite3
