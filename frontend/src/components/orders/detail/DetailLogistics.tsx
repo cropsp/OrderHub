@@ -11,26 +11,26 @@ interface DetailLogisticsProps {
 
 export function DetailLogistics({ order, canManageShipping, isPending, onGenerateTTN }: DetailLogisticsProps) {
   return (
-    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl overflow-hidden flex flex-col">
-      <div className="p-3.5">
-        <h3 className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-3.5 px-0.5">
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl overflow-hidden flex flex-col shadow-sm">
+      <div className="p-4">
+        <h3 className="text-sm font-semibold text-zinc-100 mb-4 px-1">
           Shipping & Logistics
         </h3>
         
-        <div className="space-y-2.5 px-0.5">
+        <div className="space-y-4 px-1">
           <div className="flex items-start gap-3">
-            <div className="text-[10px] text-zinc-400 leading-tight space-y-0">
-              <p className="font-bold text-zinc-200">{order.shipping_name || 'No recipient'}</p>
+            <div className="text-sm text-zinc-400 leading-normal space-y-1">
+              <p className="font-semibold text-zinc-200">{order.shipping_name || 'No recipient'}</p>
               <p>{order.shipping_street_1}</p>
               {order.shipping_street_2 && <p>{order.shipping_street_2}</p>}
-              <p>{order.shipping_city}, {order.shipping_state} {order.shipping_zip}</p>
-              <p className="font-black text-zinc-600 uppercase tracking-widest mt-1 text-[8px]">{order.shipping_country}</p>
+              <p className="text-zinc-500">{order.shipping_city}, {order.shipping_state} {order.shipping_zip}</p>
+              <p className="font-bold text-zinc-600 uppercase tracking-widest mt-2 text-[11px]">{order.shipping_country}</p>
             </div>
           </div>
           
           {order.shipping_phone && (
-            <div className="flex items-center gap-1.5 text-[9px] text-zinc-500 font-bold uppercase tracking-widest pt-1">
-              <Phone className="size-2.5 text-zinc-700" />
+            <div className="flex items-center gap-2 text-[11px] text-zinc-500 font-medium pt-2 border-t border-zinc-800/30">
+              <Phone className="size-3.5 text-zinc-700" />
               <span>{order.shipping_phone}</span>
             </div>
           )}
@@ -38,10 +38,10 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
           {order.ttn_number && (
             <div className="mt-2 p-2.5 rounded-lg bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-colors cursor-pointer group">
               <div className="flex items-center justify-between mb-0.5">
-                <p className="text-[8px] font-black text-teal-500/70 uppercase tracking-widest">Tracking (TTN)</p>
-                <ClipboardList className="size-2.5 text-teal-500/40" />
+                <p className="text-[11px] font-semibold text-teal-500/70">Tracking (TTN)</p>
+                <ClipboardList className="size-3 text-teal-500/40" />
               </div>
-              <p className="font-mono text-xs text-zinc-100 font-bold tracking-tight">{order.ttn_number}</p>
+              <p className="font-mono text-sm text-teal-100 font-bold">{order.ttn_number}</p>
             </div>
           )}
         </div>

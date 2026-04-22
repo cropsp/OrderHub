@@ -12,38 +12,33 @@ export function DetailFinance({ order }: DetailFinanceProps) {
   const marginPercent = revenue > 0 ? Math.round((netProfit / revenue) * 100) : 0;
 
   return (
-    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4">
-      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 px-1">
-        Financial Intelligence
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
+      <h3 className="text-sm font-semibold text-zinc-100 mb-4 px-1">
+        Payment summary
       </h3>
       
-      <div className="space-y-2 px-1">
+      <div className="space-y-3 px-1">
         <div className="flex items-center justify-between">
-          <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Revenue</span>
-          <span className="text-xs font-mono font-bold text-zinc-300">
-            {revenue.toFixed(2)} <span className="text-[9px] opacity-40 uppercase">{order.currency}</span>
+          <span className="text-[11px] font-medium text-zinc-500">Subtotal</span>
+          <span className="text-sm font-medium text-zinc-300">
+            {revenue.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
           </span>
         </div>
         
         <div className="flex items-center justify-between">
-          <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Platform Fees</span>
-          <span className="text-[10px] text-zinc-500 font-mono italic">No fee</span>
+          <span className="text-[11px] font-medium text-zinc-500">Shipping</span>
+          <span className="text-sm text-zinc-500 italic">No fee</span>
         </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-zinc-600 font-bold uppercase tracking-widest text-[9px]">Production Cost</span>
-          <span className="text-[10px] text-zinc-500 font-mono italic">Not set</span>
-        </div>
-
-        <div className="h-px bg-zinc-800/50 my-3" />
+        <div className="h-px bg-zinc-800/30 my-4" />
 
         <div className="flex items-center justify-between">
-          <span className="text-teal-500/70 font-black uppercase tracking-[0.15em] text-[9px]">Net Profit</span>
+          <span className="text-[11px] font-semibold text-zinc-400">Net Profit</span>
           <div className="flex items-center gap-2">
-            <span className="text-emerald-500 font-mono font-black text-sm">
+            <span className="text-base text-emerald-500 font-semibold">
               {netProfit.toFixed(2)}
             </span>
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-500 text-[9px] font-black tracking-widest">
+            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded">
               {marginPercent}%
             </span>
           </div>

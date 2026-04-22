@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { 
   ChevronDown,
-  ArrowUpRight,
   Loader2,
-  Check
+  Check,
+  Plus
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useOrder, useUpdateOrder } from '@/hooks/useOrders';
@@ -104,18 +104,19 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
             />
 
             {/* PRODUCTION ASSETS */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-3">
-              <div className="flex items-center justify-between mb-3 px-0.5">
-                <h3 className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest">
-                  Production Assets
+            <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-4 px-1">
+                <h3 className="text-sm font-semibold text-zinc-100">
+                  Production assets
                 </h3>
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  className="h-5.5 border-zinc-800 bg-zinc-900 text-zinc-500 hover:text-white rounded text-[8px] font-bold uppercase tracking-widest gap-1 px-2"
+                  className="h-7 border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white rounded text-xs font-medium gap-1.5 px-3 transition-all"
                   onClick={() => document.getElementById('file-upload-input')?.click()}
                 >
-                  + Upload file
+                  <Plus size={14} />
+                  Upload file
                 </Button>
               </div>
               <AttachmentManager orderId={order.id} />
@@ -126,28 +127,33 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
               order={order} 
               onUpdate={handleUpdate} 
             />
+
+            {/* TIMELINE */}
+            <DetailTimeline order={order} />
           </div>
 
           {/* RIGHT COLUMN: Management Sidebar (Sticky) */}
-          <aside className="sticky top-20 flex flex-col gap-3">
+          <aside className="sticky top-20 flex flex-col gap-4">
             
             {/* 1. ORDER STATUS & ACTIONS */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-3 shadow-sm">
-              <h3 className="text-[8px] font-bold text-zinc-500 uppercase tracking-widest mb-3 px-0.5">
-                Order Status
+            <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-zinc-100 mb-4 px-1">
+                Order status
               </h3>
               
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between bg-zinc-950/40 p-2 rounded-lg border border-zinc-800/50">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-[7px] font-bold text-zinc-700 uppercase tracking-widest leading-none">Current</span>
-                    <StatusBadge status={order.status} size="sm" />
+              <div className="space-y-4">
+                <div className="flex items-center justify-between bg-zinc-950/40 p-3 rounded-lg border border-zinc-800/50">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[11px] text-zinc-500 font-medium leading-none">Current status</span>
+                    <div className="mt-1">
+                      <StatusBadge status={order.status} size="sm" />
+                    </div>
                   </div>
                   
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-6 w-6 bg-zinc-900 border border-zinc-800 rounded hover:bg-zinc-800 transition-all">
-                        <ChevronDown size={10} className="text-zinc-500" />
+                      <Button variant="ghost" size="icon" className="h-8 w-8 bg-zinc-900 border border-zinc-800 rounded hover:bg-zinc-800 transition-all">
+                        <ChevronDown size={14} className="text-zinc-500" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800 text-zinc-300 w-48 p-1.5 rounded-xl shadow-2xl">
@@ -188,7 +194,6 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
               onGenerateTTN={handleGenerateTTN}
             />
             {isOwner && <DetailFinance order={order} />}
-            <DetailTimeline order={order} />
           </aside>
         </div>
       </div>

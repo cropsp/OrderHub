@@ -1,78 +1,62 @@
-import { useState, useEffect, useCallback } from 'react';
-import { debounce } from 'lodash-es';
-import { NotepadText, Sliders } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import type { OrderDetail } from '@/types/order';
 
-interface NoteProps {
+interface DetailNotesProps {
   order: OrderDetail;
-  onUpdate: (payload: any) => Promise<void>;
+  onUpdate: (data: Partial<OrderDetail>) => void;
 }
 
-export function DetailCustomizationInfo({ order, onUpdate }: NoteProps) {
+export function DetailCustomizationInfo({ order, onUpdate }: DetailNotesProps) {
   const [val, setVal] = useState(order.custom_info || '');
 
   useEffect(() => {
     setVal(order.custom_info || '');
-  }, [order.id, order.custom_info]);
+  }, [order.custom_info]);
 
-  const debouncedSave = useCallback(
-    debounce(async (v: string) => {
-      await onUpdate({ custom_info: v });
-    }, 1000),
-    [onUpdate]
-  );
-
-  const handleChange = (v: string) => {
-    setVal(v);
-    debouncedSave(v);
+  const handleChange = (newVal: string) => {
+    setVal(newVal);
+    onUpdate({ custom_info: newVal });
   };
 
   return (
-    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4">
-      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 px-1">
-        Customization Info
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
+      <h3 className="text-sm font-semibold text-zinc-100 mb-3 px-1">
+        Notes from customer
       </h3>
       <textarea 
         value={val}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="Special instructions or custom data for production..."
+        placeholder="No notes from customer"
         rows={2}
-        className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-teal-500/30 transition-all resize-none shadow-inner"
+        className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500/30 transition-all resize-none shadow-inner italic"
       />
     </div>
   );
 }
 
-export function DetailInternalNotes({ order, onUpdate }: NoteProps) {
+export function DetailInternalNotes({ order, onUpdate }: DetailNotesProps) {
   const [val, setVal] = useState(order.internal_note || '');
 
   useEffect(() => {
     setVal(order.internal_note || '');
-  }, [order.id, order.internal_note]);
+  }, [order.internal_note]);
 
-  const debouncedSave = useCallback(
-    debounce(async (v: string) => {
-      await onUpdate({ internal_note: v });
-    }, 1000),
-    [onUpdate]
-  );
-
-  const handleChange = (v: string) => {
-    setVal(v);
-    debouncedSave(v);
+  const handleChange = (newVal: string) => {
+    setVal(newVal);
+    onUpdate({ internal_note: newVal });
   };
 
   return (
-    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4">
-      <h3 className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 px-1">
-        Internal Notes
+    <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
+      <h3 className="text-sm font-semibold text-zinc-100 mb-3 px-1">
+        Internal notes
       </h3>
       <textarea 
         value={val}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="Add private team-only notes about this order..."
+        placeholder="Add a private note..."
         rows={2}
-        className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg p-3 text-xs text-zinc-300 placeholder:text-zinc-700 focus:outline-none focus:border-teal-500/30 transition-all resize-none shadow-inner"
+        className="w-full bg-zinc-950/50 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 placeholder:text-zinc-600 focus:outline-none focus:border-teal-500/30 transition-all resize-none shadow-inner"
       />
     </div>
   );
