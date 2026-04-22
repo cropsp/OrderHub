@@ -29,8 +29,8 @@ interface DetailHeaderProps {
 
 export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: DetailHeaderProps) {
   return (
-    <header className="px-6 py-4 border-b border-zinc-900 bg-zinc-950/20 shrink-0">
-      <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-6">
+    <header className="py-4 border-b border-zinc-900 bg-zinc-950/20 shrink-0">
+      <div className="max-w-5xl mx-auto px-6 flex items-center justify-between gap-6">
         <div className="flex flex-col gap-2 min-w-0">
           <h1 className="text-xl font-bold text-white tracking-tight leading-none truncate">
             {order.title || 'Untitled Order'}
@@ -80,25 +80,6 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
 
         <div className="flex items-center gap-3 shrink-0">
           <StatusBadge status={order.status} size="md" className="h-9 px-4 rounded-lg" />
-          
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="h-9 border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 font-bold uppercase text-[10px] tracking-widest gap-2">
-                Action <ChevronDown className="size-3 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800 text-zinc-300 w-48">
-              {Object.entries(ORDER_STATUS).map(([key, value]) => (
-                <DropdownMenuItem 
-                  key={value} 
-                  onSelect={() => onStatusChange(value)}
-                  className="text-[10px] font-bold uppercase tracking-widest focus:bg-zinc-800 focus:text-zinc-100"
-                >
-                  {key.replace('_', ' ')}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
 
           <Button 
             variant="ghost" 
