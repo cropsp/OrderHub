@@ -1,5 +1,0 @@
-commit 79b45ee02831c757358a90c5805bf6d203aeaabd
-Author: cropsp <cropsp@local.dev>
-Date:   Tue Apr 21 18:52:00 2026 +0000
-
-    refactor: split OrderDetailPanel into modular components and fix type imports

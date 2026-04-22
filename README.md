@@ -2,43 +2,36 @@
 
 Self-hosted Order Management CRM для управління замовленнями handmade бізнесу з виробництва.
 
-## Tech Stack
+## 🌟 Key Features
+
+- **Dashboard**: Візуалізація статистики замовлень у реальному часі.
+- **Pipeline Management**: Гнучке управління статусами замовлень (Нові, В роботі, Готові, Відправлені).
+- **Attachment System**: Централізоване сховище для виробничих файлів та макетів.
+- **AI Integration (MCP)**: Власний MCP-сервер, що дозволяє AI-агентам аналізувати дані та допомагати в управлінні.
+- **Security First**: Повна авторизація на базі JWT для всіх API-ендпоїнтів, включаючи MCP.
+
+## 🛠 Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), PostgreSQL 16 |
-| Frontend | React 19, TypeScript, Vite, TailwindCSS v4 |
-| Infrastructure | Docker, Docker Compose |
-| AI Integration | MCP Server (Model Context Protocol) |
+| **Backend** | Python 3.12, FastAPI, SQLAlchemy 2 (async), PostgreSQL 16 / SQLite |
+| **Frontend** | React 19, TypeScript, Vite, Vanilla CSS |
+| **Infrastructure** | Docker, Docker Compose, Alembic (migrations) |
+| **AI Protocol** | Model Context Protocol (MCP) via SSE |
 
-## Швидкий старт
+## 🚀 Швидкий старт
 
-### Вимоги
-
-- Docker & Docker Compose
-- (Опціонально) Node.js 22+ та Python 3.12+ для локального запуску
+Для детальних інструкцій з локального запуску та налаштування середовища дивіться [STARTUP.md](./STARTUP.md).
 
 ### 1. Клонувати та налаштувати
 
 ```bash
 git clone <repo-url> OrderHub
 cd OrderHub
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-### 2. Згенерувати ключі безпеки
-
-```bash
-# SECRET_KEY
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-
-# FERNET_KEY
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-Скопіюйте згенеровані значення в `.env` файл.
-
-### 3. Запустити (розробка)
+### 2. Запустити через Docker (Рекомендовано)
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
@@ -48,33 +41,38 @@ docker compose -f docker-compose.dev.yml up --build
 - **Backend API**: http://localhost:8000
 - **Swagger UI**: http://localhost:8000/docs
 
-### 4. Дефолтні облікові записи (dev)
+### 3. Дефолтні облікові записи (dev)
 
 | Email | Password | Role |
 |-------|----------|------|
-| owner@crm.local | owner123 | Owner (повний доступ) |
-| manager@crm.local | manager123 | Manager |
-| designer@crm.local | designer123 | Designer |
+| `owner@orderhub.dev` | `owner123` | Owner (Full Access) |
+| `manager@orderhub.dev` | `manager123` | Manager |
+| `designer@orderhub.dev` | `designer123` | Designer |
 
-## Alembic міграції
+## 🔐 Security & Hardening
 
-```bash
-# Створити нову міграцію
-docker compose exec backend alembic revision --autogenerate -m "description"
+Проект пройшов етап безпекового загартовування:
+- **JWT Auth**: Всі чутливі дані захищені токенами доступу.
+- **MCP Guard**: Ендпоїнти `/api/mcp/sse` та `/api/mcp/messages` вимагають авторизації, що запобігає несанкціонованому доступу AI-агентів.
+- **SRP Architecture**: Фронтенд-компоненти рефакторизовані за принципом єдиної відповідальності для підвищення стабільності.
 
-# Застосувати міграції
-docker compose exec backend alembic upgrade head
+## 🤖 AI & MCP Server
 
-# Скасувати останню міграцію
-docker compose exec backend alembic downgrade -1
-```
+OrderHub виставляє MCP сервер для підключення AI-агентів (Claude Desktop, Hermes тощо) через протокол SSE.
 
-## MCP Server
+**Ендпоїнти:**
+- SSE Connection: `GET /api/mcp/sse`
+- Message Channel: `POST /api/mcp/messages`
 
-OrderHub виставляє MCP сервер для підключення AI-агентів (Hermes, Claude Desktop, тощо).
+*Примітка: Для підключення агент повинен передати валідний JWT токен у заголовку Authorization.*
 
-Порт: `MCP_SERVER_PORT` (default: 3001)
+## 📂 Структура проекту
 
-## Ліцензія
+- `/backend`: FastAPI додаток, моделі бази даних та MCP сервер.
+- `/frontend`: React додаток з сучасним інтерфейсом.
+- `/docs`: Документація та звіти (включаючи аудити безпеки).
+- `/scratch`: Тимчасові діагностичні скрипти (ігноруються Git).
 
-Private project.
+## ⚖️ Ліцензія
+
+Private project. All rights reserved.

@@ -62,6 +62,7 @@ const INITIAL_SHOP_STATE = {
   color: '#14b8a6',
   shopify_store_url: '',
   shopify_access_token: '',
+  shopify_webhook_secret: '',
   np_api_key: '',
   np_sender_name: '',
   np_sender_phone: '',
@@ -97,6 +98,7 @@ export default function ShopsPage() {
       color: shop.color || '#14b8a6',
       shopify_store_url: shop.shopify_store_url || '',
       shopify_access_token: '', // Never pre-fill token
+      shopify_webhook_secret: '', // Never pre-fill secret
       np_api_key: '', // Never pre-fill key
       np_sender_name: shop.np_sender_name || '',
       np_sender_phone: shop.np_sender_phone || '',
@@ -134,6 +136,9 @@ export default function ShopsPage() {
       }
       if (editingShop.shopify_access_token.trim()) {
         payload.shopify_access_token = editingShop.shopify_access_token.trim();
+      }
+      if (editingShop.shopify_webhook_secret.trim()) {
+        payload.shopify_webhook_secret = editingShop.shopify_webhook_secret.trim();
       }
     }
 
@@ -200,7 +205,7 @@ export default function ShopsPage() {
                 <TabsContent value="general" className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Store Name</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Store Name</p>
                       <Input
                         className="border-slate-800 bg-slate-900/50"
                         placeholder="LeatherCraft Boutique"
@@ -209,7 +214,7 @@ export default function ShopsPage() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Brand Color</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Brand Color</p>
                       <div className="flex gap-2">
                         <Input
                           className="h-10 w-12 border-slate-800 bg-slate-900/50 p-1"
@@ -226,7 +231,7 @@ export default function ShopsPage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Sales Platform</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Sales Platform</p>
                     <Select
                       value={editingShop.platform}
                       onValueChange={(v) => setEditingShop(p => ({ ...p, platform: v as ShopPlatform }))}
@@ -247,7 +252,7 @@ export default function ShopsPage() {
                   {editingShop.platform === 'shopify' ? (
                     <>
                       <div className="space-y-2">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Shopify Store URL</p>
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Shopify Store URL</p>
                         <Input
                           className="border-slate-800 bg-slate-900/50"
                           placeholder="https://your-store.myshopify.com"
@@ -256,13 +261,23 @@ export default function ShopsPage() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Access Token (Admin API)</p>
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Access Token (Admin API)</p>
                         <Input
                           className="border-slate-800 bg-slate-900/50"
                           type="password"
                           placeholder={editingShop.id ? "Leave empty to keep existing" : "shpat_..."}
                           value={editingShop.shopify_access_token}
                           onChange={(e) => setEditingShop(p => ({ ...p, shopify_access_token: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Webhook Secret</p>
+                        <Input
+                          className="border-slate-800 bg-slate-900/50"
+                          type="password"
+                          placeholder={editingShop.id ? "Leave empty to keep existing" : "Shopify webhook secret"}
+                          value={editingShop.shopify_webhook_secret}
+                          onChange={(e) => setEditingShop(p => ({ ...p, shopify_webhook_secret: e.target.value }))}
                         />
                       </div>
                     </>
@@ -276,7 +291,7 @@ export default function ShopsPage() {
 
                 <TabsContent value="shipping" className="space-y-4">
                   <div className="space-y-2">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Nova Poshta API Key</p>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Nova Poshta API Key</p>
                     <Input
                       className="border-slate-800 bg-slate-900/50"
                       type="password"
@@ -424,6 +439,9 @@ export default function ShopsPage() {
                         <div className="flex items-center gap-3">
                           {shop.has_shopify_token && (
                             <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[9px] uppercase tracking-tighter">Shopify Live</Badge>
+                          )}
+                          {shop.has_shopify_webhook_secret && (
+                            <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[9px] uppercase tracking-tighter">Webhooks Active</Badge>
                           )}
                           {shop.has_np_token && (
                             <Badge className="bg-red-500/10 text-red-400 border-red-500/20 text-[9px] uppercase tracking-tighter">NovaPoshta Live</Badge>

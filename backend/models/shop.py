@@ -33,6 +33,9 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     shopify_access_token_encrypted: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )
+    shopify_webhook_secret_encrypted: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
 
     # Nova Poshta sender configuration (per shop)
     np_api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)

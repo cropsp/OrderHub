@@ -38,6 +38,7 @@ async def list_shops(
     return [ShopResponse.model_validate({
         **s.__dict__,
         "has_shopify_token": bool(s.shopify_access_token_encrypted),
+        "has_shopify_webhook_secret": bool(s.shopify_webhook_secret_encrypted),
         "has_np_token": bool(s.np_api_key_encrypted)
     }) for s in shops]
 
@@ -66,6 +67,8 @@ async def create_shop(
     
     if body.shopify_access_token:
         shop.shopify_access_token_encrypted = encrypt_value(body.shopify_access_token)
+    if body.shopify_webhook_secret:
+        shop.shopify_webhook_secret_encrypted = encrypt_value(body.shopify_webhook_secret)
     if body.np_api_key:
         shop.np_api_key_encrypted = encrypt_value(body.np_api_key)
         
@@ -76,6 +79,7 @@ async def create_shop(
     resp = ShopDetailResponse.model_validate({
         **shop.__dict__,
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
+        "has_shopify_webhook_secret": bool(shop.shopify_webhook_secret_encrypted),
         "has_np_token": bool(shop.np_api_key_encrypted),
         "order_count": 0
     })
@@ -103,6 +107,7 @@ async def get_shop(
     resp = ShopDetailResponse.model_validate({
         **shop.__dict__,
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
+        "has_shopify_webhook_secret": bool(shop.shopify_webhook_secret_encrypted),
         "has_np_token": bool(shop.np_api_key_encrypted),
         "order_count": order_count
     })
@@ -123,7 +128,7 @@ async def update_shop(
     if not shop:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
         
-    update_data = body.model_dump(exclude_unset=True, exclude={"shopify_access_token", "np_api_key"})
+    update_data = body.model_dump(exclude_unset=True, exclude={"shopify_access_token", "shopify_webhook_secret", "np_api_key"})
     
     for key, value in update_data.items():
         if key == "shopify_store_url" and value is not None:
@@ -136,6 +141,12 @@ async def update_shop(
              shop.shopify_access_token_encrypted = None
         else:
              shop.shopify_access_token_encrypted = encrypt_value(body.shopify_access_token)
+
+    if body.shopify_webhook_secret is not None:
+        if body.shopify_webhook_secret == "":
+             shop.shopify_webhook_secret_encrypted = None
+        else:
+             shop.shopify_webhook_secret_encrypted = encrypt_value(body.shopify_webhook_secret)
              
     if body.np_api_key is not None:
         if body.np_api_key == "":

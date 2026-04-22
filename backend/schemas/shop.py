@@ -27,6 +27,7 @@ class ShopBase(BaseModel):
 class ShopCreate(ShopBase):
     """Payload for creating a new shop (including raw tokens for encryption)."""
     shopify_access_token: str | None = None
+    shopify_webhook_secret: str | None = None
     np_api_key: str | None = None
 
 
@@ -35,6 +36,7 @@ class ShopUpdate(BaseModel):
     name: str | None = Field(None, max_length=255)
     shopify_store_url: HttpUrl | str | None = None
     shopify_access_token: str | None = None
+    shopify_webhook_secret: str | None = None
     np_api_key: str | None = None
     np_sender_name: str | None = Field(None, max_length=255)
     np_sender_phone: str | None = Field(None, max_length=20)
@@ -56,6 +58,7 @@ class ShopResponse(ShopBase):
     # We return boolean flags instead of the tokens themselves, 
     # to let the frontend know if they are configured
     has_shopify_token: bool = False
+    has_shopify_webhook_secret: bool = False
     has_np_token: bool = False
 
     model_config = ConfigDict(from_attributes=True)

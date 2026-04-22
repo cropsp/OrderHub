@@ -10,6 +10,7 @@ from routers.orders import router as orders_router
 from routers.imports import router as imports_router
 from routers.attachments import router as attachments_router
 from routers.dashboard import router as dashboard_router
+from routers.webhooks import router as webhooks_router
 
 __all__ = [
     "auth_router",
@@ -20,4 +21,5 @@ __all__ = [
     "imports_router",
     "attachments_router",
     "dashboard_router",
+    "webhooks_router",
 ]
