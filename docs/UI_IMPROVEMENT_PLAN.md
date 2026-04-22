@@ -55,13 +55,17 @@
 - [x] **Toast System**: Built a custom, low-latency notification system using Zustand and Lucide icons.
 - [x] **Error Handling**: Integrated toasts for API failures and update errors.
 
-### BLOCK 9 — POLISH & ANIMATIONS
-- [x] **Transitions**: Added `animate-in`, `fade-in`, and `slide-in` transitions to major layout shifts.
-- [x] **Responsive Audit**: Verified layouts across desktop and mobile breakpoints.
+### BLOCK 10 — TYPOGRAPHY & STRUCTURAL MODERNIZATION
+- [x] **Font Modernization**: Transitioned to `Inter Variable` for superior screen legibility and professional aesthetic.
+- [x] **Polaris Alignment**: Implemented Shopify-style Title Case typography hierarchy for all section headers.
+- [x] **Information Architecture**: Migrated manual order creation from a narrow modal to a dedicated two-column full-page view (`/orders/new`).
+- [x] **Refined Contrast**: Standardized on `text-[11px]` for labels and `text-sm` for values to improve visual scanning speed.
 
 ---
 
 ## TECHNICAL NOTES
+- **Fonts**: Primary font is now `@fontsource-variable/inter` (sans-serif).
 - **Icons**: Standardized on `lucide-react`.
 - **Branding**: Used deterministic hashing (`djb2`) for shop and avatar colors.
 - **Auto-Save**: Debounced persistence (1000ms) for high-frequency edits.
+- **Design System**: Following "Polaris-lite" principles — Title Case headers, bold weights for emphasis, and subtle Zinc borders.
