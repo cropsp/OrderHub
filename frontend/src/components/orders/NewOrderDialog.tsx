@@ -79,7 +79,7 @@ export default function NewOrderDialog({ open, onOpenChange }: NewOrderDialogPro
                     value={orderData.shop_id}
                     onValueChange={(val) => setOrderData(p => ({ ...p, shop_id: val }))}
                   >
-                    <SelectTrigger className="border-zinc-800 bg-zinc-900/50 rounded-xl">
+                    <SelectTrigger className="border-zinc-800 bg-zinc-900/50 rounded-xl text-zinc-100">
                       <SelectValue placeholder="Select destination store" />
                     </SelectTrigger>
                     <SelectContent className="bg-zinc-950 border-zinc-800 text-zinc-100">

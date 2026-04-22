@@ -152,7 +152,6 @@ export default function Sidebar({ user, shops = [], compact = false }: SidebarPr
         <div className="flex items-center gap-2 text-teal-400">
           <Shield className="size-5" />
           <span className="text-sm font-bold tracking-tight uppercase">OrderHub</span>
-          <span className="text-zinc-500 text-[10px] font-medium ml-auto">Sprint 3</span>
         </div>
       </div>
 

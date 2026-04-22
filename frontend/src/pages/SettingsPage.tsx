@@ -123,7 +123,7 @@ export default function SettingsPage() {
                   }))
                 }
               >
-                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50 text-zinc-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="border-zinc-800 bg-zinc-900">
@@ -146,7 +146,7 @@ export default function SettingsPage() {
                   }))
                 }
               >
-                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50 text-zinc-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="border-zinc-800 bg-zinc-900">
@@ -167,7 +167,7 @@ export default function SettingsPage() {
                   }))
                 }
               >
-                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50">
+                <SelectTrigger className="w-full border-zinc-700 bg-zinc-900/50 text-zinc-200">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="border-zinc-800 bg-zinc-900">

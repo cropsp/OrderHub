@@ -167,7 +167,7 @@ export default function DashboardPage() {
                           className="group relative flex items-center justify-between rounded-lg px-4 py-3 hover:bg-zinc-800/60 cursor-pointer transition-colors"
                           onClick={() => {/* handle navigation if needed */}}
                         >
-                          <div className={cn("absolute left-0 top-1/2 -tranzinc-y-1/2 w-0.5 h-8 rounded-full", theme.dot)} />
+                          <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full", theme.dot)} />
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                                <span className="text-zinc-500 text-xs font-mono">#{order.external_id}</span>
