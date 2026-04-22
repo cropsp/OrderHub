@@ -5,7 +5,7 @@
 echo "🌐 Starting Gemini 2.0 Flash Browser Agent on port 3001..."
 
 # API Key
-export GOOGLE_API_KEY="AIzaSyCLca7CbMdJlJrSvlBZsZzpBLEEnr1cGlQ"
+export GOOGLE_API_KEY="your key"
 
 # Browser Settings
 export BROWSER_USE_VISION="true"
