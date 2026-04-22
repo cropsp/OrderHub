@@ -13,6 +13,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useShops } from '@/hooks/useShops';
 import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+import { getShopTheme } from '@/utils/shopTheme';
+import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
   const [selectedShopId, setSelectedShopId] = useState<string | undefined>(undefined);
@@ -131,90 +134,114 @@ export default function DashboardPage() {
             </div>
             
             <div className="grid gap-6 lg:grid-cols-2">
-              <section className="rounded-xl border border-amber-500/25 bg-gradient-to-br from-amber-500/10 via-red-500/5 to-slate-950/40 p-6 shadow-[0_0_0_1px_rgba(245,158,11,0.08)]">
-                <div className="mb-4 flex items-center justify-between">
+              <section className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-6">
+                <div className="mb-6 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4 text-amber-400" />
-                    <h3 className="text-sm font-semibold uppercase tracking-wider text-amber-200">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500">
                       Attention List
                     </h3>
                   </div>
-                  <Link className="text-xs font-medium text-amber-300 hover:text-amber-200" to="/orders">
-                    Manage queue
+                  <Link className="text-[10px] font-bold uppercase tracking-wider text-teal-400 hover:text-teal-300 transition-colors" to="/orders">
+                    Manage queue →
                   </Link>
                 </div>
 
                 {isAttentionLoading ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {[1, 2, 3, 4].map((item) => (
-                      <Skeleton key={item} className="h-12 w-full bg-slate-900/60" />
+                      <Skeleton key={item} className="h-14 w-full bg-zinc-800/50 rounded-lg" />
                     ))}
                   </div>
                 ) : attentionOrders.length === 0 ? (
-                  <p className="text-sm text-amber-200/80">No urgent orders right now.</p>
+                  <div className="flex flex-col items-center justify-center py-12 opacity-50">
+                    <p className="text-sm text-zinc-500 font-medium">No urgent orders right now.</p>
+                  </div>
                 ) : (
-                  <div className="space-y-2">
-                    {attentionOrders.map((order) => (
-                      <div
-                        key={order.id}
-                        className="flex items-center justify-between rounded-lg border border-amber-500/20 bg-slate-950/50 px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-slate-100">
-                            #{order.external_id} · {order.title}
-                          </p>
-                          <p className="text-xs text-amber-100/80">
-                            {order.shop_name ?? 'Unknown shop'} · Waiting since{' '}
-                            {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
-                          </p>
+                  <div className="space-y-1">
+                    {attentionOrders.map((order) => {
+                      const theme = getShopTheme(order.shop_name ?? '');
+                      return (
+                        <div
+                          key={order.id}
+                          className="group relative flex items-center justify-between rounded-lg px-4 py-3 hover:bg-zinc-800/60 cursor-pointer transition-colors"
+                          onClick={() => {/* handle navigation if needed */}}
+                        >
+                          <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full", theme.dot)} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                               <span className="text-zinc-500 text-xs font-mono">#{order.external_id}</span>
+                               <p className="truncate text-sm font-medium text-zinc-100 line-clamp-1" title={order.title}>
+                                 {order.title}
+                               </p>
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                              {order.shop_name} <span className="mx-1">·</span> Waiting since {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
+                            </p>
+                          </div>
+                          <StatusBadge status={order.status} size="sm" className="ml-4" />
                         </div>
-                        <span className="ml-4 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/15 px-2 py-1 text-[11px] uppercase tracking-wide text-amber-200">
-                          {order.status.replace('_', ' ')}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </section>
 
-              <section className="rounded-xl border border-slate-800/60 bg-slate-900/30 p-6">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-300">
+              <section className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl p-6">
+                <div className="mb-6 flex items-center justify-between">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-zinc-500">
                     Recent Activity
                   </h3>
-                  <Link className="text-xs font-medium text-teal-400 hover:text-teal-300" to="/orders">
-                    View all orders
-                  </Link>
                 </div>
 
                 {isRecentLoading ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {[1, 2, 3, 4].map((item) => (
-                      <Skeleton key={item} className="h-12 w-full bg-slate-900/60" />
+                      <Skeleton key={item} className="h-14 w-full bg-zinc-800/50 rounded-lg" />
                     ))}
                   </div>
                 ) : (recentOrders?.items?.length ?? 0) === 0 ? (
-                  <p className="text-sm text-slate-500">No recent orders available.</p>
+                  <div className="flex flex-col items-center justify-center py-12 opacity-50">
+                    <p className="text-sm text-zinc-500 font-medium">No recent orders available.</p>
+                  </div>
                 ) : (
-                  <div className="space-y-2">
-                    {(recentOrders?.items ?? []).map((order) => (
-                      <div
-                        key={order.id}
-                        className="flex items-center justify-between rounded-lg border border-slate-800/70 bg-slate-950/30 px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-slate-200">
-                            #{order.external_id} · {order.title}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {order.shop_name ?? 'Unknown shop'} · {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
-                          </p>
+                  <div className="flex flex-col">
+                    {(recentOrders?.items ?? []).map((order) => {
+                      const theme = getShopTheme(order.shop_name ?? '');
+                      return (
+                        <div
+                          key={order.id}
+                          className="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0 hover:bg-zinc-800/40 px-2 rounded-lg transition-colors"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                               <Link to={`/orders?id=${order.id}`} className="text-zinc-500 text-xs font-mono hover:text-teal-400 transition-colors">
+                                 #{order.external_id}
+                               </Link>
+                               <p className="truncate text-sm font-medium text-zinc-200 line-clamp-1">
+                                 {order.title}
+                               </p>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                               <div className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider", theme.bg, theme.text)}>
+                                  {order.shop_name}
+                               </div>
+                               <span className="text-zinc-500 text-[10px] uppercase font-medium">
+                                 {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
+                               </span>
+                            </div>
+                          </div>
+                          <StatusBadge status={order.status} size="sm" className="ml-4" />
                         </div>
-                        <span className="ml-4 shrink-0 rounded-md border border-slate-700 bg-slate-800/50 px-2 py-1 text-[11px] uppercase tracking-wide text-slate-300">
-                          {order.status.replace('_', ' ')}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
+                    
+                    <Link 
+                      className="mt-4 flex items-center justify-center py-2 text-xs font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50 rounded-lg transition-all" 
+                      to="/orders"
+                    >
+                      View all orders →
+                    </Link>
                   </div>
                 )}
               </section>
