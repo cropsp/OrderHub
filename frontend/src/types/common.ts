@@ -40,6 +40,12 @@ export interface Shop {
   color: string
   is_active: boolean
   last_synced_at: string | null
+  np_sender_name: string | null
+  np_sender_phone: string | null
+  np_sender_city_ref: string | null
+  np_sender_warehouse_ref: string | null
+  np_default_description: string | null
+  np_default_weight_kg: number
   created_at: string
 }
 

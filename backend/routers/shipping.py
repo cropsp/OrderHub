@@ -17,7 +17,7 @@ from models.shop import Shop
 from models.user import User, UserRole
 from routers.dependencies import get_current_user, require_role
 from services.order_service import get_order_detail, change_order_status
-from services.nova_poshta import NovaPoshtaClient, build_ttn_payload
+from services.nova_poshta import NovaPoshtaClient
 from services.encryption_service import decrypt_value
 from pydantic import BaseModel
 
@@ -108,6 +108,13 @@ async def create_np_ttn(
     if not order.shipping_city or not order.shipping_name or not order.shipping_phone:
         raise HTTPException(status_code=400, detail="Order is missing required shipping information")
 
+    if not order.shipping_city_ref or not order.shipping_warehouse_ref:
+        raise HTTPException(
+            status_code=400, 
+            detail="Order is missing Nova Poshta city or warehouse reference. "
+                   "Please select them using the shipping editor."
+        )
+
     # In a full flow, you would lookup CityRef and WarehouseRef dynamically here
     # For MVP S6-2, we assume they are already known or we do a quick lookup
     # Because NP requires Ref UUIDs, this requires fetching them just-in-time or storing them.
@@ -127,16 +134,18 @@ async def create_np_ttn(
     sender_contact_ref = sender_contacts[0]["Ref"]
     sender_phone = sender_contacts[0]["Phones"] # NP returns phone here
 
-    # Get sender addresses (warehouses)
-    sender_addresses = await np_client.get_counterparty_addresses(sender_ref)
-    if not sender_addresses:
-        # Fallback to Kyiv if no addresses found, but ideally we should have one
-        sender_city_ref = shop.np_sender_city_ref or "8d5a980d-391c-11dd-90d9-001a92567626"
-        sender_warehouse_ref = shop.np_sender_warehouse_ref or "1ec09d88-e1c2-11e3-8c4a-0050568002cf"
-    else:
-        # Use the first registered address
-        sender_city_ref = sender_addresses[0]["CityRef"]
-        sender_warehouse_ref = sender_addresses[0]["Ref"]
+    # Get sender addresses from shop settings
+    sender_city_ref = shop.np_sender_city_ref
+    sender_warehouse_ref = shop.np_sender_warehouse_ref
+
+    if not sender_city_ref or not sender_warehouse_ref:
+        # If not set in shop, we could try to find the first WAREHOUSE for the sender,
+        # but it's safer to ask the user to configure it to avoid courier pickup issues.
+        raise HTTPException(
+            status_code=400, 
+            detail="Sender city or warehouse not configured in Shop settings. "
+                   "Please set them to avoid unwanted courier pickups."
+        )
 
     # 2. Resolve Recipient
     # Separate names (NP expects Last/First/Middle)
@@ -206,7 +215,8 @@ async def create_np_ttn(
         if order.status == OrderStatus.IN_PRODUCTION:
             await change_order_status(db, order, OrderStatus.SHIPPED, current_user, f"TTN created: {order.ttn_number}")
         
-        await db.flush()
+        await db.commit()
+        await db.refresh(order)
         return {"status": "success", "ttn": order.ttn_number}
         
     except Exception as e:

@@ -10,6 +10,7 @@ import {
   Truck
 } from 'lucide-react';
 import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop } from '@/hooks/useShops';
+import { shippingApi } from '@/api/shipping';
 import ShellPage from './ShellPage';
 import { Button } from '@/components/ui/button';
 import {
@@ -93,11 +94,37 @@ export default function ShopsPage() {
   const [editingShop, setEditingShop] = useState(INITIAL_SHOP_STATE);
   const [dialogError, setDialogError] = useState<string | null>(null);
   
+  // NP Search State
+  const [citySearch, setCitySearch] = useState('');
+  const [cityResults, setCityResults] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+
+  const handleSearchCities = async (q: string) => {
+    try {
+      const results = await shippingApi.searchCities(q);
+      setCityResults(results);
+    } catch (err) {
+      console.error('Failed to search cities', err);
+    }
+  };
+
+  const handleGetWarehouses = async (cityRef: string) => {
+    try {
+      const results = await shippingApi.getWarehouses(cityRef);
+      setWarehouses(results);
+    } catch (err) {
+      console.error('Failed to get warehouses', err);
+    }
+  };
+  
   const isOwner = user?.role === 'owner';
 
   const handleOpenCreate = () => {
     setEditingShop(INITIAL_SHOP_STATE);
     setDialogError(null);
+    setCitySearch('');
+    setCityResults([]);
+    setWarehouses([]);
     setIsDialogOpen(true);
   };
 
@@ -116,6 +143,12 @@ export default function ShopsPage() {
       np_sender_city_ref: shop.np_sender_city_ref || '',
       np_sender_warehouse_ref: shop.np_sender_warehouse_ref || '',
     });
+    setCitySearch(''); // We don't have city name in Shop model, user will search again or we can improve later
+    setCityResults([]);
+    setWarehouses([]);
+    if (shop.np_sender_city_ref) {
+      handleGetWarehouses(shop.np_sender_city_ref);
+    }
     setDialogError(null);
     setIsDialogOpen(true);
   };
@@ -315,36 +348,76 @@ export default function ShopsPage() {
                   <p className="text-[10px] font-bold text-teal-500 uppercase tracking-widest">Sender Metadata</p>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-zinc-400">Sender Name</p>
+                       <p className="text-xs font-medium text-zinc-400">Sender Name (Optional override)</p>
                        <Input
                          className="border-zinc-800 bg-zinc-900/50"
+                         placeholder="Leave empty to use NP default"
                          value={editingShop.np_sender_name}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_name: e.target.value }))}
                        />
                     </div>
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-zinc-400">Sender Phone</p>
+                       <p className="text-xs font-medium text-zinc-400">Sender Phone (Optional override)</p>
                        <Input
                          className="border-zinc-800 bg-zinc-900/50"
+                         placeholder="Leave empty to use NP default"
                          value={editingShop.np_sender_phone}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_phone: e.target.value }))}
                        />
                     </div>
-                    <div className="space-y-2">
-                       <p className="text-xs font-medium text-zinc-400">City REF (UUID)</p>
+                  </div>
+
+                  <div className="space-y-4 rounded-xl border border-teal-500/10 bg-teal-500/5 p-4">
+                    <p className="text-[10px] font-bold text-teal-400 uppercase tracking-widest">Permanent Sender Location</p>
+                    <div className="space-y-2 relative">
+                       <p className="text-xs font-medium text-zinc-400">Sender City</p>
                        <Input
-                         className="border-zinc-800 bg-zinc-900/50 font-mono text-[10px]"
-                         value={editingShop.np_sender_city_ref}
-                         onChange={(e) => setEditingShop(p => ({ ...p, np_sender_city_ref: e.target.value }))}
+                         className="border-zinc-800 bg-zinc-900/50"
+                         placeholder="Search city (e.g. Київ)"
+                         value={citySearch}
+                         onChange={(e) => {
+                           setCitySearch(e.target.value);
+                           if (e.target.value.length >= 2) handleSearchCities(e.target.value);
+                         }}
                        />
+                       {cityResults.length > 0 && (
+                         <div className="absolute z-10 mt-1 max-h-40 w-full overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-950 p-1 shadow-2xl">
+                           {cityResults.map((city: any) => (
+                             <div
+                               key={city.Ref}
+                               className="cursor-pointer rounded-md px-3 py-2 text-xs hover:bg-zinc-800"
+                               onClick={() => {
+                                 setEditingShop(p => ({ ...p, np_sender_city_ref: city.Ref }));
+                                 setCitySearch(city.Description);
+                                 setCityResults([]);
+                                 handleGetWarehouses(city.Ref);
+                               }}
+                             >
+                               {city.Description}
+                             </div>
+                           ))}
+                         </div>
+                       )}
                     </div>
+
                     <div className="space-y-2">
-                       <p className="text-xs font-medium text-zinc-400">Warehouse REF (UUID)</p>
-                       <Input
-                         className="border-zinc-800 bg-zinc-900/50 font-mono text-[10px]"
+                       <p className="text-xs font-medium text-zinc-400">Sender Warehouse (MUST BE A WAREHOUSE TO AVOID COURIER)</p>
+                       <Select
                          value={editingShop.np_sender_warehouse_ref}
-                         onChange={(e) => setEditingShop(p => ({ ...p, np_sender_warehouse_ref: e.target.value }))}
-                       />
+                         onValueChange={(v) => setEditingShop(p => ({ ...p, np_sender_warehouse_ref: v }))}
+                         disabled={!editingShop.np_sender_city_ref}
+                       >
+                         <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
+                           <SelectValue placeholder="Select your shipping warehouse" />
+                         </SelectTrigger>
+                         <SelectContent className="max-h-60 border-zinc-800 bg-zinc-950">
+                           {warehouses.map((w: any) => (
+                             <SelectItem key={w.Ref} value={w.Ref} className="text-xs">
+                               {w.Description}
+                             </SelectItem>
+                           ))}
+                         </SelectContent>
+                       </Select>
                     </div>
                   </div>
                 </TabsContent>
