@@ -46,6 +46,8 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     np_sender_warehouse_ref: Mapped[str | None] = mapped_column(
         String(36), nullable=True
     )
+    np_sender_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    np_sender_contact_ref: Mapped[str | None] = mapped_column(String(36), nullable=True)
     np_default_description: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )

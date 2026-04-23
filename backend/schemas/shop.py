@@ -18,6 +18,8 @@ class ShopBase(BaseModel):
     np_sender_phone: str | None = Field(None, max_length=20)
     np_sender_city_ref: str | None = Field(None, max_length=36)
     np_sender_warehouse_ref: str | None = Field(None, max_length=36)
+    np_sender_ref: str | None = Field(None, max_length=36)
+    np_sender_contact_ref: str | None = Field(None, max_length=36)
     np_default_description: str | None = Field(None, max_length=255)
     np_default_weight_kg: float = 0.5
     np_default_volume_m3: float = 0.004
@@ -45,6 +47,8 @@ class ShopUpdate(BaseModel):
     np_sender_phone: str | None = Field(None, max_length=20)
     np_sender_city_ref: str | None = Field(None, max_length=36)
     np_sender_warehouse_ref: str | None = Field(None, max_length=36)
+    np_sender_ref: str | None = Field(None, max_length=36)
+    np_sender_contact_ref: str | None = Field(None, max_length=36)
     np_default_description: str | None = Field(None, max_length=255)
     np_default_weight_kg: float | None = None
     np_default_volume_m3: float | None = None

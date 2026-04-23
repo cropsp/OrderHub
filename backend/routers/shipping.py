@@ -119,15 +119,33 @@ async def create_np_ttn(
     
     # 1. Resolve Sender
     try:
-        senders = await np_client.get_counterparties("Sender")
-        if not senders:
-            raise HTTPException(status_code=400, detail="No Sender counterparty found for this API key")
-        sender_ref = senders[0]["Ref"]
-        
-        sender_contacts = await np_client.get_contact_persons(sender_ref)
-        if not sender_contacts:
-            raise HTTPException(status_code=400, detail="No contact person found for Sender counterparty")
-        sender_contact_ref = sender_contacts[0]["Ref"]
+        if shop.np_sender_ref and shop.np_sender_contact_ref:
+            logger.info(f"[SHIPPING] Using cached sender refs for shop {shop.id}")
+            sender_ref = shop.np_sender_ref
+            sender_contact_ref = shop.np_sender_contact_ref
+        else:
+            logger.info(f"[SHIPPING] Resolving sender refs from NP API for shop {shop.id}")
+            senders = await np_client.get_counterparties("Sender")
+            if not senders:
+                raise HTTPException(status_code=400, detail="No Sender counterparty found for this API key")
+            sender_ref = senders[0]["Ref"]
+            
+            sender_contacts = await np_client.get_contact_persons(sender_ref)
+            if not sender_contacts:
+                raise HTTPException(status_code=400, detail="No contact person found for Sender counterparty")
+            sender_contact_ref = sender_contacts[0]["Ref"]
+            
+            # Cache the refs
+            shop.np_sender_ref = sender_ref
+            shop.np_sender_contact_ref = sender_contact_ref
+            # Commit immediately so refs are cached even if later steps fail
+            await db.commit()
+            await db.refresh(shop)
+            # Re-fetch order and shop because commit/refresh might have expired them in some session configs
+            # (though with selectin loading it should be fine, but let's be careful)
+            
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"NP API Error (Sender): {str(e)}")
 
