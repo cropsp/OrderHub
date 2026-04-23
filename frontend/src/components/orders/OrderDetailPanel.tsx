@@ -152,7 +152,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                     canManageShipping={canManageShipping}
                     isPending={createTTN.isPending || deleteTTN.isPending}
                     onGenerateTTN={handleGenerateTTN}
-                    onDeleteTTN={handleDeleteTTN}
+                    onRemoveTTN={handleDeleteTTN}
                   />
                   {isOwner && <DetailFinance order={order} />}
                   <DetailTimeline order={order} />

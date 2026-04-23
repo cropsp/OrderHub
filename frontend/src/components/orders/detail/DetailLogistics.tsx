@@ -13,11 +13,11 @@ interface DetailLogisticsProps {
   canManageShipping: boolean;
   isPending: boolean;
   onGenerateTTN: (params: { weight: number; volume: number }) => void;
-  onDeleteTTN?: () => void;
+  onRemoveTTN?: () => void;
   onUpdate?: (payload: any) => Promise<void>;
 }
 
-export function DetailLogistics({ order, canManageShipping, isPending, onGenerateTTN, onDeleteTTN, onUpdate }: DetailLogisticsProps) {
+export function DetailLogistics({ order, canManageShipping, isPending, onGenerateTTN, onRemoveTTN, onUpdate }: DetailLogisticsProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [cityQuery, setCityQuery] = useState(order.shipping_city || '');
@@ -348,13 +348,13 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                   <p className="text-[10px] font-bold text-teal-500/60 uppercase tracking-widest">Tracking (TTN)</p>
                   <div className="flex items-center gap-2">
                     <ClipboardList className="size-3.5 text-teal-500/40 group-hover:text-teal-500 transition-colors" />
-                    {canManageShipping && onDeleteTTN && (
+                    {canManageShipping && onRemoveTTN && (
                       <button 
                         className="p-1 rounded-md hover:bg-red-500/10 text-zinc-500 hover:text-red-500 transition-all z-20"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (window.confirm('Are you sure you want to delete this TTN?')) {
-                            onDeleteTTN();
+                            onRemoveTTN();
                           }
                         }}
                       >

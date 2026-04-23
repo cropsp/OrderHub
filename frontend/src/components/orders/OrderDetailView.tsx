@@ -11,7 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 import { useToastStore } from '@/components/ui/Toast';
 import { UserRole } from '@/types/user';
-import { useCreateTTN } from '@/hooks/useShipping';
+import { useCreateTTN, useDeleteTTN } from '@/hooks/useShipping';
 import { ORDER_STATUS } from '@/lib/order-status';
 import { 
   DropdownMenu, 
@@ -49,6 +49,7 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
   const isManager = user?.role === UserRole.MANAGER;
   const canManageShipping = isOwner || isManager;
   const createTTN = useCreateTTN();
+  const deleteTTN = useDeleteTTN();
 
   const handleUpdate = async (payload: any) => {
     if (!order) return;
@@ -63,15 +64,20 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
     }
   };
 
-  const handleGenerateTTN = () => {
+  const handleGenerateTTN = (params: { weight: number; volume: number }) => {
     if (!order) return;
     createTTN.mutate({ 
       orderId: order.id, 
       data: {
-        weight: 0.5, 
+        ...params,
         description: `Order #${order.external_id}: ${order.title.substring(0, 50)}`
       } 
     });
+  };
+
+  const handleDeleteTTN = () => {
+    if (!order) return;
+    deleteTTN.mutate(order.id);
   };
 
   if (isLoading || !order) {
@@ -220,8 +226,9 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
             <DetailLogistics 
               order={order} 
               canManageShipping={canManageShipping}
-              isPending={createTTN.isPending}
+              isPending={createTTN.isPending || deleteTTN.isPending}
               onGenerateTTN={handleGenerateTTN}
+              onRemoveTTN={handleDeleteTTN}
               onUpdate={handleUpdate}
             />
             {isOwner && <DetailFinance order={order} />}
