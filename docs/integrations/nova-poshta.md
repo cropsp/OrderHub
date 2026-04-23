@@ -48,3 +48,29 @@ API keys are never stored in plain text.
     - Ensure `ENCRYPTION_KEY` is set in the production `.env`.
     - **Backward Compatibility**: The system still supports `FERNET_KEY` as a legacy alias via Pydantic's `AliasChoices`. If `ENCRYPTION_KEY` is missing, it will automatically fall back to `FERNET_KEY`.
 - **Migrations**: Database updates are managed via Alembic (e.g., `990470ad5d99`).
+
+## 6. Automated Logistics & Parcel Calculation
+
+### Packaging Registry
+The system maintains a registry of available packaging types specifically for Nova Poshta:
+- **BOX**: Rigid packaging for most items.
+- **ENVELOPE**: Soft packaging with a `max_thickness_mm` constraint.
+- **Tare Weight**: Each packaging type includes its own weight, which is added to the total parcel weight.
+
+### Parcel Calculator Service
+A dedicated service (\`services/logistics_service.py\`) automates parcel dimension estimation:
+1. **Aggregation**: Sums the dimensions and weights of all linked variants in an order.
+2. **Packing Factor**: Applies a safety multiplier (default 1.25x) to account for protective materials.
+3. **Packaging Selection**: Automatically selects the smallest compatible Box or Envelope from the registry.
+4. **Volumetric Logic**: Calculates total volume and volumetric weight (\$LxWxH / 4000\$) to determine the chargeable weight.
+
+### UI Integration (Logistics Panel)
+The Order Detail view includes an enhanced **Logistics Panel**:
+- **Automatic Pre-fill**: Dimensions are automatically populated based on the calculation service.
+- **Manual Overrides**: Users can override calculated values; the system stores both \`parcel_override\` and the original \`calculated_parcel\` data.
+- **Smart Badges**: Displays \`Calculated\` badge when using automated data and \`Manual\` when overridden.
+
+## 7. Configuration Summary (Logistics)
+- **Shop Scoping**: Logistics settings (\`parcel_settings\`) are managed per shop.
+- **Kiev Timezone**: All delivery dates are forced to \`Europe/Kiev\` for API compatibility.
+- **Volumetric weight**: \$cm^3\$ to \$kg\$ conversion follows NP's standard formula.

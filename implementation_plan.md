@@ -152,3 +152,21 @@ Comprehensive overhaul based on the [NP Audit Report](file:///home/serhii/projec
 - **Zero Redundant Calls**: Sender references are cached in the DB.
 - **Data Integrity**: Refs are auto-cleared on manual input; dates are Kiev-compliant.
 - **Security**: All API keys are Fernet-encrypted and masked in the UI.
+
+### D. Nova Poshta Logistics Integration (Phases 1-6)
+
+Full automation of parcel estimation and catalog management. See [Detailed Summary](docs/integrations/nova-poshta.md).
+
+| ID | Phase | Milestone | Status |
+|---|---|---|---|
+| LOG-1 | Phase 1 | Database Schema (Products, Variants, Packaging) | DONE |
+| LOG-2 | Phase 2 | Backend API (CRUD, Two-step CSV Import Preview/Confirm) | DONE |
+| LOG-3 | Phase 3 | Order Item Linking & Snapshots (Atomic SKU matching) | DONE |
+| LOG-4 | Phase 4 | Parcel Calculation Service (Packaging selection & Vol. Weight) | DONE |
+| LOG-5 | Phase 5 | Frontend Logistics Panel (Calculated pre-fills & Badges) | DONE |
+| LOG-6 | Phase 6 | Catalog & Packaging Administration UI (Products/Packaging Admin) | DONE |
+
+**Key Outcomes:**
+- **Automated Calculations**: Dimensions and weights are pre-filled based on the product catalog.
+- **Data Safety**: Snapshots preserve historical order data even if catalog specs change.
+- **Administrative Control**: Full UI for managing physical specs and bulk CSV importing.
