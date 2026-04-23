@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import type { OrderDetail } from '@/types/order';
 import { useSearchCities, useGetWarehouses } from '@/hooks/useShipping';
 import { cn } from '@/lib/utils';
+import { useToastStore } from '@/components/ui/Toast';
 
 interface DetailLogisticsProps {
   order: OrderDetail;
@@ -142,13 +143,25 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                         className="h-8 text-[11px] bg-zinc-900 border-zinc-800 pl-8 focus:ring-teal-500/20"
                         placeholder="Type city name..."
                         value={cityQuery}
-                        onChange={e => setCityQuery(e.target.value)}
+                        onChange={e => {
+                          setCityQuery(e.target.value);
+                          // Clear references if user manually types after selection
+                          if (formData.shipping_city_ref) {
+                            setFormData(p => ({ 
+                              ...p, 
+                              shipping_city: '', 
+                              shipping_city_ref: '',
+                              shipping_warehouse_ref: '',
+                              shipping_street_1: '' 
+                            }));
+                          }
+                        }}
                       />
                       <Search className="absolute left-2.5 top-2.5 size-3 text-zinc-600" />
                       {isCitiesLoading && <Loader2 className="absolute right-2.5 top-2.5 size-3 animate-spin text-teal-500" />}
                     </div>
                     {cities && cities.length > 0 && cityQuery !== formData.shipping_city && (
-                      <div className="mt-1 max-h-32 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900 shadow-xl z-[60] absolute w-[calc(100%-24px)]">
+                      <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900 shadow-2xl z-[100] absolute w-full left-0">
                         {cities.map((city: any) => (
                           <div 
                             key={city.Ref}
@@ -194,7 +207,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                       </div>
                       
                       {isWarehouseOpen && (
-                        <div className="absolute top-full left-0 w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl z-[60] overflow-hidden">
+                        <div className="absolute top-full left-0 w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-lg shadow-2xl z-[100] overflow-hidden">
                           <ScrollArea className="h-48">
                             {isWarehousesLoading ? (
                               <div className="p-4 flex justify-center"><Loader2 className="size-4 animate-spin text-teal-500" /></div>
@@ -307,10 +320,16 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
           )}
 
           {!isEditing && order.ttn_number && (
-            <div className="mt-2 p-3 rounded-xl bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-all cursor-pointer group">
+            <div 
+              className="mt-2 p-3 rounded-xl bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-all cursor-pointer group active:scale-[0.98]"
+              onClick={() => {
+                navigator.clipboard.writeText(order.ttn_number!);
+                useToastStore.getState().addToast('TTN copied to clipboard', 'success');
+              }}
+            >
               <div className="flex items-center justify-between mb-1">
                 <p className="text-[10px] font-bold text-teal-500/60 uppercase tracking-widest">Tracking (TTN)</p>
-                <ClipboardList className="size-3.5 text-teal-500/40" />
+                <ClipboardList className="size-3.5 text-teal-500/40 group-hover:text-teal-500 transition-colors" />
               </div>
               <p className="font-mono text-base text-teal-100 font-black tracking-tight">{order.ttn_number}</p>
             </div>
