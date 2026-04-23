@@ -14,13 +14,15 @@ from database import get_db
 from models.user import User, UserRole
 from schemas.order import (
     OrderFilters, OrderListResponse, OrderResponse, 
-    OrderCreate, OrderUpdate, StatusChangeRequest
+    OrderCreate, OrderUpdate, StatusChangeRequest,
+    OrderItemCreate, OrderItemUpdate, OrderItemResponse
 )
 from schemas.common import PaginatedResponse
 from routers.dependencies import get_current_user, require_role
 from services.order_service import (
     get_orders_filtered, get_order_detail, 
-    create_order, update_order, change_order_status
+    create_order, update_order, change_order_status,
+    add_order_item, update_order_item, delete_order_item
 )
 from logger import get_logger
 
@@ -165,6 +167,53 @@ async def transition_order_status(
     await db.commit()
     logger.info(f"Order {order_id} status transition committed")
     return await get_order(order_id, current_user, db)
+
+
+# --- Order Items CRUD ---
+
+@router.post("/{order_id}/items", response_model=OrderItemResponse, status_code=status.HTTP_201_CREATED)
+async def add_item_to_order(
+    order_id: uuid.UUID,
+    body: OrderItemCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a new item to an existing order."""
+    if current_user.role == UserRole.DESIGNER:
+        raise HTTPException(status_code=403, detail="Designers cannot add items")
+    
+    item = await add_order_item(db, order_id, body)
+    await db.commit()
+    return item
+
+
+@router.patch("/items/{item_id}", response_model=OrderItemResponse)
+async def update_item_in_order(
+    item_id: uuid.UUID,
+    body: OrderItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update an existing order item."""
+    if current_user.role == UserRole.DESIGNER:
+        raise HTTPException(status_code=403, detail="Designers cannot update items")
+    
+    item = await update_order_item(db, item_id, body)
+    await db.commit()
+    return item
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_item_from_order(
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an item from an order."""
+    if current_user.role == UserRole.DESIGNER:
+        raise HTTPException(status_code=403, detail="Designers cannot delete items")
+    
+    await delete_order_item(db, item_id)
 
 
 @router.get("/action/export")

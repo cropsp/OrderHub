@@ -1,11 +1,13 @@
-import { Plus, Trash2, ShoppingCart } from 'lucide-react';
+import { Plus, Trash2, ShoppingCart, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ProductVariantSelector } from './ProductVariantSelector';
 
 type Item = {
   title: string;
   quantity: number;
   unit_price: number;
+  product_variant_id?: string;
 };
 
 type OrderItemsEditorProps = {
@@ -14,6 +16,7 @@ type OrderItemsEditorProps = {
   onAddItem: () => void;
   onRemoveItem: (idx: number) => void;
   onUpdateItem: (idx: number, field: string, value: any) => void;
+  shopId: string;
 };
 
 export function OrderItemsEditor({ 
@@ -21,7 +24,8 @@ export function OrderItemsEditor({
   currency, 
   onAddItem, 
   onRemoveItem, 
-  onUpdateItem 
+  onUpdateItem,
+  shopId
 }: OrderItemsEditorProps) {
   return (
     <section className="space-y-4">
@@ -45,13 +49,23 @@ export function OrderItemsEditor({
         {items.map((item, idx) => (
           <div key={idx} className="group relative flex flex-wrap sm:flex-nowrap items-end gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="flex-1 min-w-[200px] space-y-2">
-               <p className="text-[10px] font-bold uppercase text-zinc-600 px-1">Product Title</p>
-               <Input 
-                className="h-9 border-zinc-800 bg-zinc-900/40 rounded-lg text-zinc-100"
-                placeholder="Item name..."
-                value={item.title}
-                onChange={e => onUpdateItem(idx, 'title', e.target.value)}
-              />
+                <p className="text-[10px] font-bold uppercase text-zinc-600 px-1 flex items-center gap-1">
+                  Product Title
+                  {!item.product_variant_id && (
+                    <span className="text-[9px] text-amber-500/80 font-normal normal-case flex items-center gap-0.5 ml-auto">
+                      <AlertCircle className="size-2.5" /> unlinked
+                    </span>
+                  )}
+                </p>
+                <ProductVariantSelector
+                  shopId={shopId}
+                  value={item.title}
+                  onChange={(title, variantId, price) => {
+                    onUpdateItem(idx, 'title', title);
+                    if (variantId) onUpdateItem(idx, 'product_variant_id', variantId);
+                    if (price !== undefined) onUpdateItem(idx, 'unit_price', price);
+                  }}
+                />
             </div>
             <div className="w-20 space-y-2">
                <p className="text-[10px] font-bold uppercase text-zinc-600 px-1 text-center">Qty</p>

@@ -27,13 +27,26 @@ export function DetailItems({ order }: DetailItemsProps) {
               <tr key={item.id} className="group hover:bg-white/[0.01] transition-colors">
                 <td className="px-4 py-4">
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-semibold text-zinc-200 group-hover:text-teal-400 transition-colors leading-tight">
+                    <span className="text-sm font-semibold text-zinc-200 group-hover:text-teal-400 transition-colors leading-tight flex items-center gap-2">
                       {item.title}
+                      {!item.product_variant_id && (
+                        <span className="text-[10px] font-medium text-amber-500/80 bg-amber-500/5 px-1.5 py-0.5 rounded border border-amber-500/10">
+                          Unlinked
+                        </span>
+                      )}
                     </span>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-tight">
                         SKU: {item.sku || 'N/A'}
                       </span>
+                      {item.snapshot_title && item.snapshot_title !== item.title && (
+                        <>
+                          <span className="text-zinc-800">·</span>
+                          <span className="text-[11px] text-teal-500/70 font-medium">
+                             Ref: {item.snapshot_title}
+                          </span>
+                        </>
+                      )}
                       {item.variations && (
                         <>
                           <span className="text-zinc-800">·</span>

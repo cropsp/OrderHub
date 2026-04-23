@@ -21,6 +21,12 @@ class OrderItemResponse(BaseModel):
     unit_price: float
     currency: str
     variations: str | None
+    product_variant_id: uuid.UUID | None
+    snapshot_weight_g: int | None
+    snapshot_length_mm: int | None
+    snapshot_width_mm: int | None
+    snapshot_height_mm: int | None
+    snapshot_title: str | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -113,6 +119,18 @@ class OrderItemCreate(BaseModel):
     unit_price: float
     currency: str = "USD"
     variations: str | None = None
+    product_variant_id: uuid.UUID | None = None
+
+
+
+class OrderItemUpdate(BaseModel):
+    """Payload for manual order item update."""
+    title: str | None = None
+    quantity: int | None = None
+    unit_price: float | None = None
+    currency: str | None = None
+    variations: str | None = None
+    product_variant_id: uuid.UUID | None = None
 
 
 class OrderCreate(BaseModel):

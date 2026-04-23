@@ -426,6 +426,7 @@ export default function CreateOrderView() {
                     onAddItem={addItem}
                     onRemoveItem={removeItem}
                     onUpdateItem={updateItem}
+                    shopId={orderData.shop_id}
                   />
                </div>
             </div>

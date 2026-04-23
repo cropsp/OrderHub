@@ -68,6 +68,12 @@ export interface OrderItem {
   unit_price: number
   currency: string
   variations: string | null
+  product_variant_id: string | null
+  snapshot_weight_g: number | null
+  snapshot_length_mm: number | null
+  snapshot_width_mm: number | null
+  snapshot_height_mm: number | null
+  snapshot_title: string | null
 }
 
 export interface OrderStatusHistoryEntry {

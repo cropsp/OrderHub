@@ -12,7 +12,9 @@ from fastapi import HTTPException, status
 
 from models.order import Order, OrderItem, OrderStatus, OrderStatusHistory, ALLOWED_TRANSITIONS
 from models.user import User, UserRole
-from schemas.order import OrderCreate, OrderUpdate, OrderFilters
+from models.customer import Customer
+from models.product import Product, ProductVariant
+from schemas.order import OrderCreate, OrderUpdate, OrderFilters, OrderItemCreate, OrderItemUpdate
 from services.customer_service import upsert_customer
 
 
@@ -151,6 +153,29 @@ async def change_order_status(
     return order
 
 
+async def _apply_variant_snapshot(db: AsyncSession, item: OrderItem, variant_id: uuid.UUID, shop_id: uuid.UUID):
+    """Fetch a variant and copy its dimensions to the OrderItem snapshot fields."""
+    query = select(ProductVariant).join(Product).filter(
+        ProductVariant.id == variant_id,
+        Product.shop_id == shop_id
+    )
+    result = await db.execute(query)
+    variant = result.scalar_one_or_none()
+
+    if not variant:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Product variant not found or belongs to another shop"
+        )
+
+    item.product_variant_id = variant.id
+    item.snapshot_weight_g = variant.weight_g
+    item.snapshot_length_mm = variant.length_mm
+    item.snapshot_width_mm = variant.width_mm
+    item.snapshot_height_mm = variant.height_mm
+    item.snapshot_title = variant.variant_name or variant.product.title
+
+
 async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order:
     """Manual order creation."""
     # Customupsert -> Create order -> Default History
@@ -200,6 +225,8 @@ async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order
             currency=item_data.currency,
             variations=item_data.variations
         )
+        if item_data.product_variant_id:
+            await _apply_variant_snapshot(db, item, item_data.product_variant_id, order.shop_id)
         db.add(item)
     
     # Initial history
@@ -275,3 +302,66 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
         
     await db.flush()
     return order
+
+
+async def add_order_item(db: AsyncSession, order_id: uuid.UUID, data: OrderItemCreate) -> OrderItem:
+    """Add a single item to an existing order."""
+    # First get order to know the shop_id for guard
+    result = await db.execute(select(Order).filter(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    item = OrderItem(
+        id=uuid.uuid4(),
+        order_id=order_id,
+        title=data.title,
+        quantity=data.quantity,
+        unit_price=data.unit_price,
+        currency=data.currency,
+        variations=data.variations
+    )
+    if data.product_variant_id:
+        await _apply_variant_snapshot(db, item, data.product_variant_id, order.shop_id)
+    
+    db.add(item)
+    await db.flush()
+    return item
+
+
+async def update_order_item(db: AsyncSession, item_id: uuid.UUID, data: OrderItemUpdate) -> OrderItem:
+    """Update an existing order item."""
+    query = select(OrderItem).join(Order).filter(OrderItem.id == item_id).options(selectinload(OrderItem.order))
+    result = await db.execute(query)
+    item = result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Order item not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    
+    # Special handling for product_variant_id to update snapshots
+    if "product_variant_id" in update_data:
+        v_id = update_data.pop("product_variant_id")
+        if v_id:
+            await _apply_variant_snapshot(db, item, v_id, item.order.shop_id)
+        else:
+            # Clearing the link
+            item.product_variant_id = None
+            item.snapshot_weight_g = None
+            item.snapshot_length_mm = None
+            item.snapshot_width_mm = None
+            item.snapshot_height_mm = None
+            item.snapshot_title = None
+
+    for key, value in update_data.items():
+        setattr(item, key, value)
+
+    await db.flush()
+    return item
+
+
+async def delete_order_item(db: AsyncSession, item_id: uuid.UUID):
+    """Delete an order item."""
+    from sqlalchemy import delete
+    await db.execute(delete(OrderItem).filter(OrderItem.id == item_id))
+    await db.commit()
