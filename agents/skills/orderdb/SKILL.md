@@ -392,10 +392,17 @@ Agent appends one entry per sprint after merge:
 - Follow-ups: none
 
 ### 2026-04-23 — Phase 4 — Parcel calculation service
-- Commit: pending
+- Commit: 4e18a63
 - Summary: Implemented `parcel_calculator` service with envelope/box selection logic and volumetric weight calculation. Added `GET /parcel-estimate` endpoint with caching.
-- Acceptance checked by: self, pending review
+- Acceptance checked by: self
 - Deviations from plan: Fixed volume math in `ProductVariant` (from /1M to /1k for cm3).
+- Follow-ups: none
+
+### 2026-04-23 — Phase 5 — NP TTN integration update
+- Commit: pending
+- Summary: Integrated automated parcel calculation into Nova Poshta TTN panel. Added pre-filling, packaging badges, volumetric weight tooltips, and manual override tracking.
+- Acceptance checked by: self
+- Deviations from plan: Corrected VolumeGeneral divisor for mm3 to m3 conversion.
 - Follow-ups: none
 ```
 

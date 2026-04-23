@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Phone, ClipboardList, Edit2, Check, Loader2, Search, MapPin, X } from 'lucide-react';
+import { Phone, ClipboardList, Edit2, Check, Loader2, Search, MapPin, X, RefreshCw, AlertTriangle, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import type { OrderDetail } from '@/types/order';
-import { useSearchCities, useGetWarehouses } from '@/hooks/useShipping';
+import { useSearchCities, useGetWarehouses, useGetParcelEstimate } from '@/hooks/useShipping';
 import { cn } from '@/lib/utils';
 import { useToastStore } from '@/components/ui/Toast';
 
@@ -12,7 +13,14 @@ interface DetailLogisticsProps {
   order: OrderDetail;
   canManageShipping: boolean;
   isPending: boolean;
-  onGenerateTTN: (params: { weight: number; volume: number }) => void;
+  onGenerateTTN: (params: { 
+    weight: number; 
+    volume: number;
+    length?: number;
+    width?: number;
+    height?: number;
+    parcel_override?: boolean;
+  }) => void;
   onRemoveTTN?: () => void;
   onUpdate?: (payload: any) => Promise<void>;
 }
@@ -25,7 +33,30 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
   const [isWarehouseOpen, setIsWarehouseOpen] = useState(false);
   const [weight, setWeight] = useState(order.shop?.np_default_weight_kg || 0.5);
   const [volume, setVolume] = useState(order.shop?.np_default_volume_m3 || 0.004);
+  const [length, setLength] = useState<number>(0);
+  const [width, setWidth] = useState<number>(0);
+  const [height, setHeight] = useState<number>(0);
+  const [isManual, setIsManual] = useState(order.parcel_override);
+
+  const { data: estimate, isFetching: isEstimating } = useGetParcelEstimate(order.id, !order.ttn_number && order.shipping_country === 'UA');
+
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Pre-fill from estimate if not overridden
+  useEffect(() => {
+    if (estimate && !isManual) {
+      setWeight(estimate.chargeable_weight_g / 1000.0);
+      setLength(estimate.parcel_length_mm);
+      setWidth(estimate.parcel_width_mm);
+      setHeight(estimate.parcel_height_mm);
+      // Volume is derived in backend from L/W/H now, but we can set it for UI compatibility
+      setVolume(estimate.total_volume_cm3 / 1000000.0);
+    } else if (!estimate && !order.parcel_override && order.shop) {
+      // Fallback to defaults if no items or estimate failed
+      setWeight(order.shop.np_default_weight_kg);
+      setVolume(order.shop.np_default_volume_m3);
+    }
+  }, [estimate, isManual, order.parcel_override, order.shop]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -372,25 +403,143 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
 
       {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
         <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
+          {/* Estimation Context */}
+          {estimate && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <Badge 
+                    variant="outline" 
+                    className={cn(
+                      "text-[9px] font-bold uppercase tracking-widest py-0 h-5 border-zinc-700/50",
+                      isManual ? "bg-amber-500/10 text-amber-500 border-amber-500/20" : "bg-teal-500/10 text-teal-500 border-teal-500/20"
+                    )}
+                  >
+                    {isManual ? 'Manual Override' : 'Auto-Calculated'}
+                  </Badge>
+                  {!isManual && estimate.selected_packaging && (
+                    <span className="text-[9px] text-zinc-500 font-medium flex items-center gap-1">
+                      <ClipboardList size={10} />
+                      {estimate.selected_packaging.name} ({estimate.packaging_type})
+                    </span>
+                  )}
+                </div>
+                
+                {isManual && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-5 px-1.5 text-[9px] text-teal-500 hover:text-teal-400 hover:bg-teal-500/10 gap-1 font-bold"
+                    onClick={() => setIsManual(false)}
+                  >
+                    <RefreshCw size={10} className={cn(isEstimating && "animate-spin")} />
+                    Reset
+                  </Button>
+                )}
+              </div>
+
+              {/* Warnings */}
+              {estimate.warnings.length > 0 && (
+                <div className="space-y-1">
+                  {estimate.warnings.map((w, idx) => (
+                    <div key={idx} className="flex items-start gap-1.5 p-1.5 rounded bg-amber-500/5 border border-amber-500/10">
+                      <AlertTriangle size={10} className="text-amber-500 shrink-0 mt-0.5" />
+                      <p className="text-[9px] text-amber-200/70 leading-tight">{w}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Weight (kg)</label>
+              <div className="flex items-center justify-between px-1">
+                <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Weight (kg)</label>
+                {estimate && (
+                  <div className="group relative">
+                    <Info size={10} className="text-zinc-700" />
+                    <div className="absolute bottom-full right-0 mb-2 w-48 p-2 rounded-lg bg-zinc-900 border border-zinc-800 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-[100]">
+                      <div className="space-y-1 text-[10px]">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Actual:</span>
+                          <span className="text-zinc-300">{(estimate.total_weight_g / 1000).toFixed(3)} kg</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Volumetric:</span>
+                          <span className="text-zinc-300">{(estimate.volumetric_weight_g / 1000).toFixed(3)} kg</span>
+                        </div>
+                        <div className="border-t border-zinc-800 my-1" />
+                        <div className="flex justify-between font-bold">
+                          <span className="text-teal-500">Chargeable:</span>
+                          <span className="text-teal-400">{(estimate.chargeable_weight_g / 1000).toFixed(3)} kg</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
               <Input 
                 type="number"
-                step="0.1"
+                step="0.001"
                 className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
                 value={weight}
-                onChange={e => setWeight(parseFloat(e.target.value) || 0)}
+                onChange={e => {
+                  setWeight(parseFloat(e.target.value) || 0);
+                  setIsManual(true);
+                }}
               />
             </div>
             <div className="space-y-1">
               <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Volume (m³)</label>
               <Input 
                 type="number"
-                step="0.001"
+                step="0.0001"
                 className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
                 value={volume}
-                onChange={e => setVolume(parseFloat(e.target.value) || 0)}
+                onChange={e => {
+                  setVolume(parseFloat(e.target.value) || 0);
+                  setIsManual(true);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Length (mm)</label>
+              <Input 
+                type="number"
+                className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
+                value={length}
+                onChange={e => {
+                  setLength(parseInt(e.target.value) || 0);
+                  setIsManual(true);
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Width (mm)</label>
+              <Input 
+                type="number"
+                className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
+                value={width}
+                onChange={e => {
+                  setWidth(parseInt(e.target.value) || 0);
+                  setIsManual(true);
+                }}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Height (mm)</label>
+              <Input 
+                type="number"
+                className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
+                value={height}
+                onChange={e => {
+                  setHeight(parseInt(e.target.value) || 0);
+                  setIsManual(true);
+                }}
               />
             </div>
           </div>
@@ -402,8 +551,15 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                 ? "bg-teal-600 hover:bg-teal-500 text-white shadow-teal-900/20" 
                 : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
             )}
-            disabled={isPending || !order.shipping_warehouse_ref}
-            onClick={() => onGenerateTTN({ weight, volume })}
+            disabled={isPending || isEstimating || !order.shipping_warehouse_ref}
+            onClick={() => onGenerateTTN({ 
+              weight, 
+              volume, 
+              length, 
+              width, 
+              height,
+              parcel_override: isManual
+            })}
           >
             {isPending ? <Loader2 size={14} className="animate-spin" /> : null}
             {isPending ? 'Processing...' : 'Generate NP Label'}

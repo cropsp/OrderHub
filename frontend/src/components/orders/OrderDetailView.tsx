@@ -64,7 +64,14 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
     }
   };
 
-  const handleGenerateTTN = (params: { weight: number; volume: number }) => {
+  const handleGenerateTTN = (params: { 
+    weight: number; 
+    volume: number; 
+    length?: number; 
+    width?: number; 
+    height?: number;
+    parcel_override?: boolean;
+  }) => {
     if (!order) return;
     createTTN.mutate({ 
       orderId: order.id, 

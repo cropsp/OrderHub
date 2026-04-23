@@ -11,9 +11,13 @@ export function useCreateTTN() {
     mutationFn: ({ orderId, data }: { orderId: string; data: { 
       weight?: number; 
       volume?: number; 
+      length?: number;
+      width?: number;
+      height?: number;
       description?: string;
       cash_on_delivery?: boolean;
       cod_amount?: number;
+      parcel_override?: boolean;
     } }) =>
       shippingApi.createTTN(orderId, data),
     onSuccess: (_, variables) => {
@@ -25,6 +29,15 @@ export function useCreateTTN() {
       const msg = error.response?.data?.detail || 'Failed to create TTN'
       addToast(msg, 'error')
     }
+  })
+}
+
+export function useGetParcelEstimate(orderId: string, enabled: boolean = true) {
+  return useQuery({
+    queryKey: ['order', orderId, 'parcel-estimate'],
+    queryFn: () => shippingApi.getParcelEstimate(orderId),
+    enabled: !!orderId && enabled,
+    staleTime: 1000 * 60 * 5, // 5 mins
   })
 }
 

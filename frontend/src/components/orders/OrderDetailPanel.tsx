@@ -55,7 +55,14 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
     }
   };
 
-  const handleGenerateTTN = (params: { weight: number; volume: number }) => {
+  const handleGenerateTTN = (params: { 
+    weight: number; 
+    volume: number; 
+    length?: number; 
+    width?: number; 
+    height?: number;
+    parcel_override?: boolean;
+  }) => {
     if (!order) return;
     createTTN.mutate({ 
       orderId: order.id, 

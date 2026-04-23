@@ -132,6 +132,15 @@ export interface Order {
   completed_at: string | null
   created_at: string
   updated_at: string
+  
+  // Calculated parcel fields
+  computed_parcel_weight_g?: number | null
+  computed_parcel_length_mm?: number | null
+  computed_parcel_width_mm?: number | null
+  computed_parcel_height_mm?: number | null
+  computed_packaging_box_id?: string | null
+  parcel_override: boolean
+
   // Nested relations (when loaded)
   shop?: Shop
   customer?: Customer

@@ -103,6 +103,10 @@ async def create_np_ttn(
     if not shop or not shop.np_api_key_encrypted:
         raise HTTPException(status_code=400, detail="Shop does not have Nova Poshta configured")
         
+    # Update parcel_override if provided
+    if body.parcel_override != order.parcel_override:
+        order.parcel_override = body.parcel_override
+        
     # Ensure recipient data exists
     if not order.shipping_city or not order.shipping_name or not order.shipping_phone:
         raise HTTPException(status_code=400, detail="Order is missing required shipping information")
@@ -141,8 +145,6 @@ async def create_np_ttn(
             # Commit immediately so refs are cached even if later steps fail
             await db.commit()
             await db.refresh(shop)
-            # Re-fetch order and shop because commit/refresh might have expired them in some session configs
-            # (though with selectin loading it should be fine, but let's be careful)
             
     except HTTPException:
         raise
@@ -189,13 +191,22 @@ async def create_np_ttn(
 
     # 3. Build Payload
     kyiv_tz = ZoneInfo("Europe/Kiev")
+    
+    # Calculate volume from dimensions if provided
+    final_volume = body.volume
+    if body.length and body.width and body.height:
+        # L*W*H / 1,000,000,000 = m3
+        calculated_volume = (body.length * body.width * body.height) / 1_000_000_000.0
+        # Ensure at least 0.001 m3 for NP
+        final_volume = max(calculated_volume, 0.0001)
+        
     payload = {
         "PayerType": shop.np_default_payer_type or "Sender",
         "PaymentMethod": shop.np_default_payment_method or "Cash",
         "DateTime": datetime.now(tz=kyiv_tz).strftime("%d.%m.%Y"),
         "CargoType": "Parcel",
-        "VolumeGeneral": str(body.volume or shop.np_default_volume_m3 or 0.004),
-        "Weight": str(body.weight or shop.np_default_weight_kg or 0.5),
+        "VolumeGeneral": f"{final_volume or shop.np_default_volume_m3 or 0.004:.4f}",
+        "Weight": f"{body.weight or shop.np_default_weight_kg or 0.5:.3f}",
         "ServiceType": "WarehouseWarehouse",
         "SeatsAmount": "1",
         "Description": body.description or shop.np_default_description or f"Order #{order.order_number}",
