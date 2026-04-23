@@ -78,7 +78,7 @@ class ProductVariant(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Calculates volume in cm3 (L * W * H / 1,000,000).
         Stored as mm, so divide by 1,000,000 to get cm3.
         """
-        return (self.length_mm * self.width_mm * self.height_mm) / 1000000.0
+        return (self.length_mm * self.width_mm * self.height_mm) / 1000.0
 
     def __repr__(self) -> str:
         return f"<ProductVariant SKU:{self.sku} Weight:{self.weight_g}g>"

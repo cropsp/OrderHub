@@ -384,12 +384,19 @@ Required before any merge:
 Agent appends one entry per sprint after merge:
 
 ```
-### <ISO date> — Phase <N> — <short title>
-- Commit: <sha or branch>
-- Summary: <1–3 lines>
-- Acceptance checked by: <human name or "self, pending review">
-- Deviations from plan: <none | list>
-- Follow-ups: <none | list>
+### 2026-04-23 — Phase 3 — OrderItem linking & snapshot
+- Commit: f6f7970
+- Summary: Implemented variant linking with atomic snapshot population and cross-shop security guards.
+- Acceptance checked by: self, pending review
+- Deviations from plan: none
+- Follow-ups: none
+
+### 2026-04-23 — Phase 4 — Parcel calculation service
+- Commit: pending
+- Summary: Implemented `parcel_calculator` service with envelope/box selection logic and volumetric weight calculation. Added `GET /parcel-estimate` endpoint with caching.
+- Acceptance checked by: self, pending review
+- Deviations from plan: Fixed volume math in `ProductVariant` (from /1M to /1k for cm3).
+- Follow-ups: none
 ```
 
 _(empty — first entry goes here after Phase 1 lands)_

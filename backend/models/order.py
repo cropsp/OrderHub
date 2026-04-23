@@ -23,6 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.ext.hybrid import hybrid_property
 
 from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -218,6 +219,13 @@ class OrderItem(Base, UUIDPrimaryKeyMixin):
         server_default="now()",
         nullable=False,
     )
+
+    @hybrid_property
+    def volume_cm3(self) -> float:
+        """Calculates volume in cm3 from snapshot dimensions."""
+        if not all([self.snapshot_length_mm, self.snapshot_width_mm, self.snapshot_height_mm]):
+            return 0.0
+        return (self.snapshot_length_mm * self.snapshot_width_mm * self.snapshot_height_mm) / 1000.0
 
     # Relationships
     order = relationship("Order", back_populates="items")

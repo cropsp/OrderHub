@@ -18,12 +18,14 @@ from schemas.order import (
     OrderItemCreate, OrderItemUpdate, OrderItemResponse
 )
 from schemas.common import PaginatedResponse
+from schemas.parcel import ParcelEstimate
 from routers.dependencies import get_current_user, require_role
 from services.order_service import (
     get_orders_filtered, get_order_detail, 
     create_order, update_order, change_order_status,
     add_order_item, update_order_item, delete_order_item
 )
+from services.parcel_calculator import calculate_parcel_estimate
 from logger import get_logger
 
 logger = get_logger("routers.orders")
@@ -104,6 +106,41 @@ async def get_order(
         data["platform_fee"] = None
         
     return OrderResponse(**data)
+
+
+@router.get("/{order_id}/parcel-estimate", response_model=ParcelEstimate)
+async def get_order_parcel_estimate(
+    order_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Calculate and return parcel dimensions/weight based on items."""
+    # 1. Fetch order
+    order = await get_order_detail(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    # 2. Check access
+    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this order")
+        
+    # 3. Calculate estimate
+    try:
+        estimate = await calculate_parcel_estimate(db, str(order_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    # 4. Cache results if parcel_override is False
+    if not order.parcel_override:
+        order.computed_parcel_weight_g = estimate.total_weight_g
+        order.computed_parcel_length_mm = estimate.parcel_length_mm
+        order.computed_parcel_width_mm = estimate.parcel_width_mm
+        order.computed_parcel_height_mm = estimate.parcel_height_mm
+        order.computed_packaging_box_id = estimate.selected_packaging.id if estimate.selected_packaging else None
+        
+        await db.commit()
+        
+    return estimate
 
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
