@@ -13,5 +13,13 @@
 ## Current Session: Documentation Cleanup & Handover
 - [x] Consolidate architecture visuals into `implementation_plan.md`
 - [x] Standardize `task.md` with agent instructions
-- [ ] Remove temporary inventory files
-- [ ] Final project state verification
+- [x] Remove temporary inventory files
+- [x] Final project state verification
+
+- [x] Frontend: Update `api/shipping.ts` with `deleteTTN` and expanded `createTTN`
+- [x] Frontend: Update `hooks/useShipping.ts` with `useDeleteTTN` and updated `useCreateTTN`
+
+## UI Implementation
+- [x] Frontend: Add parcel parameters (weight/volume) to `DetailLogistics.tsx`
+- [x] Frontend: Add TTN deletion button with confirmation to `DetailLogistics.tsx`
+- [x] Frontend: Update `OrderDetailPanel.tsx` to integrate delete functionality

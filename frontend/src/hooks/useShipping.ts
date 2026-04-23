@@ -8,7 +8,13 @@ export function useCreateTTN() {
   const addToast = useToastStore(s => s.addToast)
   
   return useMutation({
-    mutationFn: ({ orderId, data }: { orderId: string; data: { weight?: number; description?: string } }) =>
+    mutationFn: ({ orderId, data }: { orderId: string; data: { 
+      weight?: number; 
+      volume?: number; 
+      description?: string;
+      cash_on_delivery?: boolean;
+      cod_amount?: number;
+    } }) =>
       shippingApi.createTTN(orderId, data),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
@@ -17,6 +23,24 @@ export function useCreateTTN() {
     },
     onError: (error: any) => {
       const msg = error.response?.data?.detail || 'Failed to create TTN'
+      addToast(msg, 'error')
+    }
+  })
+}
+
+export function useDeleteTTN() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore(s => s.addToast)
+  
+  return useMutation({
+    mutationFn: (orderId: string) => shippingApi.deleteTTN(orderId),
+    onSuccess: (_, orderId) => {
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['order', orderId] })
+      addToast('TTN deleted successfully', 'success')
+    },
+    onError: (error: any) => {
+      const msg = error.response?.data?.detail || 'Failed to delete TTN'
       addToast(msg, 'error')
     }
   })

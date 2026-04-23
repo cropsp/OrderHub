@@ -12,7 +12,7 @@ import { useOrder, useUpdateOrder, useUpdateOrderStatus } from '@/hooks/useOrder
 import { useAuth } from '@/hooks/useAuth';
 import { useToastStore } from '@/components/ui/Toast';
 import { UserRole } from '@/types/user';
-import { useCreateTTN } from '@/hooks/useShipping';
+import { useCreateTTN, useDeleteTTN } from '@/hooks/useShipping';
 
 import AttachmentManager from './AttachmentManager';
 import { DetailHeader } from './detail/DetailHeader';
@@ -40,6 +40,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
   const isManager = user?.role === UserRole.MANAGER;
   const canManageShipping = isOwner || isManager;
   const createTTN = useCreateTTN();
+  const deleteTTN = useDeleteTTN();
 
   const handleUpdate = async (payload: any) => {
     if (!order) return;
@@ -54,15 +55,20 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
     }
   };
 
-  const handleGenerateTTN = () => {
+  const handleGenerateTTN = (params: { weight: number; volume: number }) => {
     if (!order) return;
     createTTN.mutate({ 
       orderId: order.id, 
       data: {
-        weight: 0.5, 
+        ...params,
         description: `Order #${order.external_id}: ${order.title.substring(0, 50)}`
       } 
     });
+  };
+
+  const handleDeleteTTN = () => {
+    if (!order) return;
+    deleteTTN.mutate(order.id);
   };
 
   const isOpen = Boolean(orderId);
@@ -144,8 +150,9 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                   <DetailLogistics 
                     order={order} 
                     canManageShipping={canManageShipping}
-                    isPending={createTTN.isPending}
+                    isPending={createTTN.isPending || deleteTTN.isPending}
                     onGenerateTTN={handleGenerateTTN}
+                    onDeleteTTN={handleDeleteTTN}
                   />
                   {isOwner && <DetailFinance order={order} />}
                   <DetailTimeline order={order} />

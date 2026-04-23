@@ -12,16 +12,19 @@ interface DetailLogisticsProps {
   order: OrderDetail;
   canManageShipping: boolean;
   isPending: boolean;
-  onGenerateTTN: () => void;
+  onGenerateTTN: (params: { weight: number; volume: number }) => void;
+  onDeleteTTN?: () => void;
   onUpdate?: (payload: any) => Promise<void>;
 }
 
-export function DetailLogistics({ order, canManageShipping, isPending, onGenerateTTN, onUpdate }: DetailLogisticsProps) {
+export function DetailLogistics({ order, canManageShipping, isPending, onGenerateTTN, onDeleteTTN, onUpdate }: DetailLogisticsProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [cityQuery, setCityQuery] = useState(order.shipping_city || '');
   const [warehouseQuery, setWarehouseQuery] = useState('');
   const [isWarehouseOpen, setIsWarehouseOpen] = useState(false);
+  const [weight, setWeight] = useState(order.shop.np_default_weight_kg || 0.5);
+  const [volume, setVolume] = useState(order.shop.np_default_volume_m3 || 0.004);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -333,25 +336,65 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
           )}
 
           {!isEditing && order.ttn_number && (
-            <div 
-              className="mt-2 p-3 rounded-xl bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-all cursor-pointer group active:scale-[0.98]"
-              onClick={() => {
-                navigator.clipboard.writeText(order.ttn_number!);
-                useToastStore.getState().addToast('TTN copied to clipboard', 'success');
-              }}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-bold text-teal-500/60 uppercase tracking-widest">Tracking (TTN)</p>
-                <ClipboardList className="size-3.5 text-teal-500/40 group-hover:text-teal-500 transition-colors" />
+            <div className="space-y-2">
+              <div 
+                className="mt-2 p-3 rounded-xl bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-all cursor-pointer group active:scale-[0.98] relative"
+                onClick={() => {
+                  navigator.clipboard.writeText(order.ttn_number!);
+                  useToastStore.getState().addToast('TTN copied to clipboard', 'success');
+                }}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] font-bold text-teal-500/60 uppercase tracking-widest">Tracking (TTN)</p>
+                  <div className="flex items-center gap-2">
+                    <ClipboardList className="size-3.5 text-teal-500/40 group-hover:text-teal-500 transition-colors" />
+                    {canManageShipping && onDeleteTTN && (
+                      <button 
+                        className="p-1 rounded-md hover:bg-red-500/10 text-zinc-500 hover:text-red-500 transition-all z-20"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Are you sure you want to delete this TTN?')) {
+                            onDeleteTTN();
+                          }
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="font-mono text-base text-teal-100 font-black tracking-tight">{order.ttn_number}</p>
               </div>
-              <p className="font-mono text-base text-teal-100 font-black tracking-tight">{order.ttn_number}</p>
             </div>
           )}
         </div>
       </div>
 
       {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
-        <div className="p-2 border-t border-zinc-800/50 bg-zinc-950/20">
+        <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Weight (kg)</label>
+              <Input 
+                type="number"
+                step="0.1"
+                className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
+                value={weight}
+                onChange={e => setWeight(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Volume (m³)</label>
+              <Input 
+                type="number"
+                step="0.001"
+                className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
+                value={volume}
+                onChange={e => setVolume(parseFloat(e.target.value) || 0)}
+              />
+            </div>
+          </div>
+          
           <Button 
             className={cn(
               "w-full h-9 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all gap-2 shadow-lg",
@@ -360,13 +403,13 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                 : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
             )}
             disabled={isPending || !order.shipping_warehouse_ref}
-            onClick={onGenerateTTN}
+            onClick={() => onGenerateTTN({ weight, volume })}
           >
             {isPending ? <Loader2 size={14} className="animate-spin" /> : null}
             {isPending ? 'Processing...' : 'Generate NP Label'}
           </Button>
           {!order.shipping_warehouse_ref && (
-            <p className="text-[9px] text-zinc-600 text-center mt-2 font-medium">Select a department to enable label generation</p>
+            <p className="text-[9px] text-zinc-600 text-center mt-1 font-medium">Select a department to enable label generation</p>
           )}
         </div>
       )}

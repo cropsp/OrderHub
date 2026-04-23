@@ -46,6 +46,7 @@ export interface Shop {
   np_sender_warehouse_ref: string | null
   np_default_description: string | null
   np_default_weight_kg: number
+  np_default_volume_m3: number
   created_at: string
 }
 
