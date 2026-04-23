@@ -84,6 +84,20 @@ const navItems: NavItem[] = [
     icon: Settings,
     roles: [UserRole.OWNER, UserRole.MANAGER, UserRole.DESIGNER],
   },
+  {
+    key: 'products',
+    label: 'Products',
+    to: '/products',
+    icon: Package,
+    roles: [UserRole.OWNER, UserRole.MANAGER],
+  },
+  {
+    key: 'packaging',
+    label: 'Packaging',
+    to: '/packaging',
+    icon: Archive,
+    roles: [UserRole.OWNER, UserRole.MANAGER],
+  },
 ]
 
 function roleLabel(role: UserRoleType | undefined): string {

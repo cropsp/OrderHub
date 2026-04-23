@@ -404,6 +404,11 @@ Agent appends one entry per sprint after merge:
 - Acceptance checked by: self
 - Deviations from plan: Corrected VolumeGeneral divisor for mm3 to m3 conversion.
 - Follow-ups: none
-```
 
-_(empty — first entry goes here after Phase 1 lands)_
+### 2026-04-23 — Phase 6 — Catalog & Packaging UI
+- Commit: pending
+- Summary: Implemented administrative UI for Products and Packaging. Added CSV import (two-step), shop-scoped catalog management, and role-based access control (OWNER/MANAGER).
+- Acceptance checked by: self
+- Deviations from plan: none
+- Follow-ups: none
+```
