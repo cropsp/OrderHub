@@ -136,3 +136,19 @@ frontend/src/
 | BE-4 | Manual Shop Creation | Fixed Enum conflict in DB and backend (MANUAL) | DONE |
 | FE-5 | Navigation & Dropdowns | Fixed Back button history and Status dropdown UX | DONE |
 | FE-6 | Shops UI Polish | Fixed null checks and ID display in ShopsPage | DONE |
+
+### C. Nova Poshta Full Audit Fixes (Completed 2026-04-23)
+
+Comprehensive overhaul based on the [NP Audit Report](file:///home/serhii/projects/OrderHub/agents/skills/np-audit/SKILL.md).
+
+| ID | Category | Task | Status |
+|---|---|---|---|
+| NP-P0 | Backend | Implementation of basic stability (timeouts, retries) | DONE |
+| NP-P1 | Backend | NovaPoshtaAPIError, COD support, sender caching, timezone fix | DONE |
+| NP-P2 | Frontend | Debouncing, dropdown positioning, click-to-copy | DONE |
+| NP-P3 | Cleanup | Encryption decoupling (ENCRYPTION_KEY), dead code removal, delete TTN | DONE |
+
+**Key Outcomes:**
+- **Zero Redundant Calls**: Sender references are cached in the DB.
+- **Data Integrity**: Refs are auto-cleared on manual input; dates are Kiev-compliant.
+- **Security**: All API keys are Fernet-encrypted and masked in the UI.
