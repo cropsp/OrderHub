@@ -40,7 +40,7 @@ class NovaPoshtaClient:
             data = response.json()
             if not data.get("success"):
                 errors = data.get("errors", [])
-                error_msg = f"Nova Poshta API Error: {', '.join(errors)}"
+                error_msg = f"[NP API] Error: {', '.join(errors)}"
                 logger.error(error_msg)
                 raise NovaPoshtaAPIError(error_msg)
             return data.get("data", [])
@@ -59,7 +59,7 @@ class NovaPoshtaClient:
         """Create a TTN (waybill)."""
         data = await self._post("InternetDocument", "save", props)
         if not data:
-            raise Exception("Failed to create InternetDocument: empty response")
+            raise Exception("[NP API] Failed to create InternetDocument: empty response")
         return data[0]
 
     async def get_counterparties(self, counterparty_property: str = "Recipient", find_by_string: str = "") -> list:
@@ -82,17 +82,16 @@ class NovaPoshtaClient:
         }
         data = await self._post("Counterparty", "save", props)
         if not data:
-            raise Exception("Failed to create counterparty")
+            raise Exception("[NP API] Failed to create counterparty")
         return data[0]
 
     async def get_contact_persons(self, counterparty_ref: str) -> list:
         """Get contact persons for a counterparty."""
-        props = {"Ref": counterparty_ref}
-        return await self._post("Counterparty", "getCounterpartyContactPersons", props)
+        return await self._post("Counterparty", "getContactPersons", {"Ref": counterparty_ref})
 
-    async def get_counterparty_addresses(self, counterparty_ref: str) -> list:
-        """Get addresses (warehouses) for a counterparty."""
-        props = {"Ref": counterparty_ref, "CounterpartyProperty": "Sender"}
-        return await self._post("Counterparty", "getCounterpartyAddresses", props)
+    async def delete_internet_document(self, document_refs: str) -> bool:
+        """Delete an existing waybill (TTN)."""
+        await self._post("InternetDocument", "delete", {"DocumentRefs": document_refs})
+        return True
 
 

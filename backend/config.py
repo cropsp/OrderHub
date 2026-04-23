@@ -5,6 +5,7 @@ Loads settings from environment variables using Pydantic Settings.
 """
 
 from functools import lru_cache
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,7 +26,10 @@ class Settings(BaseSettings):
 
     # ─── Security ──────────────────────────────────────────────
     SECRET_KEY: str = "change-me-generate-a-real-secret-key-min-32"
-    FERNET_KEY: str = "change-me-generate-a-real-fernet-key"
+    ENCRYPTION_KEY: str = Field(
+        "change-me-generate-a-real-fernet-key",
+        validation_alias=AliasChoices('ENCRYPTION_KEY', 'FERNET_KEY')
+    )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 

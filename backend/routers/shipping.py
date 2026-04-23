@@ -56,7 +56,7 @@ async def search_cities(
         cities = await np_client.get_cities(query)
         return cities
     except Exception as e:
-        logger.error(f"Nova Poshta Search Cities Error: {str(e)}")
+        logger.error(f"[SHIPPING] Nova Poshta Search Cities Error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/warehouses/{city_ref}")
@@ -80,7 +80,7 @@ async def get_warehouses(
         warehouses = await np_client.get_warehouses(city_ref, query)
         return warehouses
     except Exception as e:
-        logger.error(f"Nova Poshta Get Warehouses Error: {str(e)}")
+        logger.error(f"[SHIPPING] Nova Poshta Get Warehouses Error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -220,5 +220,47 @@ async def create_np_ttn(
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"FAILED TO CREATE TTN: {str(e)}", exc_info=True)
+        logger.error(f"[SHIPPING] FAILED TO CREATE TTN: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"NP API Error: {str(e)}")
+
+
+@router.delete("/np-ttn/{order_id}")
+async def delete_np_ttn(
+    order_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete the Nova Poshta TTN (waybill) for the specified order and clear it from the database."""
+    order = await get_order_detail(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if not order.ttn_number:
+        raise HTTPException(status_code=400, detail="Order does not have a TTN")
+
+    shop = order.shop
+    if not shop or not shop.np_api_key_encrypted:
+        raise HTTPException(status_code=400, detail="Shop does not have Nova Poshta configured")
+        
+    np_api_key = decrypt_value(shop.np_api_key_encrypted)
+    np_client = NovaPoshtaClient(np_api_key)
+    
+    try:
+        logger.info(f"[SHIPPING] Deleting TTN {order.ttn_number} for order {order_id}")
+        
+        await np_client.delete_internet_document(order.ttn_number)
+        
+        # Clear TTN from order
+        old_ttn = order.ttn_number
+        order.ttn_number = None
+        
+        await change_order_status(db, order, OrderStatus.IN_PRODUCTION, current_user, f"TTN deleted: {old_ttn}")
+        
+        await db.commit()
+        await db.refresh(order)
+        return {"status": "success", "message": f"TTN {old_ttn} deleted"}
+        
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[SHIPPING] FAILED TO DELETE TTN: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"NP API Error: {str(e)}")

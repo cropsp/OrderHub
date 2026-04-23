@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Phone, ClipboardList, Edit2, Check, Loader2, Search, MapPin, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,19 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
   const [cityQuery, setCityQuery] = useState(order.shipping_city || '');
   const [warehouseQuery, setWarehouseQuery] = useState('');
   const [isWarehouseOpen, setIsWarehouseOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsWarehouseOpen(false);
+        // Also hide city dropdown if it's open (it's driven by cityQuery !== formData.shipping_city)
+        // To properly "close" city dropdown without clearing query, we might need an isCityOpen state.
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
   
   const { data: cities, isLoading: isCitiesLoading } = useSearchCities(cityQuery);
   
@@ -135,7 +148,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               </div>
 
               {formData.shipping_country === 'UA' ? (
-                <div className="space-y-3 p-3 rounded-lg bg-zinc-950/40 border border-zinc-800/50">
+                <div ref={containerRef} className="space-y-3 p-3 rounded-lg bg-zinc-950/40 border border-zinc-800/50">
                   <div className="space-y-1">
                     <label className="text-[10px] text-zinc-500 font-medium px-1 uppercase tracking-wider">City Search</label>
                     <div className="relative">

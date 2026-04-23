@@ -13,7 +13,7 @@ from config import get_settings
 def _get_fernet() -> Fernet:
     """Create a Fernet instance from the configured key."""
     settings = get_settings()
-    return Fernet(settings.FERNET_KEY.encode())
+    return Fernet(settings.ENCRYPTION_KEY.encode())
 
 
 def encrypt_value(plain_text: str) -> str:
