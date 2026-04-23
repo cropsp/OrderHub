@@ -23,8 +23,8 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
   const [cityQuery, setCityQuery] = useState(order.shipping_city || '');
   const [warehouseQuery, setWarehouseQuery] = useState('');
   const [isWarehouseOpen, setIsWarehouseOpen] = useState(false);
-  const [weight, setWeight] = useState(order.shop.np_default_weight_kg || 0.5);
-  const [volume, setVolume] = useState(order.shop.np_default_volume_m3 || 0.004);
+  const [weight, setWeight] = useState(order.shop?.np_default_weight_kg || 0.5);
+  const [volume, setVolume] = useState(order.shop?.np_default_volume_m3 || 0.004);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
