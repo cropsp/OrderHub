@@ -153,9 +153,10 @@ Comprehensive overhaul based on the [NP Audit Report](file:///home/serhii/projec
 - **Data Integrity**: Refs are auto-cleared on manual input; dates are Kiev-compliant.
 - **Security**: All API keys are Fernet-encrypted and masked in the UI.
 
-### D. Nova Poshta Logistics Integration (Phases 1-6)
+### D. Logistics Automation & Product Catalog Foundation (Phases 1-6)
 
-Full automation of parcel estimation and catalog management. See [Detailed Summary](docs/integrations/nova-poshta.md).
+Implementation of automated parcel estimation and a robust Product Catalog which serves as the foundation for future Warehouse Management.
+See [Nova Poshta Details](docs/integrations/nova-poshta.md) and [Product Catalog Foundation](docs/inventory/product-catalog.md).
 
 | ID | Phase | Milestone | Status |
 |---|---|---|---|
@@ -167,6 +168,7 @@ Full automation of parcel estimation and catalog management. See [Detailed Summa
 | LOG-6 | Phase 6 | Catalog & Packaging Administration UI (Products/Packaging Admin) | DONE |
 
 **Key Outcomes:**
-- **Automated Calculations**: Dimensions and weights are pre-filled based on the product catalog.
-- **Data Safety**: Snapshots preserve historical order data even if catalog specs change.
-- **Administrative Control**: Full UI for managing physical specs and bulk CSV importing.
+- **Inventory Foundation**: Established a source-of-truth for products and variants, prepared for full Warehouse management.
+- **Automated Logistics**: Parcel dimensions and weights are pre-filled based on the product catalog.
+- **Data Safety**: Atomic snapshots preserve historical order data even if catalog specs change.
+- **Administrative Control**: Full UI for managing physical specs and safe bulk CSV importing.
