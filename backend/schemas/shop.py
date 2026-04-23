@@ -20,6 +20,9 @@ class ShopBase(BaseModel):
     np_sender_warehouse_ref: str | None = Field(None, max_length=36)
     np_default_description: str | None = Field(None, max_length=255)
     np_default_weight_kg: float = 0.5
+    np_default_volume_m3: float = 0.004
+    np_default_payer_type: str = Field("Sender", max_length=20)
+    np_default_payment_method: str = Field("Cash", max_length=20)
     color: str = Field("#6366F1", max_length=7)
     is_active: bool = True
 
@@ -44,6 +47,9 @@ class ShopUpdate(BaseModel):
     np_sender_warehouse_ref: str | None = Field(None, max_length=36)
     np_default_description: str | None = Field(None, max_length=255)
     np_default_weight_kg: float | None = None
+    np_default_volume_m3: float | None = None
+    np_default_payer_type: str | None = Field(None, max_length=20)
+    np_default_payment_method: str | None = Field(None, max_length=20)
     color: str | None = Field(None, max_length=7)
     is_active: bool | None = None
 

@@ -50,6 +50,9 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         String(255), nullable=True
     )
     np_default_weight_kg: Mapped[float] = mapped_column(Float, default=0.5)
+    np_default_volume_m3: Mapped[float] = mapped_column(Float, default=0.004)
+    np_default_payer_type: Mapped[str] = mapped_column(String(20), default="Sender")
+    np_default_payment_method: Mapped[str] = mapped_column(String(20), default="Cash")
 
     # UI
     color: Mapped[str] = mapped_column(String(7), default="#6366F1")

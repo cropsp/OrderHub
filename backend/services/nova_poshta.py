@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 NP_API_URL = "https://api.novaposhta.ua/v2.0/json/"
 
+class NovaPoshtaAPIError(Exception):
+    """Raised when Nova Poshta API returns success: false. Never retryable."""
+    pass
+
 class NovaPoshtaClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -19,7 +23,7 @@ class NovaPoshtaClient:
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((httpx.HTTPError, Exception)),
+        retry=retry_if_exception_type(httpx.HTTPError),
         before_sleep=before_sleep_log(logger, logging.WARNING),
         reraise=True
     )
@@ -36,9 +40,9 @@ class NovaPoshtaClient:
             data = response.json()
             if not data.get("success"):
                 errors = data.get("errors", [])
-                error_data = data.get("errorCodes", [])
-                logger.error(f"Nova Poshta API Error response: {data}")
-                raise Exception(f"NP Error: {errors} (Codes: {error_data})")
+                error_msg = f"Nova Poshta API Error: {', '.join(errors)}"
+                logger.error(error_msg)
+                raise NovaPoshtaAPIError(error_msg)
             return data.get("data", [])
 
     async def get_cities(self, query: str = "") -> list:

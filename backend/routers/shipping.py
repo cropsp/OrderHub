@@ -5,11 +5,12 @@ Handles interactions with postal services (e.g. Nova Poshta).
 
 import uuid
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-
-logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from typing import List
 
 from database import get_db
 from models.order import Order, OrderStatus
@@ -21,6 +22,7 @@ from services.nova_poshta import NovaPoshtaClient
 from services.encryption_service import decrypt_value
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/shipping", tags=["shipping"])
 
@@ -28,6 +30,10 @@ router = APIRouter(prefix="/api/shipping", tags=["shipping"])
 class CreateTTNRequest(BaseModel):
     weight: float | None = None
     description: str | None = None
+    volume: float | None = None
+    cash_on_delivery: bool = False
+    cod_amount: float | None = None
+
 
 @router.get("/cities")
 async def search_cities(
@@ -97,13 +103,6 @@ async def create_np_ttn(
     if not shop or not shop.np_api_key_encrypted:
         raise HTTPException(status_code=400, detail="Shop does not have Nova Poshta configured")
         
-    np_api_key = decrypt_value(shop.np_api_key_encrypted)
-    np_client = NovaPoshtaClient(np_api_key)
-    
-    # Use provided values, fallback to shop defaults, then hardcoded fallbacks
-    weight = body.weight or shop.np_default_weight_kg or 0.5
-    description = body.description or shop.np_default_description or order.title
-    
     # Ensure recipient data exists
     if not order.shipping_city or not order.shipping_name or not order.shipping_phone:
         raise HTTPException(status_code=400, detail="Order is missing required shipping information")
@@ -115,37 +114,22 @@ async def create_np_ttn(
                    "Please select them using the shipping editor."
         )
 
-    # In a full flow, you would lookup CityRef and WarehouseRef dynamically here
-    # For MVP S6-2, we assume they are already known or we do a quick lookup
-    # Because NP requires Ref UUIDs, this requires fetching them just-in-time or storing them.
-    # We will simulate a TTN payload (NP API will likely reject fake Refs).
+    np_api_key = decrypt_value(shop.np_api_key_encrypted)
+    np_client = NovaPoshtaClient(np_api_key)
     
     # 1. Resolve Sender
-    # Try to find a Sender counterparty for the shop
-    senders = await np_client.get_counterparties("Sender")
-    if not senders:
-        raise HTTPException(status_code=400, detail="No Sender counterparty found for this API key")
-    sender_ref = senders[0]["Ref"]
-    
-    # Get contact person for sender
-    sender_contacts = await np_client.get_contact_persons(sender_ref)
-    if not sender_contacts:
-        raise HTTPException(status_code=400, detail="No contact person found for Sender counterparty")
-    sender_contact_ref = sender_contacts[0]["Ref"]
-    sender_phone = sender_contacts[0]["Phones"] # NP returns phone here
-
-    # Get sender addresses from shop settings
-    sender_city_ref = shop.np_sender_city_ref
-    sender_warehouse_ref = shop.np_sender_warehouse_ref
-
-    if not sender_city_ref or not sender_warehouse_ref:
-        # If not set in shop, we could try to find the first WAREHOUSE for the sender,
-        # but it's safer to ask the user to configure it to avoid courier pickup issues.
-        raise HTTPException(
-            status_code=400, 
-            detail="Sender city or warehouse not configured in Shop settings. "
-                   "Please set them to avoid unwanted courier pickups."
-        )
+    try:
+        senders = await np_client.get_counterparties("Sender")
+        if not senders:
+            raise HTTPException(status_code=400, detail="No Sender counterparty found for this API key")
+        sender_ref = senders[0]["Ref"]
+        
+        sender_contacts = await np_client.get_contact_persons(sender_ref)
+        if not sender_contacts:
+            raise HTTPException(status_code=400, detail="No contact person found for Sender counterparty")
+        sender_contact_ref = sender_contacts[0]["Ref"]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"NP API Error (Sender): {str(e)}")
 
     # 2. Resolve Recipient
     # Separate names (NP expects Last/First/Middle)
@@ -154,55 +138,70 @@ async def create_np_ttn(
     first_name = names[1] if len(names) > 1 else "Тест"
     middle_name = names[2] if len(names) > 2 else ""
 
-    # Clean phone (remove +)
-    clean_phone = order.shipping_phone.replace("+", "").replace(" ", "").replace("-", "")
+    # Clean phone (remove everything except digits, ensure 380 format)
+    clean_phone = "".join(filter(str.isdigit, order.shipping_phone))
+    if clean_phone.startswith("0"):
+        clean_phone = "38" + clean_phone
+    elif not clean_phone.startswith("38"):
+        # Very basic fallback, NP will validate further
+        pass
     
-    # Try to find recipient
-    recipients = await np_client.get_counterparties("Recipient", clean_phone)
-    if recipients:
-        recipient_ref = recipients[0]["Ref"]
-        # Get contact person
-        recipient_contacts = await np_client.get_contact_persons(recipient_ref)
-        if recipient_contacts:
-            recipient_contact_ref = recipient_contacts[0]["Ref"]
+    try:
+        # Try to find recipient
+        recipients = await np_client.get_counterparties("Recipient", clean_phone)
+        if recipients:
+            recipient_ref = recipients[0]["Ref"]
+            recipient_contacts = await np_client.get_contact_persons(recipient_ref)
+            if recipient_contacts:
+                recipient_contact_ref = recipient_contacts[0]["Ref"]
+            else:
+                raise HTTPException(status_code=400, detail="Recipient found but has no contact persons")
         else:
-            # Create contact person if missing (unlikely but possible)
-            raise HTTPException(status_code=400, detail="Recipient found but has no contact persons")
-    else:
-        # Create new recipient counterparty
-        recipient_data = await np_client.create_counterparty(
-            first_name=first_name,
-            middle_name=middle_name,
-            last_name=last_name,
-            phone=clean_phone
-        )
-        recipient_ref = recipient_data["Ref"]
-        recipient_contact_ref = recipient_data["ContactPerson"]["data"][0]["Ref"]
+            # Create new recipient
+            recipient_data = await np_client.create_counterparty(
+                first_name=first_name,
+                middle_name=middle_name,
+                last_name=last_name,
+                phone=clean_phone
+            )
+            recipient_ref = recipient_data["Ref"]
+            recipient_contact_ref = recipient_data["ContactPerson"]["data"][0]["Ref"]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"NP API Error (Recipient): {str(e)}")
 
     # 3. Build Payload
-    from datetime import datetime
+    kyiv_tz = ZoneInfo("Europe/Kiev")
     payload = {
-        "PayerType": "Sender",
-        "PaymentMethod": "Cash",
-        "DateTime": datetime.now().strftime("%d.%m.%Y"),
+        "PayerType": shop.np_default_payer_type or "Sender",
+        "PaymentMethod": shop.np_default_payment_method or "Cash",
+        "DateTime": datetime.now(tz=kyiv_tz).strftime("%d.%m.%Y"),
         "CargoType": "Parcel",
-        "VolumeGeneral": "0.001",
-        "Weight": str(weight),
+        "VolumeGeneral": str(body.volume or shop.np_default_volume_m3 or 0.004),
+        "Weight": str(body.weight or shop.np_default_weight_kg or 0.5),
         "ServiceType": "WarehouseWarehouse",
         "SeatsAmount": "1",
-        "Description": description,
-        "Cost": str(order.total_price),
-        "CitySender": sender_city_ref,
+        "Description": body.description or shop.np_default_description or f"Order #{order.order_number}",
+        "Cost": str(int(order.total_price)),
+        "CitySender": shop.np_sender_city_ref,
         "Sender": sender_ref,
-        "SenderAddress": sender_warehouse_ref,
+        "SenderAddress": shop.np_sender_warehouse_ref,
         "ContactSender": sender_contact_ref,
-        "SendersPhone": sender_phone,
+        "SendersPhone": shop.np_sender_phone,
         "CityRecipient": order.shipping_city_ref,
         "Recipient": recipient_ref,
         "RecipientAddress": order.shipping_warehouse_ref,
         "ContactRecipient": recipient_contact_ref,
         "RecipientsPhone": clean_phone,
     }
+
+    # Add COD if requested
+    if body.cash_on_delivery:
+        cod_val = body.cod_amount or order.total_price
+        payload["BackwardDeliveryData"] = [{
+            "PayerType": "Recipient",
+            "CargoType": "Money",
+            "RedeliveryString": str(int(cod_val))
+        }]
     
     logger.info(f"Creating NP TTN with payload: {payload}")
     
@@ -220,5 +219,6 @@ async def create_np_ttn(
         return {"status": "success", "ttn": order.ttn_number}
         
     except Exception as e:
+        await db.rollback()
         logger.error(f"FAILED TO CREATE TTN: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"NP API Error: {str(e)}")
