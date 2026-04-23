@@ -15,6 +15,8 @@ from models.order import (
     OrderStatusHistory,
     ALLOWED_TRANSITIONS,
 )
+from models.product import Product, ProductVariant
+from models.packaging import PackagingBox, PackagingType
 from models.attachment import Attachment, AttachmentType
 
 __all__ = [
@@ -31,4 +33,8 @@ __all__ = [
     "ALLOWED_TRANSITIONS",
     "Attachment",
     "AttachmentType",
+    "Product",
+    "ProductVariant",
+    "PackagingBox",
+    "PackagingType",
 ]

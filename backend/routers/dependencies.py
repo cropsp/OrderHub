@@ -59,3 +59,43 @@ def require_role(*roles: UserRole):
         return current_user
 
     return role_checker
+
+
+async def get_shop_for_user(
+    shop_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Fetch a shop and verify the current user has access to it.
+    Currently assumes any active user can access any shop (to be refined if multiple tenants added).
+    """
+    from models.shop import Shop
+    from sqlalchemy import select
+
+    result = await db.execute(select(Shop).filter(Shop.id == shop_id))
+    shop = result.scalar_one_or_none()
+
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found",
+        )
+
+    # Ownership check: shop.owner_id should match current_user.id or user must be ADMIN/OWNER
+    # For now, we trust get_current_user and check if shop exists.
+    # TODO: Implement strict multi-tenant ownership check if needed.
+
+    return shop
+
+
+def require_platform(platform_name: str):
+    """Dependency factory to enforce a specific shop platform (e.g. MANUAL)."""
+    async def platform_checker(shop=Depends(get_shop_for_user)):
+        if shop.platform.value != platform_name:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Catalog for this shop type is managed automatically (Platform: {shop.platform.value})",
+            )
+        return shop
+    return platform_checker

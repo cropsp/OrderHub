@@ -137,6 +137,16 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     ttn_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ttn_printed: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Computed parcel dimensions (Phase 4 calculation)
+    computed_parcel_weight_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    computed_parcel_length_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    computed_parcel_width_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    computed_parcel_height_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    computed_packaging_box_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("packaging_boxes.id", ondelete="SET NULL"), nullable=True
+    )
+    parcel_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # Notes
     customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_info: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -193,6 +203,16 @@ class OrderItem(Base, UUIDPrimaryKeyMixin):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     variations: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Product Catalog Linking & Snapshot
+    product_variant_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True
+    )
+    snapshot_weight_g: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_length_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_width_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_height_mm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_title: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default="now()",
@@ -201,6 +221,7 @@ class OrderItem(Base, UUIDPrimaryKeyMixin):
 
     # Relationships
     order = relationship("Order", back_populates="items")
+    variant = relationship("ProductVariant", back_populates="order_items")
 
     def __repr__(self) -> str:
         return f"<OrderItem {self.title} x{self.quantity}>"

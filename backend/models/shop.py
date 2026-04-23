@@ -65,6 +65,8 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Relationships
     orders = relationship("Order", back_populates="shop", lazy="selectin")
+    products = relationship("Product", back_populates="shop", cascade="all, delete-orphan")
+    packaging_boxes = relationship("PackagingBox", back_populates="shop", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Shop {self.name} ({self.platform.value})>"

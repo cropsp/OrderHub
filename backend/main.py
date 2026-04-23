@@ -12,7 +12,8 @@ from fastapi.responses import JSONResponse
 
 from config import get_settings
 from routers import (
-    auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping, webhooks
+    auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping, webhooks,
+    products, packaging
 )
 
 from logger import setup_logging, get_logger
@@ -79,6 +80,8 @@ app.include_router(orders.router)
 app.include_router(imports.router)
 app.include_router(attachments.router)
 app.include_router(dashboard.router)
+app.include_router(products.router)
+app.include_router(packaging.router)
 app.include_router(mcp.router)
 app.include_router(shipping.router)
 app.include_router(webhooks.router)

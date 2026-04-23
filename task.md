@@ -12,14 +12,21 @@
 
 ## Current Session: Documentation Cleanup & Handover
 - [x] Consolidate architecture visuals into `implementation_plan.md`
-- [x] Standardize `task.md` with agent instructions
-- [x] Remove temporary inventory files
-- [x] Final project state verification
-
-- [x] Frontend: Update `api/shipping.ts` with `deleteTTN` and expanded `createTTN`
-- [x] Frontend: Update `hooks/useShipping.ts` with `useDeleteTTN` and updated `useCreateTTN`
-
-## UI Implementation
+- [x] Create `backend/models/product.py`
+    - [x] `Product` model
+    - [x] `ProductVariant` model with `volume_cm3` hybrid property
+- [x] Create `backend/models/packaging.py`
+    - [x] `PackagingType` enum
+    - [x] `PackagingBox` model
+- [x] Update `backend/models/order.py`
+    - [x] Add `OrderItem` snapshot columns
+    - [x] Add `Order` computed fields
+- [x] Update `backend/models/__init__.py` (export new models)
+- [x] Generate and verify Alembic migration
+    - [x] Generate migration
+    - [x] Test on SQLite (Tested on Postgres with roundtrip verification)
+    - [x] Verify `packaging_boxes` is empty
+- [x] Run existing tests to ensure zero regressions (Smoke test passed)
 - [x] Frontend: Add parcel parameters (weight/volume) to `DetailLogistics.tsx`
 - [x] Frontend: Add TTN deletion button with confirmation to `DetailLogistics.tsx`
 - [x] Frontend: Update `OrderDetailPanel.tsx` to integrate delete functionality
