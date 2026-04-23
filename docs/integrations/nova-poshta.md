@@ -40,9 +40,11 @@ To reduce NP API latency, the system caches `SenderRef` and `ContactSenderRef` i
 ## 4. Security
 API keys are never stored in plain text.
 - **Key Storage**: `Shop.np_api_key_encrypted`.
-- **Environment**: The master encryption key is managed via `ENCRYPTION_KEY` in `.env`.
+- **Environment**: The master encryption key is managed via `ENCRYPTION_KEY` in `.env` (supports `FERNET_KEY` as a legacy alias via `AliasChoices`).
 - **Masking**: Keys are masked in responses (`****abcd`) to prevent exposure in the UI.
 
 ## 5. Deployment & Configuration
-- **Prerequisites**: Ensure `ENCRYPTION_KEY` is set in the production `.env`.
+- **Prerequisites**: 
+    - Ensure `ENCRYPTION_KEY` is set in the production `.env`.
+    - **Backward Compatibility**: The system still supports `FERNET_KEY` as a legacy alias via Pydantic's `AliasChoices`. If `ENCRYPTION_KEY` is missing, it will automatically fall back to `FERNET_KEY`.
 - **Migrations**: Database updates are managed via Alembic (e.g., `990470ad5d99`).
