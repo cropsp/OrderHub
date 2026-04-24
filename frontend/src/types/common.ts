@@ -4,8 +4,6 @@
 
 // ─── Enums ──────────────────────────────────────────────────
 
-export type UserRole = 'owner' | 'manager' | 'designer'
-
 export type ShopPlatform = 'etsy' | 'shopify' | 'manual'
 
 export type OrderStatus =
@@ -23,15 +21,7 @@ export type AttachmentType = 'mockup' | 'reference' | 'other'
 
 // ─── Models ─────────────────────────────────────────────────
 
-export interface User {
-  id: string
-  email: string
-  full_name: string
-  role: UserRole
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
+export type { User } from './user'
 
 export interface Shop {
   id: string
