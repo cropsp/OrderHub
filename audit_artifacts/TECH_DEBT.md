@@ -167,3 +167,118 @@ Regenerated from `git log --since="6 months ago" --name-only` (pre-generated `ho
 2. **Type consolidation** (day-scale): unify `User`/`UserRole` (H5); introduce `ApiError` + `useMutationWithToast` to kill ~60 `any`s (H1); fix the mypy errors that indicate real bugs (`order_number`, `order_count`, `customer_note`, `parcel_override/length/width/height`) (H6, H4).
 3. **Structural refactors** (sprint-scale): extract `useOrderDetailController` from H3; split `create_np_ttn` (H4); split `DetailLogistics` and `ShopsPage` into sub-components (M4); create `createResourceHooks` factory (M3).
 4. **Ongoing discipline**: add eslint `no-explicit-any` and `react-hooks/set-state-in-effect` to CI to stop regression. The project's own CLAUDE.md already forbids `any`; the rule just isn't enforced.
+
+---
+
+## Deferred Security Hardening (2026-04-24 audit remediation)
+
+This section records items identified during the Sprint 11 security audit (`SECURITY_REPORT.md`) that were intentionally deferred during the 2026-04-24 remediation pass. Each item was scoped out because either (a) the safe implementation requires a data migration or rollout we can't justify in early-stage development, (b) the simple implementation has production-breaking failure modes (mass logout, session-nuke races, workflow blockage), or (c) it's a robustness concern below the bar for this pass. Items are grouped by priority when we revisit.
+
+The 2026-04-24 pass implemented: SEC-01 (backward-compat), SEC-03 (prod-only guard), SEC-04 forward-fix only, SEC-05, SEC-06, SEC-07 (backend only), SEC-08 (size cap + Content-Disposition only), SEC-09, SEC-10, plus tech-debt items H1 (hooks only), H2, H3, H4 schema fix, H5, H6.
+
+### Security — High priority to revisit
+
+**SEC-02 (CRITICAL as audited) — Server-side refresh token revocation**
+The 2026-04-24 pass implemented only SEC-01 (independent `REFRESH_SECRET_KEY` via a backward-compat fallback). The full remediation — a `refresh_tokens` table with token-family rotation and reuse detection — was deferred because (a) naive rollout invalidates every refresh token in the wild on deploy (mass logout), and (b) "nuke all sessions on reuse-detection" combined with an SPA that can race two tabs through `/refresh` causes cascading re-logout loops. A production-safe rollout needs both a grace-period decode path AND a serialized refresh interceptor on the frontend.
+Trigger: first real user population beyond the core team, OR any incident where a refresh token is suspected stolen (no revocation path exists today). When picking this up, also read `frontend/src/api/client.ts` and confirm refresh calls are serialized via a single in-flight promise before enabling reuse-detection.
+
+**SEC-04 — Orphan `order_status_history` repair after system-user migration**
+The 2026-04-24 pass inserts a persistent system user and points webhooks + scheduler at it for all *future* history rows. Confirmed state: the Shopify scheduler HAS run in production, so any rows whose `changed_by_id` points at the old hard-coded UUID `00000000-0000-0000-0000-000000000000` or at a non-deterministic `select(User).limit(1)` user (from webhooks) are not repaired. Those rows remain FK-valid but attribute audit events to the wrong or ghost actor.
+Trigger: any audit/compliance requirement that historical `changed_by_id` be accurate. Remediation sketch: (1) `SELECT DISTINCT changed_by_id FROM order_status_history WHERE changed_by_id NOT IN (SELECT id FROM users WHERE is_active);` to find affected rows; (2) `UPDATE order_status_history SET changed_by_id = :system_user_id WHERE changed_by_id IN (:known_bad_uuids);`. Lossy — requires explicit operator sign-off before running.
+
+**SEC-08 residual — File upload MIME allow-list + magic-number validation**
+The 2026-04-24 pass shipped the size cap (10 MB) and `Content-Disposition: attachment` on downloads — enough to neutralize stored-XSS via inline HTML/SVG and disk-exhaustion DoS. The MIME allow-list was deferred because the designer workflow uses source files (`.ai`, `.psd`, `.eps`, potentially `.zip`) that a naive image/PDF whitelist would block on day one.
+Trigger: before exposing uploads to users beyond the core team. First step: `find uploads/ -type f | awk -F. '{print $NF}' | sort -u` to ground-truth actual extensions, then confirm the allow-list with the designer team. Implement magic-number check against a per-extension signature map; do not trust client-supplied `Content-Type`. SVG remains a landmine — exclude unless there's a concrete need.
+
+**SEC-01 residual — Remove backward-compat derivation fallback in `auth_service.py`**
+The 2026-04-24 pass made `REFRESH_SECRET_KEY` independent *if set in env*; if unset, it falls back to `settings.SECRET_KEY + "-refresh"` with a startup warning. This preserves existing refresh tokens (no deploy-day logout) but keeps the original SEC-01 vulnerability latent until the fallback is removed.
+Trigger: rotate the refresh secret once (set `REFRESH_SECRET_KEY` in all `.env` files, accept the one-time logout) then remove the fallback branch. Safe during any user-facing maintenance window.
+
+**SEC-03 residual — Remove hardcoded secret defaults from `config.py`**
+The 2026-04-24 pass added a production-only guard (fail-fast if `ENVIRONMENT=production` and secrets start with `change-me`). Dev defaults are intentionally retained so onboarding a new contributor doesn't require generating secrets to boot the app. The vulnerability is latent only if the production guard is bypassed (e.g., `ENVIRONMENT` misconfigured).
+Trigger: when a production deployment checklist exists, replace the runtime guard with a hard requirement (no default at all). Pair with SEC-20 (same class of issue).
+
+**SEC-15 — Rate limiting**
+No rate limiting on any endpoint. Highest-risk targets: `/api/auth/login` (brute force), `/api/shipping/cities|warehouses` (burn NP API key across the org), `/api/imports/etsy` (memory DoS via large CSV), `/api/orders/action/export` (memory DoS via 10k-order in-memory CSV).
+Trigger: first public-ish deployment OR a recorded abuse event. Recommended: `slowapi` with per-IP `/auth/login` limit (5/min) and per-user limits on expensive endpoints. No dependency on other deferred items.
+
+**SEC-16 — PII-redacted logging in `routers/shipping.py`**
+`logger.info(f"Creating NP TTN with payload: {payload}")` at line 235 logs full customer name, phone, address, sender details. Log rotation caps at 25 MB (`backend/logs/server.log`) so PII is bounded but not absent. Not touched in the 2026-04-24 pass because SEC-07 already required editing this file — both should be done in one pass next time.
+Trigger: any log export to a shared monitoring system, or a privacy review. Fix: log `order_id` + `shop_id` + `ttn_status` only; drop the payload dict.
+
+**SEC-11 — Migrate from `python-jose` to `PyJWT`**
+`python-jose` is unmaintained; future JWT CVEs won't be patched. Not done in 2026-04-24 because (a) auth service was already in flux (SEC-01) and (b) migration touches every `decode_token`/`create_*_token` callsite plus error handling (`JWTError` → `PyJWTError`).
+Trigger: a published CVE against `python-jose`, OR the next intentional auth service refactor. `PyJWT` is near drop-in for HS256.
+
+### Security — Medium priority to revisit
+
+**SEC-07 residual — Frontend string-matching on error `detail`**
+The 2026-04-24 pass sanitized server-side `detail=str(e)` sites but left the frontend audit undone per explicit decision. `// TODO(SEC-07)` comments were added at changed backend sites noting that callers pattern-matching on specific error text may now see a generic message.
+Trigger: first user report of "flow X used to show a specific message and now shows a generic one." Remediation: `grep -rn 'error?\.response?\.data?\.detail' frontend/src/`, decide per-case whether to preserve the specific backend message (via a typed error-code enum) or change the frontend to use HTTP status + generic message.
+
+**SEC-12 — Import preview token binding + Redis-backed storage**
+Import preview tokens are plain UUIDs stored in a process-memory dict (`services/import_service.py`). Any authenticated user with a valid token can confirm another user's import. In multi-worker deployments (gunicorn `-w N`) the confirm call can hit a different worker than the preview — silent failure. Single-process `uvicorn --reload` avoids this today.
+Trigger: before switching to `workers > 1`. Fix: bind `user_id` into the preview record and check on confirm; for multi-worker, move `_storage` to Redis or a DB table.
+
+**SEC-13 — Seed script production guard**
+`backend/seed.py` creates `owner123`/`manager123`/`designer123` accounts if the users table is empty, with no `ENVIRONMENT` check. Low immediate risk (no one runs `seed.py` against production on purpose) but no code-level safety.
+Trigger: first production deployment. One-liner: `if settings.ENVIRONMENT == "production": sys.exit(...)` at the top of `main()`.
+
+**SEC-17 — Tighten CORS `allow_methods` / `allow_headers`**
+`main.py:47-53` allows all methods and headers; origin is already restricted to `FRONTEND_URL`. Tightening is defense-in-depth only.
+Trigger: any CORS-related incident or external security review. Replace with explicit lists (`GET, POST, PATCH, DELETE, OPTIONS` and `Authorization, Content-Type`).
+
+**SEC-19 — Disable SQL echo in development by default**
+`database.py:21` uses `echo=settings.is_development`, so every query (including user emails and bcrypt hashes on INSERT) streams to stdout. Developer-convenience tradeoff.
+Trigger: standardized logging setup OR any shared-dev-environment deployment. Fix: `echo="debug"` or opt-in via `settings.SQL_ECHO`.
+
+**SEC-20 — Remove default DB credentials**
+`POSTGRES_USER="crm"` / `POSTGRES_PASSWORD="crm_pass"` hardcoded in `config.py` and `.env.example`. Same class as SEC-03; only blocks naive production deploys.
+Trigger: pair with SEC-03 production-deployment-checklist work. Fail-fast on missing DB creds when `ENVIRONMENT=production`.
+
+**SEC-21 — Password change endpoint**
+No `POST /api/auth/change-password`. Temp passwords from user creation are permanent. Acceptable for the core team but users can't rotate compromised credentials without DB access.
+Trigger: first non-team user OR the first "I leaked my password in Slack" incident. Pair with SEC-02 when both ship (change-password should invalidate all refresh tokens for that user).
+
+### Security — Low priority to revisit
+
+**SEC-22 — ILIKE wildcard injection in search** (`customers.py:43-44`, `order_service.py:54`)
+`%` and `_` in search terms aren't escaped. SQL injection is not possible (SQLAlchemy parameterizes); pattern-probe info disclosure is. One-liner per callsite: `escaped = search.replace("%", "\\%").replace("_", "\\_")`.
+Trigger: free cycle in a search-related PR, or a pattern-probe security report.
+
+**SEC-23 — Path traversal check off-by-one** (`file_storage.py:50`)
+`if uploads_dir not in abs_path.parents` misses the edge case of a file directly inside `UPLOADS_DIR`. Current upload logic always nests under `order_id/` so not exploitable. Replace with `abs_path.is_relative_to(uploads_dir)`.
+Trigger: any refactor of `file_storage.py`.
+
+**SEC-24 — OpenAPI docs gated only by environment flag** (`main.py:43-44`)
+`/docs` and `/redoc` hidden when `ENVIRONMENT != development`. Defense-in-depth would add an auth guard so a misconfigured `ENVIRONMENT` doesn't leak the API surface.
+Trigger: pair with SEC-20 production-checklist work.
+
+**SEC-25 — Shopify retry catches all exceptions** (`shopify_sync.py:67`)
+`retry_if_exception_type((httpx.HTTPError, Exception))` retries on auth failures, parse errors, and data bugs. Wastes calls; can contribute to rate-limit lockout. Drop `Exception`.
+Trigger: next Shopify sync investigation or any `tenacity` library change.
+
+**SEC-18** — Resolved by H4 in the 2026-04-24 pass (`CreateTTNRequest` schema now matches the handler). Included for audit completeness.
+
+### Tech debt — not shipped in this pass
+
+**H1 residual — ~60 remaining `any` types outside `frontend/src/hooks/`**
+The 2026-04-24 pass introduced `ApiError` + `useMutationWithToast` and migrated mutation-hook error handlers, killing ~60 `any` lint errors. Remaining ~60 are in Nova Poshta response handlers (`DetailLogistics.tsx`, 6), CSV import UIs (`CSVImportModal.tsx`, 9), form components (`ProductForm.tsx`, `PackagingForm.tsx`, 5 each), and `ShopsPage.tsx` (6). These need NP response types and form-payload types — more than 2–3 hours of work per hotspot.
+Trigger: either the next feature touching each file (natural place to type local state) or a dedicated typing pass. Add eslint `no-explicit-any` as `error` (not `warn`) to CI at that time to prevent regression.
+
+**H4 residual — `create_np_ttn` function split**
+The 2026-04-24 pass fixed the `CreateTTNRequest` schema mismatch (latent `AttributeError`) and the `order.order_number` → `external_id` bug. The 169-line monolith at `routers/shipping.py:88-256` remains. Recommended extraction: sender resolution, recipient resolution, payload building → `services/nova_poshta.py`; router handler drops to ~30 lines.
+Trigger: next bug in the TTN flow, or any change to the NP payload structure. Schema cleanup that just landed makes this materially easier.
+
+**H6 residual — `Customer.order_count` real column vs. computed**
+The 2026-04-24 pass fixed the mypy error at the two callsites by switching to a subquery count. If this is read on hot paths it's an N+1 risk.
+Trigger: first p95 regression on customer-list endpoints, or a profiling pass. Options: `@hybrid_property` with matching subquery expression, or a materialized column updated via SQLAlchemy event listener.
+
+### Deploy-day risks flagged during remediation (preserved for memory)
+
+These are not items to implement — they are risks surfaced while choosing the remediation scope. Recorded so the context isn't lost if someone later asks "why didn't we just do X":
+
+- **Mass-logout on secret rotation**: any change to `REFRESH_SECRET_KEY` invalidates all refresh tokens in browsers. The 2026-04-24 pass avoids this by keeping the derived fallback; any future removal (SEC-01 residual) must be paired with a maintenance window.
+- **SPA reuse-detection race**: if SEC-02 is implemented with "revoke token family on reuse" and the frontend interceptor doesn't serialize refresh calls, two tabs racing `/refresh` will nuke the user's sessions. Frontend `api/client.ts` must be audited first.
+- **Designer starvation on SEC-05**: a newly-created designer with zero assigned orders will get 403 on every shop-scoped endpoint. Documented as intended behavior; onboarding must assign at least one order before the designer can see a shop.
+- **Workflow block on MIME whitelist**: a naive `{png,jpeg,pdf}` allow-list blocks `.ai`/`.psd`/`.eps` — the actual file types a leather-goods design workflow uses. Ground-truth the upload directory before shipping any whitelist.
