@@ -1,23 +1,18 @@
-import { useState } from 'react';
-import { 
+import {
   ChevronDown,
   Loader2,
   Check,
   Plus
 } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useOrder, useUpdateOrder, useUpdateOrderStatus } from '@/hooks/useOrders';
-import { useAuth } from '@/hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
-import { useToastStore } from '@/components/ui/Toast';
-import { UserRole } from '@/types/user';
-import { useCreateTTN, useDeleteTTN } from '@/hooks/useShipping';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useOrderDetailController } from '@/hooks/useOrderDetailController';
 import { ORDER_STATUS } from '@/lib/order-status';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -37,55 +32,19 @@ interface OrderDetailViewProps {
 }
 
 export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
-  const { data: order, isLoading } = useOrder(orderId);
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const updateOrder = useUpdateOrder();
-  const updateStatus = useUpdateOrderStatus();
-  const { addToast } = useToastStore();
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-
-  const isOwner = user?.role === UserRole.OWNER;
-  const isManager = user?.role === UserRole.MANAGER;
-  const canManageShipping = isOwner || isManager;
-  const createTTN = useCreateTTN();
-  const deleteTTN = useDeleteTTN();
-
-  const handleUpdate = async (payload: any) => {
-    if (!order) return;
-    setSaveStatus('saving');
-    try {
-      await updateOrder.mutateAsync({ orderId: order.id, payload });
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
-      setSaveStatus('error');
-      addToast('Failed to save changes. Please try again.', 'error');
-    }
-  };
-
-  const handleGenerateTTN = (params: { 
-    weight: number; 
-    volume: number; 
-    length?: number; 
-    width?: number; 
-    height?: number;
-    parcel_override?: boolean;
-  }) => {
-    if (!order) return;
-    createTTN.mutate({ 
-      orderId: order.id, 
-      data: {
-        ...params,
-        description: `Order #${order.external_id}: ${order.title.substring(0, 50)}`
-      } 
-    });
-  };
-
-  const handleDeleteTTN = () => {
-    if (!order) return;
-    deleteTTN.mutate(order.id);
-  };
+  const {
+    order,
+    isLoading,
+    isOwner,
+    canManageShipping,
+    saveStatus,
+    handleUpdate,
+    handleStatusChange,
+    handleGenerateTTN,
+    handleDeleteTTN,
+    isTTNPending,
+  } = useOrderDetailController(orderId);
 
   if (isLoading || !order) {
     return (
@@ -102,39 +61,26 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
   return (
     <div className="flex flex-col min-h-full bg-zinc-950 pb-12">
       {/* 1. CLEAN HEADER */}
-      <DetailHeader 
-        order={order} 
+      <DetailHeader
+        order={order}
         saveStatus={saveStatus}
-        onStatusChange={async (newStatus) => {
-          if (!order) return;
-          setSaveStatus('saving');
-          try {
-            await updateStatus.mutateAsync({ orderId: order.id, status: newStatus });
-            setSaveStatus('saved');
-            setTimeout(() => setSaveStatus('idle'), 2000);
-          } catch (err) {
-            console.error('[StatusChange] Failed to update status:', err);
-            setSaveStatus('error');
-            addToast('Failed to update order status', 'error');
-            setTimeout(() => setSaveStatus('idle'), 3000);
-          }
-        }}
+        onStatusChange={handleStatusChange}
         onClose={() => navigate(-1)}
       />
 
       {/* 2. MAIN CONTENT GRID */}
       <div className="flex-1">
         <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6 p-6 pt-2 items-start">
-          
+
           {/* LEFT COLUMN: Production Workflow */}
           <div className="space-y-3 min-w-0">
             {/* PRODUCT INVENTORY */}
             <DetailItems order={order} />
 
             {/* CUSTOMIZATION INFO */}
-            <DetailCustomizationInfo 
-              order={order} 
-              onUpdate={handleUpdate} 
+            <DetailCustomizationInfo
+              order={order}
+              onUpdate={handleUpdate}
             />
 
             {/* PRODUCTION ASSETS */}
@@ -143,9 +89,9 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
                 <h3 className="text-sm font-semibold text-zinc-100">
                   Production assets
                 </h3>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
+                <Button
+                  variant="outline"
+                  size="sm"
                   className="h-7 border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white rounded text-xs font-medium gap-1.5 px-3 transition-all"
                   onClick={() => document.getElementById('file-upload-input')?.click()}
                 >
@@ -157,9 +103,9 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
             </div>
 
             {/* INTERNAL NOTES */}
-            <DetailInternalNotes 
-              order={order} 
-              onUpdate={handleUpdate} 
+            <DetailInternalNotes
+              order={order}
+              onUpdate={handleUpdate}
             />
 
             {/* TIMELINE */}
@@ -168,13 +114,13 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
 
           {/* RIGHT COLUMN: Management Sidebar (Sticky) */}
           <aside className="sticky top-20 flex flex-col gap-4">
-            
+
             {/* 1. ORDER STATUS & ACTIONS */}
             <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-zinc-100 mb-4 px-1">
                 Order status
               </h3>
-              
+
               <div className="space-y-4">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -190,21 +136,9 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" sideOffset={4} className="bg-zinc-900 border-zinc-800 text-zinc-300 w-[240px] p-1.5 rounded-xl shadow-2xl">
                     {Object.entries(ORDER_STATUS).map(([key, value]) => (
-                      <DropdownMenuItem 
-                        key={value} 
-                        onSelect={async () => {
-                          if (!order) return;
-                          setSaveStatus('saving');
-                          try {
-                            await updateStatus.mutateAsync({ orderId: order.id, status: value });
-                            setSaveStatus('saved');
-                            setTimeout(() => setSaveStatus('idle'), 2000);
-                          } catch (err) {
-                            setSaveStatus('error');
-                            addToast('Failed to update status', 'error');
-                            setTimeout(() => setSaveStatus('idle'), 3000);
-                          }
-                        }}
+                      <DropdownMenuItem
+                        key={value}
+                        onSelect={() => handleStatusChange(value)}
                         className={cn(
                           "text-[9px] font-bold uppercase tracking-widest p-2 rounded-lg focus:bg-zinc-800 focus:text-white cursor-pointer mb-0.5 last:mb-0",
                           order.status === value ? "bg-teal-500/10 text-teal-400" : ""
@@ -230,10 +164,10 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
             </div>
 
             <DetailCustomer order={order} />
-            <DetailLogistics 
-              order={order} 
+            <DetailLogistics
+              order={order}
               canManageShipping={canManageShipping}
-              isPending={createTTN.isPending || deleteTTN.isPending}
+              isPending={isTTNPending}
               onGenerateTTN={handleGenerateTTN}
               onRemoveTTN={handleDeleteTTN}
               onUpdate={handleUpdate}

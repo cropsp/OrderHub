@@ -1,18 +1,12 @@
-import { useState } from 'react';
-
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
   DialogTitle,
   DialogDescription
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useOrder, useUpdateOrder, useUpdateOrderStatus } from '@/hooks/useOrders';
-import { useAuth } from '@/hooks/useAuth';
-import { useToastStore } from '@/components/ui/Toast';
-import { UserRole } from '@/types/user';
-import { useCreateTTN, useDeleteTTN } from '@/hooks/useShipping';
+import { useOrderDetailController } from '@/hooks/useOrderDetailController';
 
 import AttachmentManager from './AttachmentManager';
 import { DetailHeader } from './detail/DetailHeader';
@@ -29,54 +23,18 @@ type OrderDetailPanelProps = {
 };
 
 export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelProps) {
-  const { data: order, isLoading } = useOrder(orderId);
-  const { user } = useAuth();
-  const updateOrder = useUpdateOrder();
-  const updateStatus = useUpdateOrderStatus();
-  const { addToast } = useToastStore();
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-
-  const isOwner = user?.role === UserRole.OWNER;
-  const isManager = user?.role === UserRole.MANAGER;
-  const canManageShipping = isOwner || isManager;
-  const createTTN = useCreateTTN();
-  const deleteTTN = useDeleteTTN();
-
-  const handleUpdate = async (payload: any) => {
-    if (!order) return;
-    setSaveStatus('saving');
-    try {
-      await updateOrder.mutateAsync({ orderId: order.id, payload });
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
-      setSaveStatus('error');
-      addToast('Failed to save changes. Please try again.', 'error');
-    }
-  };
-
-  const handleGenerateTTN = (params: { 
-    weight: number; 
-    volume: number; 
-    length?: number; 
-    width?: number; 
-    height?: number;
-    parcel_override?: boolean;
-  }) => {
-    if (!order) return;
-    createTTN.mutate({ 
-      orderId: order.id, 
-      data: {
-        ...params,
-        description: `Order #${order.external_id}: ${order.title.substring(0, 50)}`
-      } 
-    });
-  };
-
-  const handleDeleteTTN = () => {
-    if (!order) return;
-    deleteTTN.mutate(order.id);
-  };
+  const {
+    order,
+    isLoading,
+    isOwner,
+    canManageShipping,
+    saveStatus,
+    handleUpdate,
+    handleStatusChange,
+    handleGenerateTTN,
+    handleDeleteTTN,
+    isTTNPending,
+  } = useOrderDetailController(orderId);
 
   const isOpen = Boolean(orderId);
 
@@ -99,41 +57,26 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
         ) : (
           <div className="flex flex-col h-full overflow-hidden bg-zinc-950">
             {/* 1. COMPACT HEADER */}
-            <DetailHeader 
-              order={order} 
-              saveStatus={saveStatus} 
-              onStatusChange={async (newStatus) => {
-                if (!order) return;
-                console.log(`[StatusChange] Attempting transition for order ${order.id} to ${newStatus}`);
-                setSaveStatus('saving');
-                try {
-                  await updateStatus.mutateAsync({ orderId: order.id, status: newStatus });
-                  console.log(`[StatusChange] Successfully updated order ${order.id}`);
-                  setSaveStatus('saved');
-                  setTimeout(() => setSaveStatus('idle'), 2000);
-                } catch (err) {
-                  console.error('[StatusChange] Failed to update status:', err);
-                  setSaveStatus('error');
-                  addToast('Failed to update order status', 'error');
-                  setTimeout(() => setSaveStatus('idle'), 3000);
-                }
-              }}
+            <DetailHeader
+              order={order}
+              saveStatus={saveStatus}
+              onStatusChange={handleStatusChange}
               onClose={onClose}
             />
 
             {/* 2. SCROLLABLE BODY GRID */}
             <div className="flex-1 overflow-y-auto bg-zinc-950">
               <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6 p-6 items-start">
-                
+
                 {/* LEFT COLUMN: Primary Content */}
                 <div className="space-y-6 min-w-0">
                   {/* 1. PRODUCT INVENTORY */}
                   <DetailItems order={order} />
 
                   {/* 2. CUSTOMIZATION INFO */}
-                  <DetailCustomizationInfo 
-                    order={order} 
-                    onUpdate={handleUpdate} 
+                  <DetailCustomizationInfo
+                    order={order}
+                    onUpdate={handleUpdate}
                   />
 
                   {/* 3. PRODUCTION ASSETS */}
@@ -145,19 +88,19 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                   </div>
 
                   {/* 4. INTERNAL NOTES */}
-                  <DetailInternalNotes 
-                    order={order} 
-                    onUpdate={handleUpdate} 
+                  <DetailInternalNotes
+                    order={order}
+                    onUpdate={handleUpdate}
                   />
                 </div>
 
                 {/* RIGHT COLUMN: Sticky Sidebar */}
                 <aside className="sticky top-6 flex flex-col gap-4 max-h-[calc(100vh-8rem)] overflow-y-auto overflow-x-hidden pr-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent">
                   <DetailCustomer order={order} />
-                  <DetailLogistics 
-                    order={order} 
+                  <DetailLogistics
+                    order={order}
                     canManageShipping={canManageShipping}
-                    isPending={createTTN.isPending || deleteTTN.isPending}
+                    isPending={isTTNPending}
                     onGenerateTTN={handleGenerateTTN}
                     onRemoveTTN={handleDeleteTTN}
                   />
