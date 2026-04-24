@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Scale, Maximize2, Layers } from 'lucide-react'
 import {
   Dialog,
@@ -33,40 +33,32 @@ export default function PackagingForm({
   initialData,
   isLoading
 }: PackagingFormProps) {
-  const [name, setName] = useState('')
-  const [type, setType] = useState<'BOX' | 'ENVELOPE'>('BOX')
-  const [length, setLength] = useState(0)
-  const [width, setWidth] = useState(0)
-  const [height, setHeight] = useState(0)
-  const [maxWeight, setMaxWeight] = useState(0)
-  const [tareWeight, setTareWeight] = useState(0)
-  const [maxThickness, setMaxThickness] = useState<number | null>(null)
-  const [sortOrder, setSortOrder] = useState(0)
+  const [name, setName] = useState(initialData?.name || '')
+  const [type, setType] = useState<'BOX' | 'ENVELOPE'>(initialData?.packaging_type || 'BOX')
+  const [length, setLength] = useState(initialData?.inner_length_mm || 0)
+  const [width, setWidth] = useState(initialData?.inner_width_mm || 0)
+  const [height, setHeight] = useState(initialData?.inner_height_mm || 0)
+  const [maxWeight, setMaxWeight] = useState(initialData?.max_weight_g || 0)
+  const [tareWeight, setTareWeight] = useState(initialData?.tare_weight_g || 0)
+  const [maxThickness, setMaxThickness] = useState<number | null>(initialData?.max_thickness_mm || null)
+  const [sortOrder, setSortOrder] = useState(initialData?.sort_order || 0)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (initialData) {
-      setName(initialData.name || '')
-      setType(initialData.packaging_type || 'BOX')
-      setLength(initialData.inner_length_mm || 0)
-      setWidth(initialData.inner_width_mm || 0)
-      setHeight(initialData.inner_height_mm || 0)
-      setMaxWeight(initialData.max_weight_g || 0)
-      setTareWeight(initialData.tare_weight_g || 0)
-      setMaxThickness(initialData.max_thickness_mm || null)
-      setSortOrder(initialData.sort_order || 0)
-    } else {
-      setName('')
-      setType('BOX')
-      setLength(0)
-      setWidth(0)
-      setHeight(0)
-      setMaxWeight(0)
-      setTareWeight(0)
-      setMaxThickness(null)
-      setSortOrder(0)
-    }
-  }, [initialData, isOpen])
+  // Reset form state when the dialog opens or the target row changes.
+  // Derives state during render (not inside an effect) to avoid cascading re-renders.
+  const [resetKey, setResetKey] = useState({ isOpen, initialData })
+  if (resetKey.isOpen !== isOpen || resetKey.initialData !== initialData) {
+    setResetKey({ isOpen, initialData })
+    setName(initialData?.name || '')
+    setType(initialData?.packaging_type || 'BOX')
+    setLength(initialData?.inner_length_mm || 0)
+    setWidth(initialData?.inner_width_mm || 0)
+    setHeight(initialData?.inner_height_mm || 0)
+    setMaxWeight(initialData?.max_weight_g || 0)
+    setTareWeight(initialData?.tare_weight_g || 0)
+    setMaxThickness(initialData?.max_thickness_mm || null)
+    setSortOrder(initialData?.sort_order || 0)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

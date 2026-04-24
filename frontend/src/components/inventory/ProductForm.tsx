@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Plus, Trash2, Box, Scale, Maximize2 } from 'lucide-react'
 import {
   Dialog,
@@ -39,22 +39,20 @@ export default function ProductForm({
   initialData,
   isLoading
 }: ProductFormProps) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [variants, setVariants] = useState([EMPTY_VARIANT])
+  const [title, setTitle] = useState(initialData?.title || '')
+  const [description, setDescription] = useState(initialData?.description || '')
+  const [variants, setVariants] = useState(initialData?.variants || [EMPTY_VARIANT])
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (initialData) {
-      setTitle(initialData.title || '')
-      setDescription(initialData.description || '')
-      setVariants(initialData.variants || [EMPTY_VARIANT])
-    } else {
-      setTitle('')
-      setDescription('')
-      setVariants([EMPTY_VARIANT])
-    }
-  }, [initialData, isOpen])
+  // Reset form state when the dialog opens or the target product changes.
+  // Derives state during render (not inside an effect) to avoid cascading re-renders.
+  const [resetKey, setResetKey] = useState({ isOpen, initialData })
+  if (resetKey.isOpen !== isOpen || resetKey.initialData !== initialData) {
+    setResetKey({ isOpen, initialData })
+    setTitle(initialData?.title || '')
+    setDescription(initialData?.description || '')
+    setVariants(initialData?.variants || [EMPTY_VARIANT])
+  }
 
   const addVariant = () => {
     setVariants([...variants, { ...EMPTY_VARIANT }])

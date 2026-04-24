@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Package, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -39,7 +39,6 @@ export function ProductVariantSelector({
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
-  const [filteredVariants, setFilteredVariants] = useState<Array<Variant & { productId: string }>>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown on click outside
@@ -71,22 +70,19 @@ export function ProductVariantSelector({
     }
   }, [isOpen, shopId, products.length]);
 
-  // Filter variants based on search text
-  useEffect(() => {
-    if (!value) {
-      setFilteredVariants([]);
-      return;
-    }
+  // Filter variants based on search text — pure derivation, no effect needed.
+  const filteredVariants = useMemo<Array<Variant & { productId: string }>>(() => {
+    if (!value) return [];
 
     const search = value.toLowerCase();
     const matches: Array<Variant & { productId: string }> = [];
-    
+
     products.forEach(p => {
       p.variants.forEach(v => {
         const titleMatch = p.title.toLowerCase().includes(search);
         const variantMatch = v.variant_name?.toLowerCase().includes(search);
         const skuMatch = v.sku?.toLowerCase().includes(search);
-        
+
         if (titleMatch || variantMatch || skuMatch) {
           matches.push({
             ...v,
@@ -97,7 +93,7 @@ export function ProductVariantSelector({
       });
     });
 
-    setFilteredVariants(matches.slice(0, 10)); // Limit to 10
+    return matches.slice(0, 10); // Limit to 10
   }, [value, products]);
 
   const handleSelect = (v: Variant) => {

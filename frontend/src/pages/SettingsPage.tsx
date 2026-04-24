@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Mail, Shield, UserCircle2, LogOut } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -36,32 +36,38 @@ function roleLabel(role: string) {
   return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
+function normalizePreferences(raw: unknown): SystemPreferences {
+  const saved = (raw ?? {}) as Partial<SystemPreferences>;
+  return {
+    dashboard_refresh_seconds:
+      saved.dashboard_refresh_seconds === '300' ? '300' : '60',
+    order_view_default: saved.order_view_default === 'board' ? 'board' : 'table',
+    date_display: saved.date_display === 'utc' ? 'utc' : 'local',
+    default_timezone: saved.default_timezone || DEFAULT_PREFERENCES.default_timezone,
+  };
+}
+
 export default function SettingsPage() {
   const { user, logout } = useAuth();
   const updatePreferences = useUpdatePreferences();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [preferences, setPreferences] = useState<SystemPreferences>(DEFAULT_PREFERENCES);
+  const [preferences, setPreferences] = useState<SystemPreferences>(() => normalizePreferences(user?.preferences));
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user?.preferences) return;
-
-    const saved = user.preferences as Partial<SystemPreferences>;
-    setPreferences({
-      dashboard_refresh_seconds:
-        saved.dashboard_refresh_seconds === '300' ? '300' : '60',
-      order_view_default: saved.order_view_default === 'board' ? 'board' : 'table',
-      date_display: saved.date_display === 'utc' ? 'utc' : 'local',
-      default_timezone: saved.default_timezone || DEFAULT_PREFERENCES.default_timezone,
-    });
-  }, [user?.preferences]);
+  // Sync preferences when the user object changes (e.g. after login/refresh).
+  // Derive state during render rather than in an effect to avoid cascading re-renders.
+  const [syncedPrefs, setSyncedPrefs] = useState(user?.preferences);
+  if (syncedPrefs !== user?.preferences) {
+    setSyncedPrefs(user?.preferences);
+    setPreferences(normalizePreferences(user?.preferences));
+  }
 
   const savePreferences = async () => {
     try {
       await updatePreferences.mutateAsync(preferences);
       setSaveMessage('Preferences saved to server.');
       window.setTimeout(() => setSaveMessage(null), 2000);
-    } catch (error) {
+    } catch {
       setSaveMessage('Failed to save preferences.');
     }
   };

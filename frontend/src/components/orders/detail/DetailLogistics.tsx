@@ -42,8 +42,15 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Pre-fill from estimate if not overridden
-  useEffect(() => {
+  // Pre-fill from estimate if not overridden — derive state during render
+  // rather than in an effect so opening the panel doesn't trigger a second render.
+  const [parcelSyncKey, setParcelSyncKey] = useState({ estimate, isManual, shop: order.shop });
+  if (
+    parcelSyncKey.estimate !== estimate ||
+    parcelSyncKey.isManual !== isManual ||
+    parcelSyncKey.shop !== order.shop
+  ) {
+    setParcelSyncKey({ estimate, isManual, shop: order.shop });
     if (estimate && !isManual) {
       setWeight(estimate.chargeable_weight_g / 1000.0);
       setLength(estimate.parcel_length_mm);
@@ -56,7 +63,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
       setWeight(order.shop.np_default_weight_kg);
       setVolume(order.shop.np_default_volume_m3);
     }
-  }, [estimate, isManual, order.parcel_override, order.shop]);
+  }
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
