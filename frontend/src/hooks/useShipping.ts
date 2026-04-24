@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { shippingApi } from '@/api/shipping'
 import { useDebounce } from './useDebounce'
 import { useToastStore } from '@/components/ui/Toast'
+import { getApiErrorMessage } from '@/types/api'
 
 export function useCreateTTN() {
   const queryClient = useQueryClient()
@@ -25,9 +26,8 @@ export function useCreateTTN() {
       queryClient.invalidateQueries({ queryKey: ['order', variables.orderId] })
       addToast('TTN created successfully', 'success')
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.detail || 'Failed to create TTN'
-      addToast(msg, 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to create TTN'), 'error')
     }
   })
 }
@@ -52,9 +52,8 @@ export function useDeleteTTN() {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] })
       addToast('TTN deleted successfully', 'success')
     },
-    onError: (error: any) => {
-      const msg = error.response?.data?.detail || 'Failed to delete TTN'
-      addToast(msg, 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to delete TTN'), 'error')
     }
   })
 }

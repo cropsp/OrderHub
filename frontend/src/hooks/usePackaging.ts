@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { packagingApi } from '@/api/packaging'
 import { useToastStore } from '@/components/ui/Toast'
 import type { PackagingBoxCreate, PackagingBoxUpdate } from '@/types/inventory'
+import { getApiErrorMessage } from '@/types/api'
 
 export function usePackaging(shopId: string) {
   return useQuery({
@@ -22,8 +23,8 @@ export function useCreatePackaging() {
       queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
       addToast('Packaging created successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to create packaging', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to create packaging'), 'error')
     }
   })
 }
@@ -39,8 +40,8 @@ export function useUpdatePackaging() {
       queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
       addToast('Packaging updated successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to update packaging', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to update packaging'), 'error')
     }
   })
 }
@@ -56,8 +57,8 @@ export function useDeletePackaging() {
       queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
       addToast('Packaging deleted successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to delete packaging', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to delete packaging'), 'error')
     }
   })
 }
@@ -73,8 +74,8 @@ export function useBulkImportPackaging() {
       queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
       addToast('Import completed successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to complete import', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to complete import'), 'error')
     }
   })
 }

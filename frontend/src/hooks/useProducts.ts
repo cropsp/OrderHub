@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { productsApi } from '@/api/products'
 import { useToastStore } from '@/components/ui/Toast'
 import type { ProductCreate, ProductUpdate } from '@/types/inventory'
+import { getApiErrorMessage } from '@/types/api'
 
 export function useProducts(shopId: string, isActive: boolean = true) {
   return useQuery({
@@ -22,8 +23,8 @@ export function useCreateProduct() {
       queryClient.invalidateQueries({ queryKey: ['products', variables.shopId] })
       addToast('Product created successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to create product', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to create product'), 'error')
     }
   })
 }
@@ -39,8 +40,8 @@ export function useUpdateProduct() {
       queryClient.invalidateQueries({ queryKey: ['products', variables.shopId] })
       addToast('Product updated successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to update product', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to update product'), 'error')
     }
   })
 }
@@ -56,8 +57,8 @@ export function useDeleteProduct() {
       queryClient.invalidateQueries({ queryKey: ['products', variables.shopId] })
       addToast('Product archived successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to archive product', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to archive product'), 'error')
     }
   })
 }
@@ -73,8 +74,8 @@ export function useBulkImportProducts() {
       queryClient.invalidateQueries({ queryKey: ['products', variables.shopId] })
       addToast('Import completed successfully', 'success')
     },
-    onError: (error: any) => {
-      addToast(error.response?.data?.detail || 'Failed to complete import', 'error')
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to complete import'), 'error')
     }
   })
 }
