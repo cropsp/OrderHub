@@ -1,0 +1,50 @@
+ Container orderhub-postgres-1 Running 
+ Container orderhub-postgres-1 Waiting 
+ Container orderhub-postgres-1 Healthy 
+ Container orderhub-backend-run-62cb88525ceb Creating 
+ Container orderhub-backend-run-62cb88525ceb Created 
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 25.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+models/order.py:228: error: Unsupported operand types for * ("int" and "None")  [operator]
+models/order.py:228: error: Unsupported operand types for * ("None" and "int")  [operator]
+models/order.py:228: error: Unsupported left operand type for * ("None")  [operator]
+models/order.py:228: note: Both left and right operands are unions
+services/customer_service.py:68: error: "Customer" has no attribute "order_count"  [attr-defined]
+services/import_service.py:84: error: Missing named argument "external_ref" for "ProductCreate"  [call-arg]
+services/import_service.py:88: error: Missing named argument "variant_name" for "ProductVariantCreate"  [call-arg]
+services/import_service.py:88: error: Missing named argument "external_ref" for "ProductVariantCreate"  [call-arg]
+services/import_service.py:112: error: Argument "packaging_type" to "PackagingBoxCreate" has incompatible type "str"; expected "PackagingType"  [arg-type]
+config.py:60: error: Missing named argument "ENCRYPTION_KEY" for "Settings"  [call-arg]
+services/order_service.py:248: error: Incompatible return value type (got "Order | None", expected "Order")  [return-value]
+services/file_storage.py:7: error: Library stubs not installed for "aiofiles"  [import-untyped]
+services/file_storage.py:7: note: Hint: "python3 -m pip install types-aiofiles"
+services/file_storage.py:7: note: (or run "mypy --install-types" to install all missing stub packages)
+services/file_storage.py:7: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+services/shopify_sync.py:70: error: Incompatible default for parameter "variables" (default has type "None", parameter has type "dict[Any, Any]")  [assignment]
+services/shopify_sync.py:70: note: PEP 484 prohibits implicit Optional. Accordingly, mypy has changed its default to no_implicit_optional=True
+services/shopify_sync.py:70: note: Use https://github.com/hauntsaninja/no_implicit_optional to automatically upgrade your codebase
+services/shopify_sync.py:165: error: Unexpected keyword argument "customer_note" for "OrderCreate"  [call-arg]
+routers/shipping.py:53: error: Argument 1 to "decrypt_value" has incompatible type "str | None"; expected "str"  [arg-type]
+routers/shipping.py:78: error: Argument 1 to "decrypt_value" has incompatible type "str | None"; expected "str"  [arg-type]
+routers/shipping.py:107: error: "CreateTTNRequest" has no attribute "parcel_override"  [attr-defined]
+routers/shipping.py:108: error: "CreateTTNRequest" has no attribute "parcel_override"  [attr-defined]
+routers/shipping.py:197: error: "CreateTTNRequest" has no attribute "length"  [attr-defined]
+routers/shipping.py:197: error: "CreateTTNRequest" has no attribute "width"  [attr-defined]
+routers/shipping.py:197: error: "CreateTTNRequest" has no attribute "height"; maybe "weight"?  [attr-defined]
+routers/shipping.py:199: error: "CreateTTNRequest" has no attribute "length"  [attr-defined]
+routers/shipping.py:199: error: "CreateTTNRequest" has no attribute "width"  [attr-defined]
+routers/shipping.py:199: error: "CreateTTNRequest" has no attribute "height"; maybe "weight"?  [attr-defined]
+routers/shipping.py:212: error: "Order" has no attribute "order_number"  [attr-defined]
+routers/products.py:43: error: Argument 2 to "is_sku_taken" of "CatalogService" has incompatible type "str | None"; expected "str"  [arg-type]
+routers/products.py:112: error: Argument 2 to "is_sku_taken" of "CatalogService" has incompatible type "str | None"; expected "str"  [arg-type]
+routers/products.py:113: error: Argument 1 to "append" of "list" has incompatible type "dict[str, object]"; expected "ImportErrorDetail"  [arg-type]
+routers/orders.py:51: error: Argument "status" to "OrderFilters" has incompatible type "str | None"; expected "OrderStatus | None"  [arg-type]
+routers/orders.py:265: error: Argument "status" to "OrderFilters" has incompatible type "str | None"; expected "OrderStatus | None"  [arg-type]
+routers/mcp.py:132: error: Missing positional arguments "receive", "send" in call to "handle_post_message" of "SseServerTransport"  [call-arg]
+routers/imports.py:29: error: Item "None" of "str | None" has no attribute "endswith"  [union-attr]
+routers/customers.py:98: error: "Customer" has no attribute "order_count"  [attr-defined]
+routers/webhooks.py:112: error: Argument 3 to "create_order" has incompatible type "User | None"; expected "User"  [arg-type]
+Found 33 errors in 14 files (checked 27 source files)
+

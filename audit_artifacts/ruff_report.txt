@@ -1,0 +1,737 @@
+ Container orderhub-postgres-1 Running 
+ Container orderhub-postgres-1 Waiting 
+ Container orderhub-postgres-1 Healthy 
+ Container orderhub-backend-run-240f4acc07f3 Creating 
+ Container orderhub-backend-run-240f4acc07f3 Created 
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 25.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+F401 [*] `uuid` imported but unused
+ --> check_db_users.py:2:8
+  |
+1 | import asyncio
+2 | import uuid
+  |        ^^^^
+3 | from sqlalchemy import select
+4 | from database import async_session_factory
+  |
+help: Remove unused import: `uuid`
+
+F401 [*] `os` imported but unused
+ --> logger.py:2:8
+  |
+1 | import logging
+2 | import os
+  |        ^^
+3 | from logging.handlers import RotatingFileHandler
+4 | from pathlib import Path
+  |
+help: Remove unused import: `os`
+
+F401 [*] `datetime.timezone` imported but unused
+  --> models/base.py:9:32
+   |
+ 8 | import uuid
+ 9 | from datetime import datetime, timezone
+   |                                ^^^^^^^^
+10 |
+11 | from sqlalchemy import DateTime, func
+   |
+help: Remove unused import: `datetime.timezone`
+
+F401 [*] `routers.dependencies.require_role` imported but unused
+  --> routers/attachments.py:16:52
+   |
+14 | from models.attachment import Attachment, AttachmentType
+15 | from schemas.attachment import AttachmentResponse
+16 | from routers.dependencies import get_current_user, require_role
+   |                                                    ^^^^^^^^^^^^
+17 | from services.file_storage import save_file, get_absolute_path, delete_file
+   |
+help: Remove unused import: `routers.dependencies.require_role`
+
+F401 [*] `sqlalchemy.orm.selectinload` imported but unused
+ --> routers/customers.py:8:28
+  |
+6 | from fastapi import APIRouter, Depends, HTTPException, status, Query
+7 | from sqlalchemy import select, func, or_
+8 | from sqlalchemy.orm import selectinload
+  |                            ^^^^^^^^^^^^
+9 | from sqlalchemy.ext.asyncio import AsyncSession
+  |
+help: Remove unused import: `sqlalchemy.orm.selectinload`
+
+F401 [*] `sqlalchemy.text` imported but unused
+ --> routers/dashboard.py:3:50
+  |
+1 | from datetime import datetime, timedelta
+2 | from fastapi import APIRouter, Depends
+3 | from sqlalchemy import select, func, cast, Date, text
+  |                                                  ^^^^
+4 | from sqlalchemy.ext.asyncio import AsyncSession
+  |
+help: Remove unused import: `sqlalchemy.text`
+
+F401 [*] `routers.dependencies.require_role` imported but unused
+  --> routers/dashboard.py:11:52
+   |
+ 9 | from models.shop import Shop
+10 | from schemas.dashboard import DashboardResponse, DashboardStats, RevenueByCurrency, DailyRevenue, ShopOrderCount
+11 | from routers.dependencies import get_current_user, require_role
+   |                                                    ^^^^^^^^^^^^
+12 |
+13 | router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+   |
+help: Remove unused import: `routers.dependencies.require_role`
+
+F401 [*] `fastapi.status` imported but unused
+ --> routers/imports.py:6:56
+  |
+5 | import uuid
+6 | from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+  |                                                        ^^^^^^
+7 | from sqlalchemy import select
+8 | from sqlalchemy.ext.asyncio import AsyncSession
+  |
+help: Remove unused import: `fastapi.status`
+
+F401 [*] `routers.dependencies.get_current_user` imported but unused
+  --> routers/imports.py:14:34
+   |
+12 | from models.shop import Shop, ShopPlatform
+13 | from schemas.common import ImportResult
+14 | from routers.dependencies import get_current_user, require_role
+   |                                  ^^^^^^^^^^^^^^^^
+15 | from services.etsy_parser import parse_etsy_csv
+   |
+help: Remove unused import: `routers.dependencies.get_current_user`
+
+E712 Avoid equality comparisons to `True`; use `Shop.is_active:` for truth checks
+  --> routers/imports.py:32:70
+   |
+30 |         raise HTTPException(status_code=400, detail="File must be a CSV")
+31 |         
+32 |     result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
+   |                                                                      ^^^^^^^^^^^^^^^^^^^^^^
+33 |     shop = result.scalar_one_or_none()
+   |
+help: Replace with `Shop.is_active`
+
+F401 [*] `contextlib.asynccontextmanager` imported but unused
+ --> routers/mcp.py:6:24
+  |
+4 | """
+5 |
+6 | from contextlib import asynccontextmanager
+  |                        ^^^^^^^^^^^^^^^^^^^
+7 | from typing import Any
+  |
+help: Remove unused import: `contextlib.asynccontextmanager`
+
+F401 [*] `sqlalchemy.orm.selectinload` imported but unused
+  --> routers/mcp.py:12:28
+   |
+10 | from fastapi.responses import StreamingResponse
+11 | from sqlalchemy import select, func
+12 | from sqlalchemy.orm import selectinload
+   |                            ^^^^^^^^^^^^
+13 |
+14 | from database import get_db, async_session_factory
+   |
+help: Remove unused import: `sqlalchemy.orm.selectinload`
+
+F401 [*] `database.get_db` imported but unused
+  --> routers/mcp.py:14:22
+   |
+12 | from sqlalchemy.orm import selectinload
+13 |
+14 | from database import get_db, async_session_factory
+   |                      ^^^^^^
+15 | from models.order import Order, OrderStatus
+16 | from models.user import User
+   |
+help: Remove unused import: `database.get_db`
+
+F401 [*] `sqlalchemy.select` imported but unused
+  --> routers/orders.py:10:24
+   |
+ 8 | from fastapi import APIRouter, Depends, Query, HTTPException, status
+ 9 | from fastapi.responses import StreamingResponse
+10 | from sqlalchemy import select
+   |                        ^^^^^^
+11 | from sqlalchemy.ext.asyncio import AsyncSession
+   |
+help: Remove unused import: `sqlalchemy.select`
+
+F401 [*] `routers.dependencies.get_shop_for_user` imported but unused
+  --> routers/packaging.py:9:52
+   |
+ 7 | from database import get_db
+ 8 | from models.shop import ShopPlatform
+ 9 | from routers.dependencies import get_current_user, get_shop_for_user, require_platform
+   |                                                    ^^^^^^^^^^^^^^^^^
+10 | from schemas.packaging import PackagingBoxCreate, PackagingBoxRead, PackagingBoxUpdate
+11 | from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
+   |
+help: Remove unused import: `routers.dependencies.get_shop_for_user`
+
+F401 [*] `routers.dependencies.get_shop_for_user` imported but unused
+  --> routers/products.py:9:52
+   |
+ 7 | from database import get_db
+ 8 | from models.shop import ShopPlatform
+ 9 | from routers.dependencies import get_current_user, get_shop_for_user, require_platform
+   |                                                    ^^^^^^^^^^^^^^^^^
+10 | from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
+11 | from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
+   |
+help: Remove unused import: `routers.dependencies.get_shop_for_user`
+
+F401 [*] `schemas.product.ProductVariantRead` imported but unused
+  --> routers/products.py:10:72
+   |
+ 8 | from models.shop import ShopPlatform
+ 9 | from routers.dependencies import get_current_user, get_shop_for_user, require_platform
+10 | from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
+   |                                                                        ^^^^^^^^^^^^^^^^^^
+11 | from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
+12 | from services.catalog_service import CatalogService
+   |
+help: Remove unused import: `schemas.product.ProductVariantRead`
+
+F401 [*] `fastapi.status` imported but unused
+  --> routers/shipping.py:10:56
+   |
+ 8 | from datetime import datetime
+ 9 | from zoneinfo import ZoneInfo
+10 | from fastapi import APIRouter, Depends, HTTPException, status, Query
+   |                                                        ^^^^^^
+11 | from sqlalchemy.ext.asyncio import AsyncSession
+12 | from sqlalchemy import select
+   |
+help: Remove unused import: `fastapi.status`
+
+F401 [*] `typing.List` imported but unused
+  --> routers/shipping.py:13:20
+   |
+11 | from sqlalchemy.ext.asyncio import AsyncSession
+12 | from sqlalchemy import select
+13 | from typing import List
+   |                    ^^^^
+14 |
+15 | from database import get_db
+   |
+help: Remove unused import: `typing.List`
+
+F401 [*] `models.order.Order` imported but unused
+  --> routers/shipping.py:16:26
+   |
+15 | from database import get_db
+16 | from models.order import Order, OrderStatus
+   |                          ^^^^^
+17 | from models.shop import Shop
+18 | from models.user import User, UserRole
+   |
+help: Remove unused import: `models.order.Order`
+
+E711 Comparison to `None` should be `cond is not None`
+  --> routers/shipping.py:46:60
+   |
+44 |     """Search for cities in Nova Poshta."""
+45 |     # Find any shop with NP key to use for the request
+46 |     stmt = select(Shop).where(Shop.np_api_key_encrypted != None).limit(1)
+   |                                                            ^^^^
+47 |     result = await db.execute(stmt)
+48 |     shop = result.scalar_one_or_none()
+   |
+help: Replace with `cond is not None`
+
+E711 Comparison to `None` should be `cond is not None`
+  --> routers/shipping.py:70:60
+   |
+68 | ):
+69 |     """Get warehouses in a city."""
+70 |     stmt = select(Shop).where(Shop.np_api_key_encrypted != None).limit(1)
+   |                                                            ^^^^
+71 |     result = await db.execute(stmt)
+72 |     shop = result.scalar_one_or_none()
+   |
+help: Replace with `cond is not None`
+
+F401 [*] `sqlalchemy.orm.selectinload` imported but unused
+ --> routers/shops.py:8:28
+  |
+6 | from fastapi import APIRouter, Depends, HTTPException, status
+7 | from sqlalchemy import select, func
+8 | from sqlalchemy.orm import selectinload
+  |                            ^^^^^^^^^^^^
+9 | from sqlalchemy.ext.asyncio import AsyncSession
+  |
+help: Remove unused import: `sqlalchemy.orm.selectinload`
+
+F401 [*] `services.encryption_service.decrypt_value` imported but unused
+  --> routers/shops.py:18:56
+   |
+16 | from routers.dependencies import get_current_user, require_role
+17 | from services.shopify_sync import sync_shop_orders
+18 | from services.encryption_service import encrypt_value, decrypt_value
+   |                                                        ^^^^^^^^^^^^^
+   |
+help: Remove unused import: `services.encryption_service.decrypt_value`
+
+E712 Avoid equality comparisons to `True`; use `Shop.is_active:` for truth checks
+  --> routers/shops.py:32:16
+   |
+30 |     result = await db.execute(
+31 |         select(Shop)
+32 |         .where(Shop.is_active == True)
+   |                ^^^^^^^^^^^^^^^^^^^^^^
+33 |         .order_by(Shop.created_at.desc())
+34 |     )
+   |
+help: Replace with `Shop.is_active`
+
+E712 Avoid equality comparisons to `True`; use `Shop.is_active:` for truth checks
+  --> routers/shops.py:97:70
+   |
+95 | ):
+96 |     """Get shop details and order count."""
+97 |     result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
+   |                                                                      ^^^^^^^^^^^^^^^^^^^^^^
+98 |     shop = result.scalar_one_or_none()
+   |
+help: Replace with `Shop.is_active`
+
+E712 Avoid equality comparisons to `True`; use `Shop.is_active:` for truth checks
+   --> routers/shops.py:189:70
+    |
+187 | ):
+188 |     """Trigger a manual order sync for a specific shop."""
+189 |     result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
+    |                                                                      ^^^^^^^^^^^^^^^^^^^^^^
+190 |     shop = result.scalar_one_or_none()
+    |
+help: Replace with `Shop.is_active`
+
+E712 Avoid equality comparisons to `True`; use `User.is_active:` for truth checks
+   --> routers/users.py:114:49
+    |
+112 |             select(func.count())
+113 |             .select_from(User)
+114 |             .where(User.role == UserRole.OWNER, User.is_active == True, User.id != user_id)
+    |                                                 ^^^^^^^^^^^^^^^^^^^^^^
+115 |         )
+116 |         if count_result.scalar() == 0:
+    |
+help: Replace with `User.is_active`
+
+F401 [*] `models.shop.ShopPlatform` imported but unused
+  --> routers/webhooks.py:16:31
+   |
+15 | from database import get_db
+16 | from models.shop import Shop, ShopPlatform
+   |                               ^^^^^^^^^^^^
+17 | from services.encryption_service import decrypt_value
+18 | from services.shopify_sync import call_shopify_graphql # For fetching full details if needed
+   |
+help: Remove unused import: `models.shop.ShopPlatform`
+
+F401 [*] `services.shopify_sync.call_shopify_graphql` imported but unused
+  --> routers/webhooks.py:18:35
+   |
+16 | from models.shop import Shop, ShopPlatform
+17 | from services.encryption_service import decrypt_value
+18 | from services.shopify_sync import call_shopify_graphql # For fetching full details if needed
+   |                                   ^^^^^^^^^^^^^^^^^^^^
+19 | from schemas.order import OrderCreate
+20 | from services.order_service import create_order, update_order
+   |
+help: Remove unused import: `services.shopify_sync.call_shopify_graphql`
+
+F401 [*] `services.order_service.update_order` imported but unused
+  --> routers/webhooks.py:20:50
+   |
+18 | from services.shopify_sync import call_shopify_graphql # For fetching full details if needed
+19 | from schemas.order import OrderCreate
+20 | from services.order_service import create_order, update_order
+   |                                                  ^^^^^^^^^^^^
+21 | from models.order import Order
+22 | from models.user import User
+   |
+help: Remove unused import: `services.order_service.update_order`
+
+E712 Avoid equality comparisons to `True`; use `Shop.is_active:` for truth checks
+  --> scheduler.py:32:32
+   |
+30 |     async with async_session_factory() as db:
+31 |         shops_result = await db.execute(
+32 |             select(Shop).where(Shop.is_active == True, Shop.platform == ShopPlatform.SHOPIFY)
+   |                                ^^^^^^^^^^^^^^^^^^^^^^
+33 |         )
+34 |         shops = shops_result.scalars().all()
+   |
+help: Replace with `Shop.is_active`
+
+F401 [*] `typing.Optional` imported but unused
+ --> schemas/import_preview.py:1:37
+  |
+1 | from typing import Any, Dict, List, Optional
+  |                                     ^^^^^^^^
+2 | from pydantic import BaseModel
+  |
+help: Remove unused import: `typing.Optional`
+
+F401 [*] `uuid.UUID` imported but unused
+ --> schemas/parcel.py:3:18
+  |
+1 | from typing import Optional, List, Literal
+2 | from pydantic import BaseModel, Field
+3 | from uuid import UUID
+  |                  ^^^^
+4 | from schemas.packaging import PackagingBoxRead
+  |
+help: Remove unused import: `uuid.UUID`
+
+F401 [*] `sqlalchemy.and_` imported but unused
+ --> services/catalog_service.py:5:40
+  |
+3 | from datetime import datetime
+4 |
+5 | from sqlalchemy import select, delete, and_
+  |                                        ^^^^
+6 | from sqlalchemy.ext.asyncio import AsyncSession
+7 | from sqlalchemy.orm import selectinload
+  |
+help: Remove unused import: `sqlalchemy.and_`
+
+F401 [*] `schemas.product.ProductVariantCreate` imported but unused
+  --> services/catalog_service.py:11:59
+   |
+ 9 | from models.product import Product, ProductVariant
+10 | from models.packaging import PackagingBox
+11 | from schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate, ProductVariantUpdate
+   |                                                           ^^^^^^^^^^^^^^^^^^^^
+12 | from schemas.packaging import PackagingBoxCreate, PackagingBoxUpdate
+   |
+help: Remove unused import
+
+F401 [*] `schemas.product.ProductVariantUpdate` imported but unused
+  --> services/catalog_service.py:11:81
+   |
+ 9 | from models.product import Product, ProductVariant
+10 | from models.packaging import PackagingBox
+11 | from schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate, ProductVariantUpdate
+   |                                                                                 ^^^^^^^^^^^^^^^^^^^^
+12 | from schemas.packaging import PackagingBoxCreate, PackagingBoxUpdate
+   |
+help: Remove unused import
+
+F401 [*] `sqlalchemy.update` imported but unused
+ --> services/customer_service.py:6:38
+  |
+5 | import uuid
+6 | from sqlalchemy import select, func, update
+  |                                      ^^^^^^
+7 | from sqlalchemy.ext.asyncio import AsyncSession
+  |
+help: Remove unused import: `sqlalchemy.update`
+
+E701 Multiple statements on one line (colon)
+  --> services/customer_service.py:32:19
+   |
+30 |         # Update existing
+31 |         customer.full_name = full_name
+32 |         if country: customer.country = country
+   |                   ^
+33 |         if phone: customer.phone = phone
+34 |         if shipping_city: customer.shipping_city = shipping_city
+   |
+
+E701 Multiple statements on one line (colon)
+  --> services/customer_service.py:33:17
+   |
+31 |         customer.full_name = full_name
+32 |         if country: customer.country = country
+33 |         if phone: customer.phone = phone
+   |                 ^
+34 |         if shipping_city: customer.shipping_city = shipping_city
+35 |         if shipping_city_ref: customer.shipping_city_ref = shipping_city_ref
+   |
+
+E701 Multiple statements on one line (colon)
+  --> services/customer_service.py:34:25
+   |
+32 |         if country: customer.country = country
+33 |         if phone: customer.phone = phone
+34 |         if shipping_city: customer.shipping_city = shipping_city
+   |                         ^
+35 |         if shipping_city_ref: customer.shipping_city_ref = shipping_city_ref
+36 |         if shipping_warehouse_ref: customer.shipping_warehouse_ref = shipping_warehouse_ref
+   |
+
+E701 Multiple statements on one line (colon)
+  --> services/customer_service.py:35:29
+   |
+33 |         if phone: customer.phone = phone
+34 |         if shipping_city: customer.shipping_city = shipping_city
+35 |         if shipping_city_ref: customer.shipping_city_ref = shipping_city_ref
+   |                             ^
+36 |         if shipping_warehouse_ref: customer.shipping_warehouse_ref = shipping_warehouse_ref
+37 |     else:
+   |
+
+E701 Multiple statements on one line (colon)
+  --> services/customer_service.py:36:34
+   |
+34 |         if shipping_city: customer.shipping_city = shipping_city
+35 |         if shipping_city_ref: customer.shipping_city_ref = shipping_city_ref
+36 |         if shipping_warehouse_ref: customer.shipping_warehouse_ref = shipping_warehouse_ref
+   |                                  ^
+37 |     else:
+38 |         # Create new
+   |
+
+F401 [*] `schemas.import_preview.ImportPreviewResponse` imported but unused
+  --> services/import_service.py:10:55
+   |
+ 8 | from schemas.product import ProductCreate, ProductVariantCreate
+ 9 | from schemas.packaging import PackagingBoxCreate
+10 | from schemas.import_preview import ImportErrorDetail, ImportPreviewResponse
+   |                                                       ^^^^^^^^^^^^^^^^^^^^^
+   |
+help: Remove unused import: `schemas.import_preview.ImportPreviewResponse`
+
+F401 [*] `datetime.datetime` imported but unused
+ --> services/nova_poshta.py:5:22
+  |
+3 | """
+4 |
+5 | from datetime import datetime
+  |                      ^^^^^^^^
+6 |
+7 | import httpx
+  |
+help: Remove unused import: `datetime.datetime`
+
+E701 Multiple statements on one line (colon)
+   --> services/order_service.py:280:47
+    |
+278 |             # Map order field names to customer field names
+279 |             customer_updates = {}
+280 |             if "shipping_phone" in update_data: customer_updates["phone"] = update_data["shipping_phone"]
+    |                                               ^
+281 |             if "shipping_city" in update_data: customer_updates["shipping_city"] = update_data["shipping_city"]
+282 |             if "shipping_city_ref" in update_data: customer_updates["shipping_city_ref"] = update_data["shipping_city_ref"]
+    |
+
+E701 Multiple statements on one line (colon)
+   --> services/order_service.py:281:46
+    |
+279 | …     customer_updates = {}
+280 | …     if "shipping_phone" in update_data: customer_updates["phone"] = update_data["shipping_phone"]
+281 | …     if "shipping_city" in update_data: customer_updates["shipping_city"] = update_data["shipping_city"]
+    |                                        ^
+282 | …     if "shipping_city_ref" in update_data: customer_updates["shipping_city_ref"] = update_data["shipping_city_ref"]
+283 | …     if "shipping_warehouse_ref" in update_data: customer_updates["shipping_warehouse_ref"] = update_data["shipping_warehouse_ref"]
+    |
+
+E701 Multiple statements on one line (colon)
+   --> services/order_service.py:282:50
+    |
+280 | …     if "shipping_phone" in update_data: customer_updates["phone"] = update_data["shipping_phone"]
+281 | …     if "shipping_city" in update_data: customer_updates["shipping_city"] = update_data["shipping_city"]
+282 | …     if "shipping_city_ref" in update_data: customer_updates["shipping_city_ref"] = update_data["shipping_city_ref"]
+    |                                            ^
+283 | …     if "shipping_warehouse_ref" in update_data: customer_updates["shipping_warehouse_ref"] = update_data["shipping_warehouse_ref"]
+    |
+
+E701 Multiple statements on one line (colon)
+   --> services/order_service.py:283:55
+    |
+281 | …     if "shipping_city" in update_data: customer_updates["shipping_city"] = update_data["shipping_city"]
+282 | …     if "shipping_city_ref" in update_data: customer_updates["shipping_city_ref"] = update_data["shipping_city_ref"]
+283 | …     if "shipping_warehouse_ref" in update_data: customer_updates["shipping_warehouse_ref"] = update_data["shipping_warehouse_ref"]
+    |                                                 ^
+284 | …     
+285 | …     if customer_updates:
+    |
+
+F401 [*] `math` imported but unused
+ --> services/parcel_calculator.py:1:8
+  |
+1 | import math
+  |        ^^^^
+2 | from typing import List, Optional, Tuple
+3 | from sqlalchemy.ext.asyncio import AsyncSession
+  |
+help: Remove unused import: `math`
+
+F401 [*] `typing.List` imported but unused
+ --> services/parcel_calculator.py:2:20
+  |
+1 | import math
+2 | from typing import List, Optional, Tuple
+  |                    ^^^^
+3 | from sqlalchemy.ext.asyncio import AsyncSession
+4 | from sqlalchemy import select
+  |
+help: Remove unused import
+
+F401 [*] `typing.Optional` imported but unused
+ --> services/parcel_calculator.py:2:26
+  |
+1 | import math
+2 | from typing import List, Optional, Tuple
+  |                          ^^^^^^^^
+3 | from sqlalchemy.ext.asyncio import AsyncSession
+4 | from sqlalchemy import select
+  |
+help: Remove unused import
+
+F401 [*] `typing.Tuple` imported but unused
+ --> services/parcel_calculator.py:2:36
+  |
+1 | import math
+2 | from typing import List, Optional, Tuple
+  |                                    ^^^^^
+3 | from sqlalchemy.ext.asyncio import AsyncSession
+4 | from sqlalchemy import select
+  |
+help: Remove unused import
+
+F401 [*] `models.order.OrderItem` imported but unused
+ --> services/parcel_calculator.py:5:33
+  |
+3 | from sqlalchemy.ext.asyncio import AsyncSession
+4 | from sqlalchemy import select
+5 | from models.order import Order, OrderItem
+  |                                 ^^^^^^^^^
+6 | from models.packaging import PackagingBox, PackagingType
+7 | from schemas.parcel import ParcelEstimate
+  |
+help: Remove unused import: `models.order.OrderItem`
+
+F401 [*] `uuid` imported but unused
+  --> services/shopify_sync.py:9:8
+   |
+ 7 | import json
+ 8 | from datetime import datetime, timezone
+ 9 | import uuid
+   |        ^^^^
+10 | import logging
+11 | from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
+   |
+help: Remove unused import: `uuid`
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:15:1
+   |
+13 | logger = logging.getLogger(__name__)
+14 |
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+16 | from sqlalchemy import select
+17 | from fastapi import HTTPException
+   |
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:16:1
+   |
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+16 | from sqlalchemy import select
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+17 | from fastapi import HTTPException
+   |
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:17:1
+   |
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+16 | from sqlalchemy import select
+17 | from fastapi import HTTPException
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+18 |
+19 | from models.shop import Shop, ShopPlatform
+   |
+
+F401 [*] `fastapi.HTTPException` imported but unused
+  --> services/shopify_sync.py:17:21
+   |
+15 | from sqlalchemy.ext.asyncio import AsyncSession
+16 | from sqlalchemy import select
+17 | from fastapi import HTTPException
+   |                     ^^^^^^^^^^^^^
+18 |
+19 | from models.shop import Shop, ShopPlatform
+   |
+help: Remove unused import: `fastapi.HTTPException`
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:19:1
+   |
+17 | from fastapi import HTTPException
+18 |
+19 | from models.shop import Shop, ShopPlatform
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+20 | from models.order import Order
+21 | from schemas.order import OrderCreate
+   |
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:20:1
+   |
+19 | from models.shop import Shop, ShopPlatform
+20 | from models.order import Order
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+21 | from schemas.order import OrderCreate
+22 | from services.order_service import create_order
+   |
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:21:1
+   |
+19 | from models.shop import Shop, ShopPlatform
+20 | from models.order import Order
+21 | from schemas.order import OrderCreate
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+22 | from services.order_service import create_order
+23 | from services.encryption_service import decrypt_value
+   |
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:22:1
+   |
+20 | from models.order import Order
+21 | from schemas.order import OrderCreate
+22 | from services.order_service import create_order
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+23 | from services.encryption_service import decrypt_value
+   |
+
+E402 Module level import not at top of file
+  --> services/shopify_sync.py:23:1
+   |
+21 | from schemas.order import OrderCreate
+22 | from services.order_service import create_order
+23 | from services.encryption_service import decrypt_value
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+24 |
+25 | SHOPIFY_API_VERSION = "2024-04"
+   |
+
+F401 [*] `schemas.packaging.PackagingBoxRead` imported but unused
+ --> tests/test_parcel_calculator.py:7:31
+  |
+5 | from services.parcel_calculator import calculate_parcel_estimate
+6 | from models.packaging import PackagingType
+7 | from schemas.packaging import PackagingBoxRead
+  |                               ^^^^^^^^^^^^^^^^
+8 |
+9 | @pytest.mark.asyncio
+  |
+help: Remove unused import: `schemas.packaging.PackagingBoxRead`
+
+Found 65 errors.
+[*] 40 fixable with the `--fix` option (8 hidden fixes can be enabled with the `--unsafe-fixes` option).
+

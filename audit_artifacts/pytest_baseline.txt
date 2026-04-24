@@ -1,0 +1,69 @@
+ Container orderhub-postgres-1 Running 
+ Container orderhub-postgres-1 Waiting 
+ Container orderhub-postgres-1 Healthy 
+ Container orderhub-backend-run-9655a5b16ffd Creating 
+ Container orderhub-backend-run-9655a5b16ffd Created 
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+
+[notice] A new release of pip is available: 25.0.1 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /app
+plugins: anyio-4.13.0
+collecting ... collected 3 items
+
+tests/test_parcel_calculator.py::test_calculate_parcel_estimate_basic FAILED [ 33%]
+tests/test_parcel_calculator.py::test_envelope_selection FAILED          [ 66%]
+tests/test_parcel_calculator.py::test_box_fallback FAILED                [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_calculate_parcel_estimate_basic _____________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+___________________________ test_envelope_selection ____________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+______________________________ test_box_fallback _______________________________
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework, for example:
+  - anyio
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+  - pytest-twisted
+=============================== warnings summary ===============================
+../usr/local/lib/python3.12/site-packages/pydantic/_internal/_config.py:295
+  /usr/local/lib/python3.12/site-packages/pydantic/_internal/_config.py:295: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.10/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+tests/test_parcel_calculator.py:9
+  /app/tests/test_parcel_calculator.py:9: PytestUnknownMarkWarning: Unknown pytest.mark.asyncio - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.asyncio
+
+tests/test_parcel_calculator.py:46
+  /app/tests/test_parcel_calculator.py:46: PytestUnknownMarkWarning: Unknown pytest.mark.asyncio - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.asyncio
+
+tests/test_parcel_calculator.py:93
+  /app/tests/test_parcel_calculator.py:93: PytestUnknownMarkWarning: Unknown pytest.mark.asyncio - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.asyncio
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_parcel_calculator.py::test_calculate_parcel_estimate_basic
+FAILED tests/test_parcel_calculator.py::test_envelope_selection - Failed: asy...
+FAILED tests/test_parcel_calculator.py::test_box_fallback - Failed: async def...
+======================== 3 failed, 4 warnings in 0.97s =========================
+
