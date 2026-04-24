@@ -33,6 +33,12 @@ class CreateTTNRequest(BaseModel):
     volume: float | None = None
     cash_on_delivery: bool = False
     cod_amount: float | None = None
+    # Parcel dimensions in millimetres (frontend sends mm; handler converts to m³)
+    length: float | None = None
+    width: float | None = None
+    height: float | None = None
+    # Whether the user manually overrode the auto-calculated parcel values
+    parcel_override: bool = False
 
 
 @router.get("/cities")
