@@ -209,7 +209,8 @@ async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order
         shipping_zip=data.shipping_zip,
         shipping_country=data.shipping_country,
         shipping_city_ref=data.shipping_city_ref,
-        shipping_warehouse_ref=data.shipping_warehouse_ref
+        shipping_warehouse_ref=data.shipping_warehouse_ref,
+        customer_note=data.customer_note,
     )
     db.add(order)
     await db.flush()

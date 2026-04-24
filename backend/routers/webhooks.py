@@ -66,6 +66,9 @@ async def shopify_webhook(
     # Let's find the owner or use a dummy system user
     user_result = await db.execute(select(User).limit(1))
     system_user = user_result.scalar_one_or_none()
+    if system_user is None:
+        logger.error("Cannot process webhook: no users exist in database")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="System misconfigured")
 
     if x_shopify_topic == "orders/create" or x_shopify_topic == "orders/updated":
         logger.info(f"Processing Shopify webhook {x_shopify_topic} for order {external_id}")

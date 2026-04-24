@@ -209,7 +209,7 @@ async def create_np_ttn(
         "Weight": f"{body.weight or shop.np_default_weight_kg or 0.5:.3f}",
         "ServiceType": "WarehouseWarehouse",
         "SeatsAmount": "1",
-        "Description": body.description or shop.np_default_description or f"Order #{order.order_number}",
+        "Description": body.description or shop.np_default_description or f"Order #{order.external_id}",
         "Cost": str(int(order.total_price)),
         "CitySender": shop.np_sender_city_ref,
         "Sender": sender_ref,

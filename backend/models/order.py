@@ -223,9 +223,12 @@ class OrderItem(Base, UUIDPrimaryKeyMixin):
     @hybrid_property
     def volume_cm3(self) -> float:
         """Calculates volume in cm3 from snapshot dimensions."""
-        if not all([self.snapshot_length_mm, self.snapshot_width_mm, self.snapshot_height_mm]):
+        length = self.snapshot_length_mm
+        width = self.snapshot_width_mm
+        height = self.snapshot_height_mm
+        if length is None or width is None or height is None:
             return 0.0
-        return (self.snapshot_length_mm * self.snapshot_width_mm * self.snapshot_height_mm) / 1000.0
+        return (length * width * height) / 1000.0
 
     # Relationships
     order = relationship("Order", back_populates="items")

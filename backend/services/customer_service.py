@@ -65,5 +65,6 @@ async def get_customer_with_order_count(
     count_result = await db.execute(
         select(func.count()).select_from(Order).where(Order.customer_id == customer_id)
     )
-    customer.order_count = count_result.scalar() or 0
+    # order_count is a computed field on CustomerResponse, not a Customer column
+    setattr(customer, "order_count", count_result.scalar() or 0)
     return customer

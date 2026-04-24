@@ -91,9 +91,9 @@ async def get_customer_by_email(
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     
-    # Also get order count
+    # Also get order count (computed field on CustomerResponse, not a Customer column)
     count_result = await db.execute(
         select(func.count()).select_from(Order).where(Order.customer_id == customer.id)
     )
-    customer.order_count = count_result.scalar() or 0
+    setattr(customer, "order_count", count_result.scalar() or 0)
     return customer

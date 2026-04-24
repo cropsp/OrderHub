@@ -143,7 +143,7 @@ class OrderCreate(BaseModel):
     total_price: float
     currency: str = "USD"
     ordered_at: datetime
-    
+
     # Items
     items: list[OrderItemCreate] = []
 
@@ -158,6 +158,9 @@ class OrderCreate(BaseModel):
     shipping_country: str | None = None
     shipping_city_ref: str | None = None
     shipping_warehouse_ref: str | None = None
+
+    # Notes (populated from Shopify webhook / sync; manual form leaves blank)
+    customer_note: str | None = None
 
 
 class OrderUpdate(BaseModel):
