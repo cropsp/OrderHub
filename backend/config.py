@@ -53,8 +53,28 @@ class Settings(BaseSettings):
     def is_development(self) -> bool:
         return self.ENVIRONMENT == "development"
 
+    def _validate_production_secrets(self) -> None:
+        """Fail-fast if production is using placeholder secrets (SEC-03 guard)."""
+        if self.ENVIRONMENT != "production":
+            return
+        if self.SECRET_KEY.startswith("change-me"):
+            raise RuntimeError(
+                "ENVIRONMENT=production but SECRET_KEY is the default placeholder. "
+                "Set SECRET_KEY to a real value (e.g. `python -c 'import secrets; "
+                "print(secrets.token_urlsafe(32))'`) before starting the app."
+            )
+        if self.ENCRYPTION_KEY.startswith("change-me"):
+            raise RuntimeError(
+                "ENVIRONMENT=production but ENCRYPTION_KEY is the default placeholder. "
+                "Set ENCRYPTION_KEY to a real Fernet key (e.g. `python -c 'from "
+                "cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`) "
+                "before starting the app."
+            )
+
 
 @lru_cache
 def get_settings() -> Settings:
     """Cached settings instance — created once per process."""
-    return Settings()
+    settings = Settings()
+    settings._validate_production_secrets()
+    return settings
