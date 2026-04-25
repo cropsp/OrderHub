@@ -107,3 +107,4 @@ Performance: route-level chunk splitting (frontend). Testing: smoke tests with V
 - Nova Poshta refs auto-clear on manual address input — this is intentional, not a bug.
 - Backend logs rotate at 25MB cap in `backend/logs/server.log`.
 - `CreateOrderPage.tsx` is a full-page form, not a modal — this was a deliberate UX decision.
+- MCP server development is paused — do not modify `backend/routers/mcp.py` unless explicitly asked. See `docs/integrations/mcp-server.md` for context.
