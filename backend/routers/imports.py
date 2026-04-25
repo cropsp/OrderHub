@@ -8,11 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from logger import get_logger
 from models.user import User, UserRole
 from models.shop import Shop, ShopPlatform
 from schemas.common import ImportResult
 from routers.dependencies import get_current_user, require_role
 from services.etsy_parser import parse_etsy_csv
+
+logger = get_logger("routers.imports")
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -46,4 +49,5 @@ async def import_etsy_orders(
         return import_result
     except Exception as e:
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to import: {str(e)}")
+        logger.error(f"[IMPORTS] Etsy import failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to import CSV. Please verify the file and try again.")

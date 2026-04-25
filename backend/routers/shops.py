@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from logger import get_logger
 from models.shop import Shop
 from models.order import Order
 from models.user import User, UserRole
@@ -17,6 +18,8 @@ from routers.dependencies import get_current_user, require_role
 from services.shopify_sync import sync_shop_orders
 from services.encryption_service import encrypt_value, decrypt_value
 
+
+logger = get_logger("routers.shops")
 
 router = APIRouter(prefix="/api/shops", tags=["shops"])
 
@@ -196,4 +199,5 @@ async def manual_sync_shop(
         count = await sync_shop_orders(db, shop, current_user)
         return {"status": "success", "synced_count": count}
     except Exception as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        logger.error(f"[SHOPS] Manual sync failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Manual sync failed")

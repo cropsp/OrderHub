@@ -82,6 +82,7 @@ export function useOrderForm(onSuccess: () => void) {
       resetForm();
       onSuccess();
     } catch (err: any) {
+      // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
       setError(err.response?.data?.detail || 'Failed to create order');
     } finally {
       setIsSubmitting(false);

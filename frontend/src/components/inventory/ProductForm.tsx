@@ -92,6 +92,7 @@ export default function ProductForm({
       await onSave({ title, description, variants })
       onClose()
     } catch (err: any) {
+      // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
       setError(err.response?.data?.detail || 'Failed to save product')
     }
   }

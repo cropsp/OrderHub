@@ -56,6 +56,7 @@ function getErrorMessage(error: unknown): string {
     }
     
     // Handle standard string detail
+    // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
     if (data?.detail && typeof data.detail === 'string') {
       return data.detail;
     }

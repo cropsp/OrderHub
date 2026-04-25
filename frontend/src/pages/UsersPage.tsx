@@ -62,6 +62,7 @@ const ROLE_COLORS = {
 function getErrorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'response' in error) {
     const response = (error as { response?: { data?: { detail?: string } } }).response;
+    // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
     return response?.data?.detail ?? 'Request failed';
   }
 

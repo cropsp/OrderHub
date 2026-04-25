@@ -128,7 +128,8 @@ async def get_order_parcel_estimate(
     try:
         estimate = await calculate_parcel_estimate(db, str(order_id))
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning(f"[ORDERS] Parcel estimate validation error for {order_id}: {e}")
+        raise HTTPException(status_code=400, detail="Unable to calculate parcel estimate for this order")
         
     # 4. Cache results if parcel_override is False
     if not order.parcel_override:

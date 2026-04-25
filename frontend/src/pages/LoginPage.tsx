@@ -23,6 +23,7 @@ function extractErrorMessage(error: unknown): string {
     return 'Login failed. Please try again.'
   }
 
+  // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
   const detail = error.response?.data?.detail
   if (typeof detail === 'string' && detail.trim().length > 0) {
     return detail

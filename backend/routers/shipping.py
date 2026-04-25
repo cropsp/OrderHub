@@ -62,8 +62,8 @@ async def search_cities(
         cities = await np_client.get_cities(query)
         return cities
     except Exception as e:
-        logger.error(f"[SHIPPING] Nova Poshta Search Cities Error: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"[SHIPPING] Nova Poshta Search Cities Error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to communicate with shipping provider")
 
 @router.get("/warehouses/{city_ref}")
 async def get_warehouses(
@@ -86,8 +86,8 @@ async def get_warehouses(
         warehouses = await np_client.get_warehouses(city_ref, query)
         return warehouses
     except Exception as e:
-        logger.error(f"[SHIPPING] Nova Poshta Get Warehouses Error: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"[SHIPPING] Nova Poshta Get Warehouses Error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to communicate with shipping provider")
 
 
 @router.post("/np-ttn/{order_id}")
@@ -155,7 +155,8 @@ async def create_np_ttn(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"NP API Error (Sender): {str(e)}")
+        logger.error(f"[SHIPPING] NP sender resolution failed for shop {shop.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail="Failed to resolve sender with shipping provider")
 
     # 2. Resolve Recipient
     # Separate names (NP expects Last/First/Middle)
@@ -192,8 +193,11 @@ async def create_np_ttn(
             )
             recipient_ref = recipient_data["Ref"]
             recipient_contact_ref = recipient_data["ContactPerson"]["data"][0]["Ref"]
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"NP API Error (Recipient): {str(e)}")
+        logger.error(f"[SHIPPING] NP recipient resolution failed for order {order_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail="Failed to resolve recipient with shipping provider")
 
     # 3. Build Payload
     kyiv_tz = ZoneInfo("Europe/Kiev")
@@ -255,8 +259,8 @@ async def create_np_ttn(
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"[SHIPPING] FAILED TO CREATE TTN: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"NP API Error: {str(e)}")
+        logger.error(f"[SHIPPING] FAILED TO CREATE TTN: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to create shipping label")
 
 
 @router.delete("/np-ttn/{order_id}")
@@ -297,5 +301,5 @@ async def delete_np_ttn(
         
     except Exception as e:
         await db.rollback()
-        logger.error(f"[SHIPPING] FAILED TO DELETE TTN: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail=f"NP API Error: {str(e)}")
+        logger.error(f"[SHIPPING] FAILED TO DELETE TTN: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to delete shipping label")

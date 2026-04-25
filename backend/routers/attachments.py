@@ -9,12 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from logger import get_logger
 from models.user import User, UserRole
 from models.order import Order
 from models.attachment import Attachment, AttachmentType
 from schemas.attachment import AttachmentResponse
 from routers.dependencies import get_current_user, require_role
 from services.file_storage import save_file, get_absolute_path, delete_file
+
+logger = get_logger("routers.attachments")
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
@@ -43,7 +46,8 @@ async def upload_attachment(
     try:
         relative_path, file_size = await save_file(file, order_id)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+        logger.error(f"[ATTACHMENTS] Failed to save upload for order {order_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to save attachment")
         
     # Create DB entry
     attachment = Attachment(

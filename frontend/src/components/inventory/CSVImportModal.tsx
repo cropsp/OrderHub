@@ -67,6 +67,7 @@ export default function CSVImportModal({
       setPreviewData(data)
       setStep('preview')
     } catch (err: any) {
+      // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
       setError(err.response?.data?.detail || 'Failed to parse CSV file')
     } finally {
       setIsLoading(false)
@@ -84,6 +85,7 @@ export default function CSVImportModal({
       onClose()
       handleReset()
     } catch (err: any) {
+      // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
       setError(err.response?.data?.detail || 'Failed to confirm import')
     } finally {
       setIsLoading(false)
