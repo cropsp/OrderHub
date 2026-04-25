@@ -152,6 +152,11 @@ The hot files (OrderDetailPanel, DetailLogistics, OrdersLayout, App, DashboardPa
 - The pre-generated `hot_files.txt` lists scratch scripts (`verify_etsy_fix.py`, `mcp_debug_tools.py`) and file-add/delete pairs as "hot," making the top of the list meaningless. `git log --since=6mo --name-only | sort | uniq -c` produces a more truthful list (used in this report).
 - **Why it matters**: Not code debt, but the audit tooling itself is lying. Worth regenerating with `.git` pathspec exclusion for scratch/ + filtering to files that still exist.
 
+### L6. Default currency per shop (model column + migration + auto-fill on order creation)
+
+- Currently currency is only on `Order`/`OrderItem`. There is no per-shop default, so every order entry path has to specify currency explicitly. Surfaced 2026-04-25 when adding KoraKlenu to seed: a shop is conceptually a single-currency storefront (KoraKlenu = UAH), but the model can't express that.
+- **Why it matters**: Minor — orders work fine without it. But manual order entry and CSV import both have to either hardcode a currency or fall back to `BASE_CURRENCY`. A `Shop.default_currency` column would let the order creation path auto-fill and let the UI show shop-appropriate currency. Fix: add `default_currency: Mapped[str]` to `Shop` model, alembic migration, and thread it through `OrderCreate` defaulting in `services/orders` + manual entry form.
+
 ---
 
 ## Hot-File Instability Inspection (Top 5 by 6-month change count)
