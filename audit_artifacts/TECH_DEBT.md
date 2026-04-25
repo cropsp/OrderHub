@@ -186,6 +186,13 @@ Trigger: first real user population beyond the core team, OR any incident where 
 The 2026-04-24 pass inserts a persistent system user and points webhooks + scheduler at it for all *future* history rows. Confirmed state: the Shopify scheduler HAS run in production, so any rows whose `changed_by_id` points at the old hard-coded UUID `00000000-0000-0000-0000-000000000000` or at a non-deterministic `select(User).limit(1)` user (from webhooks) are not repaired. Those rows remain FK-valid but attribute audit events to the wrong or ghost actor.
 Trigger: any audit/compliance requirement that historical `changed_by_id` be accurate. Remediation sketch: (1) `SELECT DISTINCT changed_by_id FROM order_status_history WHERE changed_by_id NOT IN (SELECT id FROM users WHERE is_active);` to find affected rows; (2) `UPDATE order_status_history SET changed_by_id = :system_user_id WHERE changed_by_id IN (:known_bad_uuids);`. Lossy — requires explicit operator sign-off before running.
 
+**SEC-06 — MCP session-keyed transports + `handle_post_message` signature fix**
+Status: Deferred. MCP server is not the current priority. The project needs a solid core (orders, logistics, catalog) before expanding AI agent capabilities.
+Bad pattern: `backend/routers/mcp.py` keeps a single module-global `sse_transport: SseServerTransport | None` (around line 31) that any new SSE connection overwrites at the connect site (around line 106-107). A second concurrent agent session silently steals the first agent's transport — messages can be routed to the wrong session and the first session quietly breaks. Same file's `handle_post_message` POST handler also has a mypy signature mismatch against the upstream SDK (called out in `audit_artifacts/mypy_report.txt`).
+Fix sketch: replace the global with a `Dict[str, SseServerTransport]` keyed by session ID (or use the MCP SDK's built-in session manager if it's matured since the original implementation), and update `handle_post_message`'s signature to match the SDK's expected `(scope, receive, send)` shape so mypy stops flagging it.
+References: full audit context in `audit_artifacts/SECURITY_REPORT.md` SEC-06; vision/roadmap and the explicit "do not touch" status in `docs/integrations/mcp-server.md`.
+Trigger: when MCP server development resumes (per the freeze noted in `CLAUDE.md` Gotchas).
+
 **SEC-08 residual — File upload MIME allow-list + magic-number validation**
 The 2026-04-24 pass shipped the size cap (10 MB) and `Content-Disposition: attachment` on downloads — enough to neutralize stored-XSS via inline HTML/SVG and disk-exhaustion DoS. The MIME allow-list was deferred because the designer workflow uses source files (`.ai`, `.psd`, `.eps`, potentially `.zip`) that a naive image/PDF whitelist would block on day one.
 Trigger: before exposing uploads to users beyond the core team. First step: `find uploads/ -type f | awk -F. '{print $NF}' | sort -u` to ground-truth actual extensions, then confirm the allow-list with the designer team. Implement magic-number check against a per-extension signature map; do not trust client-supplied `Content-Type`. SVG remains a landmine — exclude unless there's a concrete need.
@@ -257,6 +264,14 @@ Trigger: pair with SEC-20 production-checklist work.
 **SEC-25 — Shopify retry catches all exceptions** (`shopify_sync.py:67`)
 `retry_if_exception_type((httpx.HTTPError, Exception))` retries on auth failures, parse errors, and data bugs. Wastes calls; can contribute to rate-limit lockout. Drop `Exception`.
 Trigger: next Shopify sync investigation or any `tenacity` library change.
+
+**SEC-26 — Misleading 403 wording on orphan attachment access** (`backend/routers/attachments.py` download handler)
+The SEC-10 designer-access check returns 403 "Not assigned to this order" when the parent order has been deleted but the attachment row + file still exist. For a designer the wording is wrong (the order doesn't exist; it's not an authorization failure), and for owner/manager the orphan is still served. Risk is cosmetic + low data-exposure — the actual remediation depends on whether `Attachment.order_id` has a cascading delete in the SQLAlchemy model. Surfaced during Phase 2.2 SEC-10 review.
+Trigger: any attachment-cleanup work, OR a user report about confusing 403s after order deletion. Fix sketch: check order existence first and return 404 if missing; orphan cleanup belongs in a separate maintenance task.
+
+**SEC-27 — Zero-byte uploads silently accepted** (`backend/services/file_storage.py:save_file`)
+The streaming save loop exits immediately on an empty `UploadFile` (the `while content := await ...read(...)` walrus stops on `b""`), creating a 0-byte file on disk and a DB row with `file_size=0`. No minimum-size check exists. Surfaced during Phase 2.2 SEC-08 review.
+Trigger: free cycle, OR a user report of "blank attachment" rows. Fix: reject `file_size == 0` in the upload handler with 400, OR enforce in `save_file` and return a typed error like `FileTooLargeError`.
 
 **SEC-18** — Resolved by H4 in the 2026-04-24 pass (`CreateTTNRequest` schema now matches the handler). Included for audit completeness.
 
