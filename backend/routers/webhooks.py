@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request, Header, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from constants import SYSTEM_USER_ID
 from database import get_db
 from models.shop import Shop, ShopPlatform
 from services.encryption_service import decrypt_value
@@ -62,12 +63,12 @@ async def shopify_webhook(
     data = json.loads(body)
     external_id = str(data.get("id"))
     
-    # We need a "system user" for order creation audit
-    # Let's find the owner or use a dummy system user
-    user_result = await db.execute(select(User).limit(1))
+    # System user for the audit trail (SEC-04). Installed by alembic
+    # migration a1b2c3d4e5f6 — if missing, the deployment is misconfigured.
+    user_result = await db.execute(select(User).where(User.id == SYSTEM_USER_ID))
     system_user = user_result.scalar_one_or_none()
     if system_user is None:
-        logger.error("Cannot process webhook: no users exist in database")
+        logger.error("Cannot process webhook: system user %s not found", SYSTEM_USER_ID)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="System misconfigured")
 
     if x_shopify_topic == "orders/create" or x_shopify_topic == "orders/updated":
