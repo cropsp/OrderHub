@@ -86,7 +86,13 @@ async def seed():
             color="#6366F1",
             shopify_store_url="https://my-leather-shop.myshopify.com",
         )
-        session.add_all([shop_lc, shop_lm, shop_sf])
+        shop_kk = Shop(
+            id=uuid.uuid4(),
+            name="KoraKlenu",
+            platform=ShopPlatform.MANUAL,
+            color="#10B981",
+        )
+        session.add_all([shop_lc, shop_lm, shop_sf, shop_kk])
 
         # ─── Customers ────────────────────────────────────────
         customers_data = [
@@ -222,7 +228,7 @@ async def seed():
             session.add(history)
 
         await session.commit()
-        print(f"✅ Seed complete: 3 users, 3 shops, {len(orders_spec)} orders")
+        print(f"✅ Seed complete: 3 users, 4 shops, {len(orders_spec)} orders")
 
 
 async def main():
