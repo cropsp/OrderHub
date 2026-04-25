@@ -6,6 +6,7 @@ Access tokens: 15 min. Refresh tokens: 30 days (httpOnly cookie).
 Refresh tokens use a separate signing key for cryptographic isolation.
 """
 
+import logging
 import secrets
 import string
 import uuid
@@ -19,12 +20,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import get_settings
 from models.user import User
 
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ALGORITHM = "HS256"
-REFRESH_SECRET_KEY = settings.SECRET_KEY + "-refresh"
+
+if settings.REFRESH_SECRET_KEY:
+    REFRESH_SECRET_KEY = settings.REFRESH_SECRET_KEY
+else:
+    REFRESH_SECRET_KEY = settings.SECRET_KEY + "-refresh"
+    logger.warning(
+        "REFRESH_SECRET_KEY is not set; deriving from SECRET_KEY for "
+        "backward-compat. See SEC-01 — set REFRESH_SECRET_KEY in .env to "
+        "an independent value (rotates all current refresh tokens)."
+    )
 
 
 def hash_password(password: str) -> str:

@@ -30,6 +30,10 @@ class Settings(BaseSettings):
         "change-me-generate-a-real-fernet-key",
         validation_alias=AliasChoices('ENCRYPTION_KEY', 'FERNET_KEY')
     )
+    # Optional independent refresh-token signing key. If unset, auth_service
+    # falls back to deriving from SECRET_KEY (preserves existing tokens on
+    # rollout). See SEC-01 in audit_artifacts/SECURITY_REPORT.md.
+    REFRESH_SECRET_KEY: str | None = None
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
