@@ -68,9 +68,13 @@ async def get_shop_for_user(
 ):
     """
     Fetch a shop and verify the current user has access to it.
-    Currently assumes any active user can access any shop (to be refined if multiple tenants added).
+
+    Owner/manager: access to any shop. Designer: only shops where they have at
+    least one assigned order. A designer with zero assignments gets 403 on every
+    shop-scoped endpoint — see CLAUDE.md Gotchas (SEC-05).
     """
     from models.shop import Shop
+    from models.order import Order
     from sqlalchemy import select
 
     result = await db.execute(select(Shop).filter(Shop.id == shop_id))
@@ -82,9 +86,18 @@ async def get_shop_for_user(
             detail="Shop not found",
         )
 
-    # Ownership check: shop.owner_id should match current_user.id or user must be ADMIN/OWNER
-    # For now, we trust get_current_user and check if shop exists.
-    # TODO: Implement strict multi-tenant ownership check if needed.
+    if current_user.role == UserRole.DESIGNER:
+        assignment = await db.execute(
+            select(Order.id)
+            .where(Order.shop_id == shop_id)
+            .where(Order.assigned_designer_id == current_user.id)
+            .limit(1)
+        )
+        if assignment.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not assigned to this shop",
+            )
 
     return shop
 
