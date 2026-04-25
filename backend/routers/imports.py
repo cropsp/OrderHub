@@ -49,5 +49,7 @@ async def import_etsy_orders(
         return import_result
     except Exception as e:
         await db.rollback()
+        # CSV parse/validation errors carry actionable per-row context (e.g. "Row 5: missing 'Sale Date'");
+        # surface them to the user verbatim. Internal traceback still goes to logs.
         logger.error(f"[IMPORTS] Etsy import failed for shop {shop_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to import CSV. Please verify the file and try again.")
+        raise HTTPException(status_code=500, detail=f"Failed to import: {str(e)}")

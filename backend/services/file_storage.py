@@ -12,7 +12,7 @@ from config import get_settings
 settings = get_settings()
 UPLOADS_DIR = Path(settings.UPLOADS_DIR)
 
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB — designer source bundles (.psd/.ai/.zip) routinely 30-80 MB
 
 
 class FileTooLargeError(Exception):

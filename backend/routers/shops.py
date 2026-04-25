@@ -199,5 +199,7 @@ async def manual_sync_shop(
         count = await sync_shop_orders(db, shop, current_user)
         return {"status": "success", "synced_count": count}
     except Exception as e:
+        # Shopify import errors (auth failure, rate-limit, malformed payload) are actionable
+        # for the operator triggering the sync; surface them. Traceback still goes to logs.
         logger.error(f"[SHOPS] Manual sync failed for shop {shop_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Manual sync failed")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Manual sync failed: {str(e)}")
