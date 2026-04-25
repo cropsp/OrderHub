@@ -65,9 +65,10 @@ The hot files (OrderDetailPanel, DetailLogistics, OrdersLayout, App, DashboardPa
 
 ## MEDIUM Priority
 
-### M9. `tenacity` missing from `backend/requirements.txt` — scheduler import would crash on a clean rebuild
+### M9. `tenacity` missing from `backend/requirements.txt` — scheduler import would crash on a clean rebuild ✅ DONE (2026-04-25)
 
 - `services/shopify_sync.py:11` imports `tenacity`, but the package is not declared. Surfaced 2026-04-25 (Session 4) when running pytest in a freshly built backend image — collection failed with `ModuleNotFoundError: No module named 'tenacity'`. Fix: add `tenacity==X.Y` next to `apscheduler` in `requirements.txt`. Trigger: any image rebuild from a clean state, or any CI pipeline that installs from `requirements.txt`.
+- **Resolution**: Added `tenacity==9.1.4` to `backend/requirements.txt`.
 
 ### M10. `routers/__init__.py` chains every router import — fans out transitive dependencies into any test that imports `routers.*`
 
