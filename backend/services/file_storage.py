@@ -12,31 +12,52 @@ from config import get_settings
 settings = get_settings()
 UPLOADS_DIR = Path(settings.UPLOADS_DIR)
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
-async def save_file(upload_file: UploadFile, order_id: uuid.UUID) -> tuple[str, int]:
+
+class FileTooLargeError(Exception):
+    """Raised when an uploaded file exceeds the configured size limit."""
+
+
+async def save_file(
+    upload_file: UploadFile,
+    order_id: uuid.UUID,
+    max_size: int = MAX_UPLOAD_BYTES,
+) -> tuple[str, int]:
     """
-    Saves an uploaded file to disk.
+    Saves an uploaded file to disk, enforcing ``max_size`` while streaming.
+    Raises ``FileTooLargeError`` (and removes any partial file) if exceeded.
     Returns: (relative_file_path, file_size_in_bytes)
     """
     # Create directory for the order if it doesn't exist
     order_dir = UPLOADS_DIR / str(order_id)
     order_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Generate unique filename to avoid collisions and path traversal
     base_name = os.path.basename(upload_file.filename) if upload_file.filename else "unknown"
     safe_filename = f"{uuid.uuid4()}_{base_name}"
     file_path = order_dir / safe_filename
-    
+
     # Relative path to store in DB
     relative_path = str(Path(str(order_id)) / safe_filename)
-    
+
     file_size = 0
-    # Save file asynchronously
-    async with aiofiles.open(file_path, 'wb') as out_file:
-        while content := await upload_file.read(1024 * 1024):  # 1MB chunks
-            await out_file.write(content)
-            file_size += len(content)
-            
+    try:
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            while content := await upload_file.read(1024 * 1024):  # 1MB chunks
+                file_size += len(content)
+                if file_size > max_size:
+                    raise FileTooLargeError(
+                        f"upload exceeds maximum size of {max_size} bytes"
+                    )
+                await out_file.write(content)
+    except FileTooLargeError:
+        try:
+            file_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
     return relative_path, file_size
 
 

@@ -15,7 +15,13 @@ from models.order import Order
 from models.attachment import Attachment, AttachmentType
 from schemas.attachment import AttachmentResponse
 from routers.dependencies import get_current_user, require_role
-from services.file_storage import save_file, get_absolute_path, delete_file
+from services.file_storage import (
+    FileTooLargeError,
+    MAX_UPLOAD_BYTES,
+    delete_file,
+    get_absolute_path,
+    save_file,
+)
 
 logger = get_logger("routers.attachments")
 
@@ -45,6 +51,11 @@ async def upload_attachment(
     # Save file
     try:
         relative_path, file_size = await save_file(file, order_id)
+    except FileTooLargeError:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds maximum size of {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
     except Exception as e:
         logger.error(f"[ATTACHMENTS] Failed to save upload for order {order_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save attachment")
@@ -119,7 +130,8 @@ async def download_attachment(
     return FileResponse(
         path=abs_path,
         filename=attachment.file_name,
-        media_type=attachment.mime_type
+        media_type=attachment.mime_type,
+        content_disposition_type="attachment",
     )
 
 
