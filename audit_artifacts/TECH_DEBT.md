@@ -65,6 +65,14 @@ The hot files (OrderDetailPanel, DetailLogistics, OrdersLayout, App, DashboardPa
 
 ## MEDIUM Priority
 
+### M9. `tenacity` missing from `backend/requirements.txt` — scheduler import would crash on a clean rebuild
+
+- `services/shopify_sync.py:11` imports `tenacity`, but the package is not declared. Surfaced 2026-04-25 (Session 4) when running pytest in a freshly built backend image — collection failed with `ModuleNotFoundError: No module named 'tenacity'`. Fix: add `tenacity==X.Y` next to `apscheduler` in `requirements.txt`. Trigger: any image rebuild from a clean state, or any CI pipeline that installs from `requirements.txt`.
+
+### M10. `routers/__init__.py` chains every router import — fans out transitive dependencies into any test that imports `routers.*`
+
+- The package's `__init__.py` re-exports all router modules, so `from routers.dependencies import X` triggers the entire router tree (and thus every transitive dep, including `tenacity`, `mcp`, `apscheduler`). Surfaced 2026-04-25 (Session 4) — `tests/test_designer_shop_scoping.py` collection imported the whole tree just to reach one helper. Fix: drop the eager re-exports in `routers/__init__.py` and have `main.py` import each router module by name. Trigger: when adding more backend tests, or alongside M9.
+
 ### M1. 45 unused-import errors in backend (ruff F401)
 
 - **Pattern**: Every router file has 1–3 dead imports. Particularly bad: `routers/webhooks.py` (3 dead imports — `ShopPlatform`, `call_shopify_graphql`, `update_order`), `routers/shipping.py` (4 dead imports including `List`, `status`, `Order`), `services/parcel_calculator.py` (4 dead `typing` imports + `math` + `OrderItem`).
