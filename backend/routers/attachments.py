@@ -101,11 +101,17 @@ async def download_attachment(
     
     if not attachment:
         raise HTTPException(status_code=404, detail="Attachment not found")
-        
+
+    if current_user.role == UserRole.DESIGNER:
+        order_result = await db.execute(select(Order).where(Order.id == attachment.order_id))
+        order = order_result.scalar_one_or_none()
+        if not order or order.assigned_designer_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not assigned to this order")
+
     abs_path = get_absolute_path(attachment.file_path)
     if not abs_path:
         raise HTTPException(status_code=404, detail="File content not found on disk")
-        
+
     return FileResponse(
         path=abs_path,
         filename=attachment.file_name,
