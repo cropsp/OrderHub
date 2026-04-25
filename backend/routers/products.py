@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.shop import ShopPlatform
-from routers.dependencies import get_current_user, get_shop_for_user, require_platform
+from models.user import UserRole
+from routers.dependencies import get_current_user, get_shop_for_user, require_platform, require_role
 from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
 from services.catalog_service import CatalogService
@@ -68,7 +69,7 @@ async def update_product(
     id: uuid.UUID,
     schema: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user)
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER))
 ):
     """Update product details."""
     service = CatalogService(db)
@@ -82,7 +83,7 @@ async def update_product(
 async def delete_product(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(get_current_user)
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER))
 ):
     """Soft-delete a product."""
     service = CatalogService(db)
