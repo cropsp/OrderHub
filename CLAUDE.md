@@ -109,3 +109,4 @@ Performance: route-level chunk splitting (frontend). Testing: smoke tests with V
 - `CreateOrderPage.tsx` is a full-page form, not a modal — this was a deliberate UX decision.
 - MCP server development is paused — do not modify `backend/routers/mcp.py` unless explicitly asked. See `docs/integrations/mcp-server.md` for context.
 - Designer shop access (SEC-05): a designer is granted access to a shop only if they have at least one order in that shop assigned to them. A designer with zero assignments gets 403 on every shop-scoped endpoint — onboarding must assign at least one order before the designer can use the system.
+- Designer access is shop-scoped, not order-scoped: a designer with any assigned order in shop X can access all shop-level endpoints (products, packaging, config) for that shop. Fine-grained order-level checks only apply in orders and attachments routers.
