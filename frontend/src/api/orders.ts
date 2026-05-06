@@ -1,5 +1,6 @@
 import client from './client'
 
+import type { OrderItem } from '@/types/common'
 import type { OrderListFilters, OrderListItem, OrderListResponse } from '@/types/order'
 
 export const ordersApi = {
@@ -26,5 +27,37 @@ export const ordersApi = {
   create: async (payload: any): Promise<OrderListItem> => {
     const { data } = await client.post<OrderListItem>('/orders', payload)
     return data
+  },
+
+  addItem: async (
+    orderId: string,
+    payload: {
+      title: string
+      quantity: number
+      unit_price: number
+      product_variant_id?: string
+      sku?: string
+      variations?: string
+    },
+  ): Promise<OrderItem> => {
+    const { data } = await client.post<OrderItem>(`/orders/${orderId}/items`, payload)
+    return data
+  },
+
+  updateItem: async (
+    itemId: string,
+    payload: {
+      title?: string
+      quantity?: number
+      unit_price?: number
+      product_variant_id?: string
+    },
+  ): Promise<OrderItem> => {
+    const { data } = await client.patch<OrderItem>(`/orders/items/${itemId}`, payload)
+    return data
+  },
+
+  deleteItem: async (itemId: string): Promise<void> => {
+    await client.delete(`/orders/items/${itemId}`)
   },
 };

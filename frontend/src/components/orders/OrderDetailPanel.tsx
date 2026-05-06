@@ -27,12 +27,16 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
     order,
     isLoading,
     isOwner,
+    isManager,
     canManageShipping,
     saveStatus,
     handleUpdate,
     handleStatusChange,
     handleGenerateTTN,
     handleDeleteTTN,
+    handleAddItem,
+    handleUpdateItem,
+    handleDeleteItem,
     isTTNPending,
   } = useOrderDetailController(orderId);
 
@@ -71,7 +75,13 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                 {/* LEFT COLUMN: Primary Content */}
                 <div className="space-y-6 min-w-0">
                   {/* 1. PRODUCT INVENTORY */}
-                  <DetailItems order={order} />
+                  <DetailItems
+                    order={order}
+                    isEditable={isOwner || isManager}
+                    onAddItem={handleAddItem}
+                    onUpdateItem={handleUpdateItem}
+                    onDeleteItem={handleDeleteItem}
+                  />
 
                   {/* 2. CUSTOMIZATION INFO */}
                   <DetailCustomizationInfo

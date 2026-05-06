@@ -64,3 +64,64 @@ export function useCreateOrder() {
     },
   })
 }
+
+type AddItemVars = {
+  orderId: string
+  title: string
+  quantity: number
+  unit_price: number
+  product_variant_id?: string
+  sku?: string
+  variations?: string
+}
+
+export function useAddOrderItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ orderId, ...payload }: AddItemVars) => ordersApi.addItem(orderId, payload),
+    onSuccess: (_, { orderId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+    },
+  })
+}
+
+type UpdateItemVars = {
+  orderId: string
+  itemId: string
+  title?: string
+  quantity?: number
+  unit_price?: number
+  product_variant_id?: string
+}
+
+export function useUpdateOrderItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: UpdateItemVars) =>
+      ordersApi.updateItem(vars.itemId, {
+        title: vars.title,
+        quantity: vars.quantity,
+        unit_price: vars.unit_price,
+        product_variant_id: vars.product_variant_id,
+      }),
+    onSuccess: (_, { orderId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+    },
+  })
+}
+
+export function useDeleteOrderItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ itemId }: { orderId: string; itemId: string }) => ordersApi.deleteItem(itemId),
+    onSuccess: (_, { orderId }) => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+    },
+  })
+}

@@ -37,6 +37,7 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
     order,
     isLoading,
     isOwner,
+    isManager,
     canManageShipping,
     saveStatus,
     handleUpdate,
@@ -44,6 +45,9 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
     handleGenerateTTN,
     handleDeleteTTN,
     isTTNPending,
+    handleAddItem,
+    handleUpdateItem,
+    handleDeleteItem,
   } = useOrderDetailController(orderId);
 
   if (isLoading || !order) {
@@ -75,7 +79,13 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
           {/* LEFT COLUMN: Production Workflow */}
           <div className="space-y-3 min-w-0">
             {/* PRODUCT INVENTORY */}
-            <DetailItems order={order} />
+            <DetailItems
+              order={order}
+              isEditable={isOwner || isManager}
+              onAddItem={handleAddItem}
+              onUpdateItem={handleUpdateItem}
+              onDeleteItem={handleDeleteItem}
+            />
 
             {/* CUSTOMIZATION INFO */}
             <DetailCustomizationInfo

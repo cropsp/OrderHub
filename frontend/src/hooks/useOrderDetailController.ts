@@ -1,7 +1,14 @@
 import { useState } from 'react';
 
 import { useAuth } from '@/hooks/useAuth';
-import { useOrder, useUpdateOrder, useUpdateOrderStatus } from '@/hooks/useOrders';
+import {
+  useAddOrderItem,
+  useDeleteOrderItem,
+  useOrder,
+  useUpdateOrder,
+  useUpdateOrderItem,
+  useUpdateOrderStatus,
+} from '@/hooks/useOrders';
 import { useCreateTTN, useDeleteTTN } from '@/hooks/useShipping';
 import { useToastStore } from '@/components/ui/Toast';
 import type { OrderDetail } from '@/types/order';
@@ -26,6 +33,9 @@ export function useOrderDetailController(orderId: string | null) {
   const { user } = useAuth();
   const updateOrder = useUpdateOrder();
   const updateStatus = useUpdateOrderStatus();
+  const addItem = useAddOrderItem();
+  const updateItem = useUpdateOrderItem();
+  const deleteItem = useDeleteOrderItem();
   const createTTN = useCreateTTN();
   const deleteTTN = useDeleteTTN();
   const { addToast } = useToastStore();
@@ -79,6 +89,49 @@ export function useOrderDetailController(orderId: string | null) {
     deleteTTN.mutate(order.id);
   };
 
+  const handleAddItem = async (payload: {
+    title: string;
+    quantity: number;
+    unit_price: number;
+    product_variant_id?: string;
+  }) => {
+    if (!order) return;
+    try {
+      await addItem.mutateAsync({ orderId: order.id, ...payload });
+    } catch (err) {
+      addToast('Failed to add item', 'error');
+      throw err;
+    }
+  };
+
+  const handleUpdateItem = async (
+    itemId: string,
+    payload: {
+      title?: string;
+      quantity?: number;
+      unit_price?: number;
+      product_variant_id?: string;
+    },
+  ) => {
+    if (!order) return;
+    try {
+      await updateItem.mutateAsync({ orderId: order.id, itemId, ...payload });
+    } catch (err) {
+      addToast('Failed to update item', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteItem = async (itemId: string) => {
+    if (!order) return;
+    try {
+      await deleteItem.mutateAsync({ orderId: order.id, itemId });
+    } catch (err) {
+      addToast('Failed to delete item', 'error');
+      throw err;
+    }
+  };
+
   return {
     order,
     isLoading,
@@ -91,6 +144,9 @@ export function useOrderDetailController(orderId: string | null) {
     handleStatusChange,
     handleGenerateTTN,
     handleDeleteTTN,
+    handleAddItem,
+    handleUpdateItem,
+    handleDeleteItem,
     isTTNPending: createTTN.isPending || deleteTTN.isPending,
   };
 }
