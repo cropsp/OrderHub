@@ -25,6 +25,9 @@ export interface ProductVariant {
   length_mm: number;
   width_mm: number;
   height_mm: number;
+  price: number | string | null;
+  cost_price: number | string | null;
+  stock_quantity: number;
   is_active: boolean;
   volume_cm3?: number;
 }

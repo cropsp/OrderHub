@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2, Box, Scale, Maximize2 } from 'lucide-react'
+import { Plus, Trash2, Box, Scale, Maximize2, DollarSign, Package, TrendingUp } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -30,6 +30,22 @@ const EMPTY_VARIANT = {
   length_mm: 0,
   width_mm: 0,
   height_mm: 0,
+  price: '',
+  cost_price: '',
+  stock_quantity: 0,
+}
+
+const calcMargin = (price: number | string | null, cost: number | string | null): number | null => {
+  const p = typeof price === 'number' ? price : parseFloat(price ?? '')
+  const c = typeof cost === 'number' ? cost : parseFloat(cost ?? '')
+  if (!isFinite(p) || !isFinite(c) || p <= 0 || c <= 0) return null
+  return ((p - c) / p) * 100
+}
+
+const marginClasses = (m: number) => {
+  if (m >= 30) return 'bg-emerald-500/5 border-emerald-500/10 text-emerald-400'
+  if (m >= 10) return 'bg-amber-500/5 border-amber-500/10 text-amber-400'
+  return 'bg-red-500/5 border-red-500/10 text-red-400'
 }
 
 export default function ProductForm({
@@ -89,7 +105,13 @@ export default function ProductForm({
     }
 
     try {
-      await onSave({ title, description, variants })
+      const cleanedVariants = (variants as Array<Record<string, unknown>>).map((v) => ({
+        ...v,
+        price: v.price === '' || v.price === null || v.price === undefined ? null : parseFloat(String(v.price)),
+        cost_price: v.cost_price === '' || v.cost_price === null || v.cost_price === undefined ? null : parseFloat(String(v.cost_price)),
+        stock_quantity: parseInt(String(v.stock_quantity ?? 0), 10) || 0,
+      }))
+      await onSave({ title, description, variants: cleanedVariants })
       onClose()
     } catch (err: any) {
       // TODO: SEC-07 — backend now returns generic detail; reconsider message extraction.
@@ -240,11 +262,67 @@ export default function ProductForm({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 px-1">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                          <DollarSign className="size-3" />
+                          <p className="text-[10px] font-bold uppercase tracking-widest">Price</p>
+                        </div>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="border-zinc-800 bg-zinc-900/50"
+                          placeholder="0.00"
+                          value={v.price}
+                          onChange={e => updateVariant(i, 'price', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                          <DollarSign className="size-3" />
+                          <p className="text-[10px] font-bold uppercase tracking-widest">Cost Price</p>
+                        </div>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          className="border-zinc-800 bg-zinc-900/50"
+                          placeholder="0.00"
+                          value={v.cost_price}
+                          onChange={e => updateVariant(i, 'cost_price', e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                          <Package className="size-3" />
+                          <p className="text-[10px] font-bold uppercase tracking-widest">Stock Qty</p>
+                        </div>
+                        <Input
+                          type="number"
+                          min="0"
+                          className="border-zinc-800 bg-zinc-900/50"
+                          value={v.stock_quantity}
+                          onChange={e => updateVariant(i, 'stock_quantity', parseInt(e.target.value) || 0)}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 px-1 flex-wrap">
                       <div className="flex items-center gap-2 bg-teal-500/5 border border-teal-500/10 rounded-full px-3 py-1">
                          <Box className="size-3 text-teal-400" />
                          <span className="text-[10px] font-bold text-teal-400 uppercase tracking-widest">Volume: {calculateVolume(v)} cm³</span>
                       </div>
+                      {(() => {
+                        const m = calcMargin(v.price, v.cost_price)
+                        if (m === null) return null
+                        return (
+                          <div className={cn('flex items-center gap-2 border rounded-full px-3 py-1', marginClasses(m))}>
+                            <TrendingUp className="size-3" />
+                            <span className="text-[10px] font-bold uppercase tracking-widest">Margin: {m.toFixed(1)}%</span>
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
                 ))}

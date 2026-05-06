@@ -94,7 +94,51 @@ frontend/src/
 
 ## Unified Backlog (Pending Tasks & Fixes)
 
-### A. Production & Deployment
+### A. Product Catalog — Enhancement Sprints
+
+**Sprint PC-A — Foundation: Pricing, Cost & Stock** (Status: `NOT STARTED`)
+
+Goal: Add price, cost_price, and stock_quantity to ProductVariant. Update form and list view.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PC-A-1 | Alembic migration: add `price`, `cost_price`, `stock_quantity` to `product_variants` | backend/DB | TODO |
+| PC-A-2 | Update `ProductVariant` model + Pydantic schemas (Create/Read/Update) | backend | TODO |
+| PC-A-3 | Add price, cost_price, stock_quantity fields to `ProductForm.tsx` per variant | frontend | TODO |
+| PC-A-4 | Update products list: add Price Range, Stock, Status badge columns | frontend | TODO |
+| PC-A-5 | Update `ProductsPage.tsx`: show archived filter tab | frontend | TODO |
+
+**Sprint PC-B — Product Detail Page** (Status: `NOT STARTED`)
+
+Goal: Replace modal-only flow with a full-page product view at `/products/:id`.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PC-B-1 | New route `/products/:id` + `ProductDetailPage.tsx` | frontend | TODO |
+| PC-B-2 | Detail page header: title, shop badge, status, Archive/Restore + Edit buttons | frontend | TODO |
+| PC-B-3 | Variants table: all fields incl. price, cost, stock, volume, margin % per variant | frontend | TODO |
+| PC-B-4 | Row click in `ProductsPage.tsx` navigates to detail page (replaces modal trigger) | frontend | TODO |
+| PC-B-5 | Archive/Restore backend endpoint (PATCH `is_active`) if not already exposed | backend | TODO |
+
+**Sprint PC-C — Sales Analytics per Product** (Status: `NOT STARTED`)
+
+Goal: Show order history and sales stats per product variant on the detail page.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PC-C-1 | Backend: extend GET `/products/{id}` response with per-variant stats (orders_count, units_sold, last_order_date) | backend | TODO |
+| PC-C-2 | Frontend: Sales Analytics section on `ProductDetailPage.tsx` | frontend | TODO |
+| PC-C-3 | Show: total orders, units sold, revenue, last sale date per variant | frontend | TODO |
+
+**Future (not scheduled)**
+
+| ID | Task | Notes |
+|---|---|---|
+| PC-F-1 | Product photos | Requires new file upload infrastructure per product. Deferred. |
+
+---
+
+### B. Production & Deployment
 
 **Sprint 11 — Production & Deployment** (Status: `NOT STARTED`)
 

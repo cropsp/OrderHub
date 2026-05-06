@@ -4,9 +4,10 @@ OrderHub CRM — Product and ProductVariant Models
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, List
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
 
@@ -65,7 +66,12 @@ class ProductVariant(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     length_mm: Mapped[int] = mapped_column(Integer, nullable=False)
     width_mm: Mapped[int] = mapped_column(Integer, nullable=False)
     height_mm: Mapped[int] = mapped_column(Integer, nullable=False)
-    
+
+    # Pricing & stock
+    price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    cost_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2), nullable=True)
+    stock_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     # Relationships

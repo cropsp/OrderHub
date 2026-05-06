@@ -46,6 +46,9 @@ class CatalogService:
                 length_mm=v_schema.length_mm,
                 width_mm=v_schema.width_mm,
                 height_mm=v_schema.height_mm,
+                price=v_schema.price,
+                cost_price=v_schema.cost_price,
+                stock_quantity=v_schema.stock_quantity,
                 is_active=v_schema.is_active
             )
             self.db.add(variant)
@@ -63,14 +66,32 @@ class CatalogService:
         product = await self.get_product(product_id)
         if not product:
             return None
-        
+
         update_data = schema.model_dump(exclude_unset=True)
+
+        # Extract variants before setting product-level fields
+        variant_patches = update_data.pop('variants', None)
+
         for key, value in update_data.items():
             setattr(product, key, value)
-        
+
+        # Apply variant patches when provided (form edit flow)
+        if variant_patches:
+            for v_data in variant_patches:
+                v_id = v_data.get('id')
+                if not v_id:
+                    continue
+                variant = await self.db.get(ProductVariant, v_id)
+                if variant is None or variant.product_id != product_id:
+                    continue
+                for key, value in v_data.items():
+                    if key == 'id':
+                        continue
+                    setattr(variant, key, value)
+
         await self.db.commit()
-        await self.db.refresh(product)
-        return product
+        # Re-fetch via get_product to ensure variants are loaded via selectinload
+        return await self.get_product(product_id)
 
     async def soft_delete_product(self, product_id: uuid.UUID):
         product = await self.get_product(product_id)

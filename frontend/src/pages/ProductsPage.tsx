@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers } from 'lucide-react'
+import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers, Archive, CheckCircle2 } from 'lucide-react'
 import ShellPage from './ShellPage'
 import ShopSelector from '@/components/inventory/ShopSelector'
 import ProductForm from '@/components/inventory/ProductForm'
@@ -19,6 +19,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { ProductVariant } from '@/types/inventory'
 
 
 export default function ProductsPage() {
@@ -27,8 +28,9 @@ export default function ProductsPage() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
+  const [viewMode, setViewMode] = useState<'active' | 'archived'>('active')
 
-  const { data: products, isLoading } = useProducts(selectedShopId || '')
+  const { data: products, isLoading } = useProducts(selectedShopId || '', viewMode === 'active')
   const createProduct = useCreateProduct()
   const updateProduct = useUpdateProduct()
   const deleteProduct = useDeleteProduct()
@@ -60,6 +62,29 @@ export default function ProductsPage() {
     const min = Math.min(...weights)
     const max = Math.max(...weights)
     return min === max ? `${min}g` : `${min}g - ${max}g`
+  }
+
+  const getPriceRange = (variants: ProductVariant[]) => {
+    if (!variants?.length) return '—'
+    const prices = variants
+      .map(v => (v.price === null || v.price === undefined || v.price === '' ? null : Number(v.price)))
+      .filter((p): p is number => p !== null && isFinite(p))
+    if (!prices.length) return '—'
+    const min = Math.min(...prices)
+    const max = Math.max(...prices)
+    const fmt = (n: number) => `$${n.toFixed(2)}`
+    return min === max ? fmt(min) : `${fmt(min)} – ${fmt(max)}`
+  }
+
+  const getTotalStock = (variants: ProductVariant[]) => {
+    if (!variants?.length) return 0
+    return variants.reduce((acc, v) => acc + (Number(v.stock_quantity) || 0), 0)
+  }
+
+  const stockColorClass = (qty: number) => {
+    if (qty === 0) return 'text-red-400'
+    if (qty < 5) return 'text-amber-400'
+    return 'text-emerald-400'
   }
 
   return (
@@ -107,6 +132,34 @@ export default function ProductsPage() {
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Status tabs */}
+            <div className="flex items-center gap-1 border-b border-zinc-800/60">
+              <button
+                type="button"
+                onClick={() => setViewMode('active')}
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-widest border-b-2 transition-colors ${
+                  viewMode === 'active'
+                    ? 'border-teal-500 text-zinc-100'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <CheckCircle2 className="size-3.5" />
+                Active
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('archived')}
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-widest border-b-2 transition-colors ${
+                  viewMode === 'archived'
+                    ? 'border-teal-500 text-zinc-100'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Archive className="size-3.5" />
+                Archived
+              </button>
+            </div>
+
             {/* Search & Stats */}
             <div className="flex items-center justify-between gap-4">
                <div className="relative flex-1 max-w-md">
@@ -140,6 +193,9 @@ export default function ProductsPage() {
                       <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Variants</TableHead>
                       <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">SKUs</TableHead>
                       <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight Range</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Price Range</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Status</TableHead>
                       <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -151,12 +207,15 @@ export default function ProductsPage() {
                           <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>
                           <TableCell><Skeleton className="h-5 w-32 bg-zinc-800" /></TableCell>
                           <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>
+                          <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>
+                          <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>
+                          <TableCell><Skeleton className="h-5 w-16 bg-zinc-800" /></TableCell>
                           <TableCell className="px-8 py-6"><Skeleton className="h-5 w-16 ml-auto bg-zinc-800" /></TableCell>
                         </TableRow>
                       ))
                     ) : filteredProducts.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="h-60 text-center">
+                        <TableCell colSpan={8} className="h-60 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <Package className="size-10 text-zinc-800" />
                             <p className="text-sm text-zinc-500 italic">No products found matching your search.</p>
@@ -191,6 +250,30 @@ export default function ProductsPage() {
                           </TableCell>
                           <TableCell className="text-xs text-zinc-400 font-medium">
                             {getWeightRange(product.variants)}
+                          </TableCell>
+                          <TableCell className="text-xs text-zinc-300 font-mono">
+                            {getPriceRange(product.variants)}
+                          </TableCell>
+                          <TableCell>
+                            {(() => {
+                              const qty = getTotalStock(product.variants)
+                              return (
+                                <span className={`text-xs font-bold font-mono ${stockColorClass(qty)}`}>
+                                  {qty}
+                                </span>
+                              )
+                            })()}
+                          </TableCell>
+                          <TableCell>
+                            {product.is_active ? (
+                              <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
+                                Active
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                                Archived
+                              </Badge>
+                            )}
                           </TableCell>
                           <TableCell className="px-8 py-6 text-right">
                             <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
