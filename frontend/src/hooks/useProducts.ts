@@ -12,6 +12,14 @@ export function useProducts(shopId: string, isActive: boolean = true) {
   })
 }
 
+export function useProduct(id: string | undefined) {
+  return useQuery({
+    queryKey: ['product', id],
+    queryFn: () => productsApi.getProduct(id as string),
+    enabled: !!id,
+  })
+}
+
 export function useCreateProduct() {
   const queryClient = useQueryClient()
   const addToast = useToastStore(s => s.addToast)
@@ -38,6 +46,7 @@ export function useUpdateProduct() {
       productsApi.updateProduct(id, data),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['products', variables.shopId] })
+      queryClient.invalidateQueries({ queryKey: ['product', variables.id] })
       addToast('Product updated successfully', 'success')
     },
     onError: (error) => {

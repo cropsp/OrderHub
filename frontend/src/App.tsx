@@ -17,6 +17,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
 const OrderDetailPage = lazy(() => import('@/pages/OrderDetailPage'))
 const CreateOrderPage = lazy(() => import('@/pages/CreateOrderPage'))
 const ProductsPage = lazy(() => import('@/pages/ProductsPage'))
+const ProductDetailPage = lazy(() => import('@/pages/ProductDetailPage'))
 const PackagingPage = lazy(() => import('@/pages/PackagingPage'))
 
 function RouteLoadingFallback() {
@@ -86,6 +87,14 @@ function App() {
             </Suspense>
           }
           path="/settings"
+        />
+        <Route
+          element={
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <ProductDetailPage />
+            </Suspense>
+          }
+          path="/products/:id"
         />
 
         <Route element={<RequireRole allowedRoles={[UserRole.OWNER, UserRole.MANAGER]} />}>

@@ -40,3 +40,35 @@ export interface Product {
   is_active: boolean;
   variants: ProductVariant[];
 }
+
+export type ProductRead = Product;
+
+export interface ProductVariantCreate {
+  sku?: string | null;
+  variant_name?: string | null;
+  weight_g: number;
+  length_mm: number;
+  width_mm: number;
+  height_mm: number;
+  price?: number | string | null;
+  cost_price?: number | string | null;
+  stock_quantity?: number;
+  is_active?: boolean;
+}
+
+export interface ProductVariantPatch extends Partial<ProductVariantCreate> {
+  id?: string;
+}
+
+export interface ProductCreate {
+  title: string;
+  description?: string | null;
+  variants: ProductVariantCreate[];
+}
+
+export interface ProductUpdate {
+  title?: string;
+  description?: string | null;
+  is_active?: boolean;
+  variants?: ProductVariantPatch[];
+}

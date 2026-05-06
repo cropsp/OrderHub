@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers, Archive, CheckCircle2 } from 'lucide-react'
 import ShellPage from './ShellPage'
 import ShopSelector from '@/components/inventory/ShopSelector'
@@ -23,6 +24,7 @@ import type { ProductVariant } from '@/types/inventory'
 
 
 export default function ProductsPage() {
+  const navigate = useNavigate()
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -224,7 +226,11 @@ export default function ProductsPage() {
                       </TableRow>
                     ) : (
                       filteredProducts.map((product) => (
-                        <TableRow key={product.id} className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group">
+                        <TableRow
+                          key={product.id}
+                          onClick={() => navigate(`/products/${product.id}`)}
+                          className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group cursor-pointer"
+                        >
                           <TableCell className="px-8 py-6">
                             <div className="flex flex-col gap-1">
                                <p className="text-sm font-bold text-zinc-100 tracking-tight">{product.title}</p>
@@ -277,19 +283,19 @@ export default function ProductsPage() {
                           </TableCell>
                           <TableCell className="px-8 py-6 text-right">
                             <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] rounded-xl"
-                                onClick={() => { setEditingProduct(product); setIsFormOpen(true); }}
+                                onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setIsFormOpen(true); }}
                               >
                                 <Edit2 className="h-3.5 w-3.5" />
                               </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-400/10 rounded-xl"
-                                onClick={() => handleDelete(product)}
+                                onClick={(e) => { e.stopPropagation(); handleDelete(product); }}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
