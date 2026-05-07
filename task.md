@@ -30,7 +30,11 @@ list page navigates to the detail page; modal kept only for "Add Product".
 
 ---
 
-## Sprint PC-B.2 — Column Visibility Picker (NOT STARTED)
+## Sprint PC-B.2 ✅ DONE — Column Visibility Picker
 
-Goal: user can toggle which columns are visible in the ProductsPage table via a column picker
-(checkboxes). Preference saved to `localStorage` per browser session.
+ProductsPage gained a **Columns** dropdown (right of the search bar) with a
+checkbox per toggleable column: Variants, SKUs, Weight Range, Price Range,
+Stock, Status. Title and Actions are always visible. Selection persists in
+`localStorage` under `orderhub:productsTable:columnVisibility`, hydrated with
+merge-over-defaults so future column additions appear by default. Empty-state
+`colSpan` derives from the live visible-column count.
