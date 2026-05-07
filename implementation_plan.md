@@ -239,6 +239,7 @@ Goal: Show order history and sales stats per product variant on the detail page.
 | ID | Task | Scope | Status |
 |---|---|---|---|
 | BUG-2 | Catalog search in OrderItemsEditor returned no matches (auth-bypassed fetch) | frontend | DONE — commit `46cb8d9` |
+| BUG-3 | Product inventory Subtotal didn't reflect items[] (read mode used stale `order.total_price`) | frontend | DONE — commit `4f45979`, housekeeping `d4c3ab4` |
 
 **Post-fix notes (BUG-2):**
 - `frontend/src/components/orders/ProductVariantSelector.tsx` was calling raw
@@ -272,16 +273,32 @@ Goal: Show order history and sales stats per product variant on the detail page.
   first time. The "N item(s) have no dimensions linked" warning from LOG-4
   remains accurate: it now refers only to historically unlinked items.
 
-**Found during BUG-2 smoke test, kept out of scope:**
-- **BUG-3 (queued, immediate next task):** `Subtotal` shown at the bottom of
-  the Product inventory panel does not reflect newly added rows with non-zero
-  `unit_price`. Display reads from a snapshot field instead of summing
-  `items[].unit_price * quantity`. Reproducible: after the BUG-2 fix, adding
-  the catalog variant "Скарбничка 8К Холдери (Brown)" at 130 UAH leaves the
-  Subtotal row at 0.00 UAH even though the line shows 130.00 UAH. **Not data
-  loss** — per-item `unit_price` persists correctly. Fix is expected to be
-  small (~1 frontend file).
-- **Known limitation, no task:** items saved before the catalog existed (or
+**Post-fix notes (BUG-3):**
+- Read-mode Subtotal cell at `frontend/src/components/orders/detail/DetailItems.tsx:271`
+  was bound to `order.total_price` — a backend snapshot field that is not
+  recomputed when items are mutated. Edit-mode in the same file already inlined
+  `items.reduce((acc, it) => acc + it.quantity * it.unit_price, 0)`; the two
+  branches diverged. Fix converges read-mode on the same expression — one-line
+  change, no helper extraction (CLAUDE.md "three similar lines beats premature
+  abstraction"; we have only two call sites in one file).
+- No `Number()` coercion added — line 260 already calls `item.unit_price.toFixed(2)`
+  directly on the same data path, proving runtime type is already number. Adding
+  coercion only at the new site would diverge from edit-mode and the per-row render.
+- `?? 0` guard for missing `order.items` matches existing patterns at lines 218
+  and 281.
+- **Backend `order.total_price` field intentionally NOT modified** — the snapshot
+  still drives the Orders list TOTAL column and Dashboard NET PROFIT / revenue
+  widgets, all of which read aggregated values via a separate code path. Fixing
+  those would be a separate decision (recompute server-side on item mutation,
+  affecting audit and migrations) — out of scope for this UI fix.
+- Smoke test confirmed: 130.00 → 240.00 after adding Black variant; Orders list
+  TOTAL unchanged (0 UAH); Dashboard widgets unchanged.
+
+**Pre-task housekeeping (commit `d4c3ab4`):** `docs(plan): close BUG-2, queue BUG-3` —
+landed before the code commit so git history reads as discrete docs vs. fix changes.
+
+**Known limitation, no task (carried over from BUG-2 smoke test):**
+- Items saved before the catalog existed (or
   before BUG-2 was fixed) carry `product_variant_id = null` permanently —
   there is no backfill path or UI gesture to retroactively link them. They
   display the orange "Unlinked" badge forever and contribute nothing to
