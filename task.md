@@ -38,3 +38,5 @@ Stock, Status. Title and Actions are always visible. Selection persists in
 `localStorage` under `orderhub:productsTable:columnVisibility`, hydrated with
 merge-over-defaults so future column additions appear by default. Empty-state
 `colSpan` derives from the live visible-column count.
+
+Commit: `46783bf` feat(catalog): Sprint PC-B.2 — column visibility picker on ProductsPage

@@ -12,6 +12,7 @@
 - Sprint 9 status: `DONE` (Attachments & Designer Workflow)
 - Sprint 10 status: `DONE` (Shop Management & Manual Entry)
 - UI Modernization (Block 11) status: `DONE` (Customers, Users, Imports, Dashboard unified)
+- Sprint PC-B.2 status: `DONE` (Column Visibility Picker on ProductsPage — commit `46783bf`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 
 ## Architecture Schematic
