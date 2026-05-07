@@ -78,15 +78,18 @@ class CatalogService:
         # Apply variant patches when provided (form edit flow)
         if variant_patches:
             for v_data in variant_patches:
-                v_id = v_data.get('id')
-                if not v_id:
+                v_id = v_data.pop('id', None)
+                if v_id is None:
+                    required = ('weight_g', 'length_mm', 'width_mm', 'height_mm')
+                    missing = [f for f in required if v_data.get(f) is None]
+                    if missing:
+                        raise ValueError(f"New variant missing required fields: {missing}")
+                    self.db.add(ProductVariant(product_id=product_id, **v_data))
                     continue
                 variant = await self.db.get(ProductVariant, v_id)
                 if variant is None or variant.product_id != product_id:
                     continue
                 for key, value in v_data.items():
-                    if key == 'id':
-                        continue
                     setattr(variant, key, value)
 
         await self.db.commit()

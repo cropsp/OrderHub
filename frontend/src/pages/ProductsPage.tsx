@@ -287,7 +287,7 @@ export default function ProductsPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] rounded-xl"
-                                onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setIsFormOpen(true); }}
+                                onClick={(e) => { e.stopPropagation(); navigate(`/products/${product.id}`); }}
                               >
                                 <Edit2 className="h-3.5 w-3.5" />
                               </Button>

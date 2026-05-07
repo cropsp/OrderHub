@@ -73,7 +73,10 @@ async def update_product(
 ):
     """Update product details."""
     service = CatalogService(db)
-    product = await service.update_product(id, schema)
+    try:
+        product = await service.update_product(id, schema)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product

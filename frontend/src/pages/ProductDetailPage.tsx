@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Archive, Edit2, Undo2 } from 'lucide-react'
+import { ArrowLeft, Archive, Plus, Save, Trash2, Undo2, X } from 'lucide-react'
 
 import { useProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useShops } from '@/hooks/useShops'
-import ProductForm from '@/components/inventory/ProductForm'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -17,16 +16,55 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { ProductUpdate, ProductVariant } from '@/types/inventory'
+import { useToastStore } from '@/components/ui/Toast'
+import type { Product, ProductUpdate, ProductVariantPatch } from '@/types/inventory'
 
-function fmtMoney(v: number | string | null | undefined): string {
-  if (v === null || v === undefined || v === '') return '—'
-  const n = Number(v)
-  if (!isFinite(n)) return '—'
-  return `$${n.toFixed(2)}`
+type VariantDraft = {
+  _key: string
+  id?: string
+  sku: string
+  variant_name: string
+  weight_g: string
+  length_mm: string
+  width_mm: string
+  height_mm: string
+  price: string
+  cost_price: string
+  stock_quantity: string
 }
 
-function marginPercent(price: number | string | null | undefined, cost: number | string | null | undefined): number | null {
+type ProductDraft = {
+  title: string
+  description: string
+  variants: VariantDraft[]
+}
+
+function toStr(v: number | string | null | undefined): string {
+  if (v === null || v === undefined) return ''
+  return String(v)
+}
+
+function buildDraft(product: Product): ProductDraft {
+  return {
+    title: product.title ?? '',
+    description: product.description ?? '',
+    variants: product.variants.map(v => ({
+      _key: v.id,
+      id: v.id,
+      sku: toStr(v.sku),
+      variant_name: toStr(v.variant_name),
+      weight_g: toStr(v.weight_g),
+      length_mm: toStr(v.length_mm),
+      width_mm: toStr(v.width_mm),
+      height_mm: toStr(v.height_mm),
+      price: toStr(v.price),
+      cost_price: toStr(v.cost_price),
+      stock_quantity: toStr(v.stock_quantity),
+    })),
+  }
+}
+
+function marginPercent(price: string, cost: string): number | null {
   const p = Number(price)
   const c = Number(cost)
   if (!isFinite(p) || !isFinite(c) || p <= 0 || c <= 0) return null
@@ -45,18 +83,70 @@ function stockColorClass(qty: number) {
   return 'text-emerald-400'
 }
 
+function computeVolume(l: string, w: string, h: string): number | null {
+  const L = Number(l)
+  const W = Number(w)
+  const H = Number(h)
+  if (!isFinite(L) || !isFinite(W) || !isFinite(H) || L <= 0 || W <= 0 || H <= 0) return null
+  return (L * W * H) / 1000
+}
+
+function newVariantKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `new-${crypto.randomUUID()}`
+  }
+  return `new-${Math.random().toString(36).slice(2)}-${Date.now()}`
+}
+
+function emptyVariant(): VariantDraft {
+  return {
+    _key: newVariantKey(),
+    id: undefined,
+    sku: '',
+    variant_name: '',
+    weight_g: '',
+    length_mm: '',
+    width_mm: '',
+    height_mm: '',
+    price: '',
+    cost_price: '',
+    stock_quantity: '0',
+  }
+}
+
+const cellInputCls =
+  'w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-xs text-zinc-300 font-mono focus:outline-none focus:border-teal-500/40 focus:bg-zinc-900/40 hover:border-zinc-700/60 transition-colors'
+
+const numericCellCls = `${cellInputCls} text-right`
+
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [isEditOpen, setIsEditOpen] = useState(false)
+  const addToast = useToastStore(s => s.addToast)
 
   const { data: product, isLoading, isError } = useProduct(id)
   const { data: shops } = useShops()
   const updateProduct = useUpdateProduct()
 
+  const [draft, setDraft] = useState<ProductDraft | null>(null)
+  const [original, setOriginal] = useState<string>('')
+  const [syncedProductId, setSyncedProductId] = useState<string | undefined>(undefined)
+
+  // Reset draft only when navigating to a different product. Background
+  // refetches must not clobber in-progress edits, so we key on product.id
+  // (not the full product reference). React's "adjust state during render"
+  // pattern: https://react.dev/learn/you-might-not-need-an-effect
+  if (product && product.id !== syncedProductId) {
+    const d = buildDraft(product)
+    setDraft(d)
+    setOriginal(JSON.stringify(d))
+    setSyncedProductId(product.id)
+  }
+
   if (!id) return null
 
   const shopName = shops?.find(s => s.id === product?.shop_id)?.name
+  const isDirty = draft !== null && JSON.stringify(draft) !== original
 
   const handleArchiveToggle = () => {
     if (!product) return
@@ -67,13 +157,101 @@ export default function ProductDetailPage() {
     })
   }
 
-  const handleEditSave = async (data: unknown) => {
-    if (!product) return
-    await updateProduct.mutateAsync({
-      id: product.id,
-      shopId: product.shop_id,
-      data: data as ProductUpdate,
+  const updateField = <K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) => {
+    setDraft(d => (d ? { ...d, [key]: value } : d))
+  }
+
+  const updateVariant = (key: string, field: keyof VariantDraft, value: string) => {
+    setDraft(d => {
+      if (!d) return d
+      return {
+        ...d,
+        variants: d.variants.map(v => (v._key === key ? { ...v, [field]: value } : v)),
+      }
     })
+  }
+
+  const addVariant = () => {
+    setDraft(d => (d ? { ...d, variants: [...d.variants, emptyVariant()] } : d))
+  }
+
+  const removeVariant = (key: string) => {
+    // TODO: persist variant deletion (out of PC-B.1 scope). Existing variants
+    // disappear locally but reappear after refetch since the backend doesn't
+    // delete missing variants.
+    setDraft(d => (d ? { ...d, variants: d.variants.filter(v => v._key !== key) } : d))
+  }
+
+  const handleCancel = () => {
+    if (product) {
+      const d = buildDraft(product)
+      setDraft(d)
+      setOriginal(JSON.stringify(d))
+    }
+  }
+
+  const handleSave = async () => {
+    if (!draft || !product) return
+
+    for (const v of draft.variants) {
+      const dims = [v.weight_g, v.length_mm, v.width_mm, v.height_mm]
+      for (const x of dims) {
+        const n = Number(x)
+        if (!isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+          addToast('Each variant needs positive integer weight and dimensions', 'error')
+          return
+        }
+      }
+      if (v.price !== '' && !(Number(v.price) >= 0)) {
+        addToast('Price must be ≥ 0', 'error')
+        return
+      }
+      if (v.cost_price !== '' && !(Number(v.cost_price) >= 0)) {
+        addToast('Cost must be ≥ 0', 'error')
+        return
+      }
+      if (v.sku.length > 100) {
+        addToast('SKU must be ≤ 100 characters', 'error')
+        return
+      }
+    }
+
+    const variants: ProductVariantPatch[] = draft.variants.map(v => {
+      const patch: ProductVariantPatch = {
+        weight_g: Number(v.weight_g),
+        length_mm: Number(v.length_mm),
+        width_mm: Number(v.width_mm),
+        height_mm: Number(v.height_mm),
+        sku: v.sku === '' ? null : v.sku,
+        variant_name: v.variant_name === '' ? null : v.variant_name,
+        price: v.price === '' ? null : Number(v.price),
+        cost_price: v.cost_price === '' ? null : Number(v.cost_price),
+        stock_quantity: v.stock_quantity === '' ? 0 : Number(v.stock_quantity),
+      }
+      if (v.id) patch.id = v.id
+      return patch
+    })
+
+    const data: ProductUpdate = {
+      title: draft.title,
+      description: draft.description === '' ? null : draft.description,
+      variants,
+    }
+
+    try {
+      const saved = await updateProduct.mutateAsync({
+        id: product.id,
+        shopId: product.shop_id,
+        data,
+      })
+      // Re-derive draft from response so newly created variants pick up their
+      // server-generated ids; this also clears the dirty flag.
+      const next = buildDraft(saved)
+      setDraft(next)
+      setOriginal(JSON.stringify(next))
+    } catch {
+      // Toast is already surfaced by the mutation hook.
+    }
   }
 
   return (
@@ -92,7 +270,7 @@ export default function ProductDetailPage() {
 
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
-          {isLoading ? (
+          {isLoading || !draft ? (
             <div className="space-y-4">
               <Skeleton className="h-10 w-96 bg-zinc-800" />
               <Skeleton className="h-64 w-full bg-zinc-800" />
@@ -139,21 +317,44 @@ export default function ProductDetailPage() {
                   )}
                 </div>
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">{product.title}</h1>
-                    {product.description && (
-                      <p className="text-sm text-zinc-500 mt-1">{product.description}</p>
-                    )}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <input
+                      type="text"
+                      value={draft.title}
+                      onChange={e => updateField('title', e.target.value)}
+                      placeholder="Product title"
+                      className="w-full bg-transparent text-2xl font-bold text-zinc-100 tracking-tight border border-transparent rounded-md px-2 py-1 -ml-2 focus:outline-none focus:border-teal-500/40 focus:bg-zinc-900/40 hover:border-zinc-800 transition-colors"
+                    />
+                    <textarea
+                      value={draft.description}
+                      onChange={e => updateField('description', e.target.value)}
+                      placeholder="Description"
+                      rows={2}
+                      className="w-full bg-transparent text-sm text-zinc-400 border border-transparent rounded-md px-2 py-1 -ml-2 resize-none focus:outline-none focus:border-teal-500/40 focus:bg-zinc-900/40 hover:border-zinc-800 transition-colors"
+                    />
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <Button
-                      variant="outline"
-                      onClick={() => setIsEditOpen(true)}
-                      className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
-                    >
-                      <Edit2 className="size-4 mr-2 text-teal-500" />
-                      Edit
-                    </Button>
+                    {isDirty && (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={handleCancel}
+                          disabled={updateProduct.isPending}
+                          className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                        >
+                          <X className="size-4 mr-2 text-zinc-500" />
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleSave}
+                          disabled={updateProduct.isPending}
+                          className="bg-teal-500 hover:bg-teal-400 text-zinc-950 font-bold"
+                        >
+                          <Save className="size-4 mr-2" />
+                          Save Changes
+                        </Button>
+                      </>
+                    )}
                     <Button
                       variant="outline"
                       onClick={handleArchiveToggle}
@@ -176,6 +377,17 @@ export default function ProductDetailPage() {
                 </div>
               </div>
 
+              <div className="flex justify-end">
+                <Button
+                  variant="ghost"
+                  onClick={addVariant}
+                  className="text-zinc-400 hover:text-teal-400 hover:bg-white/[0.02]"
+                >
+                  <Plus className="size-4 mr-2" />
+                  Add Variant
+                </Button>
+              </div>
+
               <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md shadow-2xl overflow-hidden rounded-2xl">
                 <CardContent className="p-0">
                   <Table>
@@ -184,61 +396,150 @@ export default function ProductDetailPage() {
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">SKU</TableHead>
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Name</TableHead>
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Dimensions</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Dimensions (mm)</TableHead>
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Volume</TableHead>
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Price</TableHead>
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Cost</TableHead>
                         <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5 px-8">Margin %</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Margin %</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5 px-8 w-12"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {product.variants.length === 0 ? (
+                      {draft.variants.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="h-40 text-center">
-                            <p className="text-sm text-zinc-500 italic">No variants defined.</p>
+                          <TableCell colSpan={10} className="h-40 text-center">
+                            <p className="text-sm text-zinc-500 italic">No variants yet. Click "Add Variant" to create one.</p>
                           </TableCell>
                         </TableRow>
                       ) : (
-                        product.variants.map((v: ProductVariant) => {
+                        draft.variants.map(v => {
                           const margin = marginPercent(v.price, v.cost_price)
-                          const volume = typeof v.volume_cm3 === 'number'
-                            ? v.volume_cm3
-                            : (v.length_mm * v.width_mm * v.height_mm) / 1000
+                          const volume = computeVolume(v.length_mm, v.width_mm, v.height_mm)
                           const stock = Number(v.stock_quantity) || 0
                           return (
                             <TableRow
-                              key={v.id}
+                              key={v._key}
                               className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors"
                             >
-                              <TableCell className="px-8 py-5">
-                                <code className="text-xs bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-300 border border-zinc-700">
-                                  {v.sku || '—'}
-                                </code>
+                              <TableCell className="px-8 py-3 align-middle">
+                                <input
+                                  type="text"
+                                  value={v.sku}
+                                  onChange={e => updateVariant(v._key, 'sku', e.target.value)}
+                                  placeholder="SKU"
+                                  className={cellInputCls}
+                                />
                               </TableCell>
-                              <TableCell className="text-xs text-zinc-300">{v.variant_name || '—'}</TableCell>
-                              <TableCell className="text-xs text-zinc-400 font-mono">{v.weight_g}g</TableCell>
-                              <TableCell className="text-xs text-zinc-400 font-mono">
-                                {v.length_mm} × {v.width_mm} × {v.height_mm} mm
+                              <TableCell className="py-3 align-middle">
+                                <input
+                                  type="text"
+                                  value={v.variant_name}
+                                  onChange={e => updateVariant(v._key, 'variant_name', e.target.value)}
+                                  placeholder="Name"
+                                  className={cellInputCls}
+                                />
                               </TableCell>
-                              <TableCell className="text-xs text-zinc-400 font-mono">
-                                {volume.toFixed(2)} cm³
+                              <TableCell className="py-3 align-middle">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={v.weight_g}
+                                    onChange={e => updateVariant(v._key, 'weight_g', e.target.value)}
+                                    placeholder="g"
+                                    className={`${numericCellCls} w-20`}
+                                  />
+                                  <span className="text-[10px] text-zinc-600">g</span>
+                                </div>
                               </TableCell>
-                              <TableCell className="text-xs text-zinc-300 font-mono">{fmtMoney(v.price)}</TableCell>
-                              <TableCell className="text-xs text-zinc-300 font-mono">{fmtMoney(v.cost_price)}</TableCell>
-                              <TableCell>
-                                <span className={`text-xs font-bold font-mono ${stockColorClass(stock)}`}>
-                                  {stock}
-                                </span>
+                              <TableCell className="py-3 align-middle">
+                                <div className="flex items-center gap-1 font-mono text-zinc-600 text-xs">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={v.length_mm}
+                                    onChange={e => updateVariant(v._key, 'length_mm', e.target.value)}
+                                    placeholder="L"
+                                    className={`${numericCellCls} w-16`}
+                                  />
+                                  <span>×</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={v.width_mm}
+                                    onChange={e => updateVariant(v._key, 'width_mm', e.target.value)}
+                                    placeholder="W"
+                                    className={`${numericCellCls} w-16`}
+                                  />
+                                  <span>×</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    step={1}
+                                    value={v.height_mm}
+                                    onChange={e => updateVariant(v._key, 'height_mm', e.target.value)}
+                                    placeholder="H"
+                                    className={`${numericCellCls} w-16`}
+                                  />
+                                </div>
                               </TableCell>
-                              <TableCell className="px-8">
+                              <TableCell className="text-xs text-zinc-400 font-mono py-3 align-middle">
+                                {volume === null ? '—' : `${volume.toFixed(2)} cm³`}
+                              </TableCell>
+                              <TableCell className="py-3 align-middle">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={v.price}
+                                  onChange={e => updateVariant(v._key, 'price', e.target.value)}
+                                  placeholder="0.00"
+                                  className={`${numericCellCls} w-24`}
+                                />
+                              </TableCell>
+                              <TableCell className="py-3 align-middle">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  value={v.cost_price}
+                                  onChange={e => updateVariant(v._key, 'cost_price', e.target.value)}
+                                  placeholder="0.00"
+                                  className={`${numericCellCls} w-24`}
+                                />
+                              </TableCell>
+                              <TableCell className="py-3 align-middle">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  value={v.stock_quantity}
+                                  onChange={e => updateVariant(v._key, 'stock_quantity', e.target.value)}
+                                  className={`${numericCellCls} w-20 ${stockColorClass(stock)} font-bold`}
+                                />
+                              </TableCell>
+                              <TableCell className="py-3 align-middle">
                                 {margin === null ? (
-                                  <span className="text-xs text-zinc-600">—</span>
+                                  <span className="text-xs text-zinc-600 font-mono">—</span>
                                 ) : (
                                   <span className={`text-xs font-bold font-mono ${marginColorClass(margin)}`}>
                                     {margin.toFixed(1)}%
                                   </span>
                                 )}
+                              </TableCell>
+                              <TableCell className="px-8 py-3 align-middle">
+                                <button
+                                  type="button"
+                                  onClick={() => removeVariant(v._key)}
+                                  className="text-zinc-600 hover:text-red-400 transition-colors p-1 rounded"
+                                  aria-label="Remove variant"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
                               </TableCell>
                             </TableRow>
                           )
@@ -252,16 +553,6 @@ export default function ProductDetailPage() {
           )}
         </div>
       </main>
-
-      {product && (
-        <ProductForm
-          isOpen={isEditOpen}
-          onClose={() => setIsEditOpen(false)}
-          onSave={handleEditSave}
-          initialData={product}
-          isLoading={updateProduct.isPending}
-        />
-      )}
     </div>
   )
 }
