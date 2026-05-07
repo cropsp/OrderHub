@@ -208,9 +208,9 @@ Goal: Show order history and sales stats per product variant on the detail page.
 | PERF-1 | Route-level chunk splitting | frontend bundler | TODO |
 | TEST-1 | Smoke test coverage | vitest + playwright | TODO |
 
-### B. Post-Audit Achievements (Completed 2026-04-22)
+### B. Post-Audit Achievements
 
-**Frontend & Architecture**
+**Frontend & Architecture (Completed 2026-04-22)**
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
@@ -221,7 +221,7 @@ Goal: Show order history and sales stats per product variant on the detail page.
 | SEC-1 | MCP Security Guards | Added auth protection to /sse and /messages | DONE |
 | INFRA-1 | Backend Logging System | Rotating logs with 25MB safety cap | DONE |
 
-**Backend Resilience & Business Logic**
+**Backend Resilience & Business Logic (Completed 2026-04-22)**
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
@@ -233,6 +233,64 @@ Goal: Show order history and sales stats per product variant on the detail page.
 | BE-4 | Manual Shop Creation | Fixed Enum conflict in DB and backend (MANUAL) | DONE |
 | FE-5 | Navigation & Dropdowns | Fixed Back button history and Status dropdown UX | DONE |
 | FE-6 | Shops UI Polish | Fixed null checks and ID display in ShopsPage | DONE |
+
+**Bug Fixes (2026-05-07)**
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| BUG-2 | Catalog search in OrderItemsEditor returned no matches (auth-bypassed fetch) | frontend | DONE — commit `46cb8d9` |
+
+**Post-fix notes (BUG-2):**
+- `frontend/src/components/orders/ProductVariantSelector.tsx` was calling raw
+  `axios.get(...)` directly (its own `import axios from 'axios'`), bypassing the
+  shared `frontend/src/api/client.ts` and its Bearer-token request interceptor.
+  Every catalog fetch returned **403** and the silent `catch → console.error`
+  made the failure look identical to a genuinely empty catalog
+  ("No matches found. Using manual entry."). The bug had been latent since
+  `ProductVariantSelector` was introduced in LOG-3.
+- Fix replaces the local `useState<Product[]>` + fetch effect with the existing
+  `useProducts(shopId)` hook (React Query) from `frontend/src/hooks/useProducts.ts`.
+  Two structural side-effects worth knowing:
+  1. The cache key on `shopId` removes the brittle `products.length === 0` gate
+     that would otherwise leak a stale list across shops.
+  2. `DetailItems.tsx` mounts **two** selector instances (existing edited rows +
+     new rows) — they now share one fetch via React Query dedupe instead of two
+     parallel calls.
+- Local `Variant.price` widened to `number | string | null` to match the actual
+  `ProductRead` shape (backend serialises `Decimal` as a string like `"130.00"`).
+  `handleSelect` does a safe `Number(price)` coercion before invoking `onChange`,
+  so the parent's numeric `unit_price` input never receives a string. **Smoke
+  test confirmed**: selecting a variant populates `130` (numeric), Subtotal
+  recomputes correctly inside the editor, no `NaN`, no `"$130.00"` string leak.
+- Distinct error branch added to the dropdown ("Failed to load catalog — try
+  again", rose tone) — fetch failures no longer masquerade as empty results.
+- **Bonus discovered during smoke test:** catalog linking now feeds the
+  `parcel-estimate` service correctly. Adding a linked variant immediately
+  populates Weight/Volume in Shipping & Logistics from the variant's
+  `weight_g` / `length_mm` / `width_mm` / `height_mm`. No code change in the
+  parcel service — the data path was simply being correctly fed for the
+  first time. The "N item(s) have no dimensions linked" warning from LOG-4
+  remains accurate: it now refers only to historically unlinked items.
+
+**Found during BUG-2 smoke test, kept out of scope:**
+- **BUG-3 (queued, immediate next task):** `Subtotal` shown at the bottom of
+  the Product inventory panel does not reflect newly added rows with non-zero
+  `unit_price`. Display reads from a snapshot field instead of summing
+  `items[].unit_price * quantity`. Reproducible: after the BUG-2 fix, adding
+  the catalog variant "Скарбничка 8К Холдери (Brown)" at 130 UAH leaves the
+  Subtotal row at 0.00 UAH even though the line shows 130.00 UAH. **Not data
+  loss** — per-item `unit_price` persists correctly. Fix is expected to be
+  small (~1 frontend file).
+- **Known limitation, no task:** items saved before the catalog existed (or
+  before BUG-2 was fixed) carry `product_variant_id = null` permanently —
+  there is no backfill path or UI gesture to retroactively link them. They
+  display the orange "Unlinked" badge forever and contribute nothing to
+  parcel-estimate. This is a pre-existing constraint from LOG-1…6, **not**
+  introduced by BUG-2; the fix simply makes the contrast visible (linked and
+  unlinked rows now sit side-by-side in the same order). Revisit only if a
+  concrete operational need surfaces (e.g. bulk-link migration for ≥N
+  historical orders) — at that point it becomes a UX/migration design
+  decision, not a technical debt item.
 
 ### C. Nova Poshta Full Audit Fixes (Completed 2026-04-23)
 
