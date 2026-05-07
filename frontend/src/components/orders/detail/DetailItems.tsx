@@ -268,7 +268,7 @@ export function DetailItems({
                   </td>
                   <td className="px-4 py-3.5 text-right">
                     <span className="text-sm font-bold text-zinc-100">
-                      {order.total_price.toFixed(2)} <span className="text-[11px] text-zinc-500 uppercase ml-0.5">{order.currency}</span>
+                      {(order.items?.reduce((acc, it) => acc + it.quantity * it.unit_price, 0) ?? 0).toFixed(2)} <span className="text-[11px] text-zinc-500 uppercase ml-0.5">{order.currency}</span>
                     </span>
                   </td>
                 </tr>
