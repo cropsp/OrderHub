@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers, Archive, CheckCircle2 } from 'lucide-react'
+import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers, Archive, CheckCircle2, Columns3 } from 'lucide-react'
 import ShellPage from './ShellPage'
 import ShopSelector from '@/components/inventory/ShopSelector'
 import ProductForm from '@/components/inventory/ProductForm'
@@ -17,10 +17,41 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuCheckboxItem,
+} from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ProductVariant } from '@/types/inventory'
+
+const TOGGLEABLE_COLUMNS = [
+  { key: 'variants',    label: 'Variants' },
+  { key: 'skus',        label: 'SKUs' },
+  { key: 'weightRange', label: 'Weight Range' },
+  { key: 'priceRange',  label: 'Price Range' },
+  { key: 'stock',       label: 'Stock' },
+  { key: 'status',      label: 'Status' },
+] as const
+
+type ColumnKey = typeof TOGGLEABLE_COLUMNS[number]['key']
+type Visibility = Record<ColumnKey, boolean>
+
+const DEFAULT_VISIBILITY: Visibility = {
+  variants: true,
+  skus: true,
+  weightRange: true,
+  priceRange: true,
+  stock: true,
+  status: true,
+}
+
+const STORAGE_KEY = 'orderhub:productsTable:columnVisibility'
 
 
 export default function ProductsPage() {
@@ -31,6 +62,22 @@ export default function ProductsPage() {
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active')
+  const [visibility, setVisibility] = useState<Visibility>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (!raw) return DEFAULT_VISIBILITY
+      const parsed = JSON.parse(raw)
+      return { ...DEFAULT_VISIBILITY, ...parsed }
+    } catch {
+      return DEFAULT_VISIBILITY
+    }
+  })
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility))
+  }, [visibility])
+
+  const visibleColumnCount = 2 + Object.values(visibility).filter(Boolean).length
 
   const { data: products, isLoading } = useProducts(selectedShopId || '', viewMode === 'active')
   const createProduct = useCreateProduct()
@@ -173,15 +220,44 @@ export default function ProductsPage() {
                    onChange={e => setSearchQuery(e.target.value)}
                  />
                </div>
-               <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                  <div className="flex items-center gap-1.5">
-                    <Package className="size-3" />
-                    <span>{filteredProducts.length} Products</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="size-3" />
-                    <span>{filteredProducts.reduce((acc, p) => acc + p.variants.length, 0)} Variants</span>
-                  </div>
+               <div className="flex items-center gap-4">
+                 <DropdownMenu>
+                   <DropdownMenuTrigger asChild>
+                     <Button
+                       variant="outline"
+                       size="sm"
+                       className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+                     >
+                       <Columns3 className="size-3.5 mr-2" />
+                       Columns
+                     </Button>
+                   </DropdownMenuTrigger>
+                   <DropdownMenuContent align="end" className="w-48">
+                     <DropdownMenuLabel>Visible columns</DropdownMenuLabel>
+                     <DropdownMenuSeparator />
+                     {TOGGLEABLE_COLUMNS.map(col => (
+                       <DropdownMenuCheckboxItem
+                         key={col.key}
+                         checked={visibility[col.key]}
+                         onCheckedChange={v =>
+                           setVisibility(prev => ({ ...prev, [col.key]: !!v }))
+                         }
+                       >
+                         {col.label}
+                       </DropdownMenuCheckboxItem>
+                     ))}
+                   </DropdownMenuContent>
+                 </DropdownMenu>
+                 <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                    <div className="flex items-center gap-1.5">
+                      <Package className="size-3" />
+                      <span>{filteredProducts.length} Products</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Layers className="size-3" />
+                      <span>{filteredProducts.reduce((acc, p) => acc + p.variants.length, 0)} Variants</span>
+                    </div>
+                 </div>
                </div>
             </div>
 
@@ -192,12 +268,12 @@ export default function ProductsPage() {
                   <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                     <TableRow className="border-none hover:bg-transparent">
                       <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Product Title</TableHead>
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Variants</TableHead>
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">SKUs</TableHead>
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight Range</TableHead>
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Price Range</TableHead>
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Status</TableHead>
+                      {visibility.variants && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Variants</TableHead>}
+                      {visibility.skus && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">SKUs</TableHead>}
+                      {visibility.weightRange && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight Range</TableHead>}
+                      {visibility.priceRange && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Price Range</TableHead>}
+                      {visibility.stock && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>}
+                      {visibility.status && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Status</TableHead>}
                       <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -206,18 +282,18 @@ export default function ProductsPage() {
                       [1, 2, 3].map(i => (
                         <TableRow key={i} className="border-b border-white/[0.02]">
                           <TableCell className="px-8 py-6"><Skeleton className="h-5 w-48 bg-zinc-800" /></TableCell>
-                          <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>
-                          <TableCell><Skeleton className="h-5 w-32 bg-zinc-800" /></TableCell>
-                          <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>
-                          <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>
-                          <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>
-                          <TableCell><Skeleton className="h-5 w-16 bg-zinc-800" /></TableCell>
+                          {visibility.variants && <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>}
+                          {visibility.skus && <TableCell><Skeleton className="h-5 w-32 bg-zinc-800" /></TableCell>}
+                          {visibility.weightRange && <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>}
+                          {visibility.priceRange && <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>}
+                          {visibility.stock && <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>}
+                          {visibility.status && <TableCell><Skeleton className="h-5 w-16 bg-zinc-800" /></TableCell>}
                           <TableCell className="px-8 py-6"><Skeleton className="h-5 w-16 ml-auto bg-zinc-800" /></TableCell>
                         </TableRow>
                       ))
                     ) : filteredProducts.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="h-60 text-center">
+                        <TableCell colSpan={visibleColumnCount} className="h-60 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <Package className="size-10 text-zinc-800" />
                             <p className="text-sm text-zinc-500 italic">No products found matching your search.</p>
@@ -239,48 +315,60 @@ export default function ProductsPage() {
                                )}
                             </div>
                           </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="border-zinc-800 bg-zinc-900/50 text-zinc-400 font-mono text-[10px]">
-                              {product.variants.length}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                               {product.variants.slice(0, 2).map((v: any) => (
-                                 <code key={v.id} className="text-[9px] bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 border border-zinc-700">{v.sku}</code>
-                               ))}
-                               {product.variants.length > 2 && (
-                                 <span className="text-[9px] text-zinc-600 font-bold">+{product.variants.length - 2} more</span>
-                               )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-zinc-400 font-medium">
-                            {getWeightRange(product.variants)}
-                          </TableCell>
-                          <TableCell className="text-xs text-zinc-300 font-mono">
-                            {getPriceRange(product.variants)}
-                          </TableCell>
-                          <TableCell>
-                            {(() => {
-                              const qty = getTotalStock(product.variants)
-                              return (
-                                <span className={`text-xs font-bold font-mono ${stockColorClass(qty)}`}>
-                                  {qty}
-                                </span>
-                              )
-                            })()}
-                          </TableCell>
-                          <TableCell>
-                            {product.is_active ? (
-                              <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
-                                Active
+                          {visibility.variants && (
+                            <TableCell>
+                              <Badge variant="outline" className="border-zinc-800 bg-zinc-900/50 text-zinc-400 font-mono text-[10px]">
+                                {product.variants.length}
                               </Badge>
-                            ) : (
-                              <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
-                                Archived
-                              </Badge>
-                            )}
-                          </TableCell>
+                            </TableCell>
+                          )}
+                          {visibility.skus && (
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                 {product.variants.slice(0, 2).map((v: any) => (
+                                   <code key={v.id} className="text-[9px] bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 border border-zinc-700">{v.sku}</code>
+                                 ))}
+                                 {product.variants.length > 2 && (
+                                   <span className="text-[9px] text-zinc-600 font-bold">+{product.variants.length - 2} more</span>
+                                 )}
+                              </div>
+                            </TableCell>
+                          )}
+                          {visibility.weightRange && (
+                            <TableCell className="text-xs text-zinc-400 font-medium">
+                              {getWeightRange(product.variants)}
+                            </TableCell>
+                          )}
+                          {visibility.priceRange && (
+                            <TableCell className="text-xs text-zinc-300 font-mono">
+                              {getPriceRange(product.variants)}
+                            </TableCell>
+                          )}
+                          {visibility.stock && (
+                            <TableCell>
+                              {(() => {
+                                const qty = getTotalStock(product.variants)
+                                return (
+                                  <span className={`text-xs font-bold font-mono ${stockColorClass(qty)}`}>
+                                    {qty}
+                                  </span>
+                                )
+                              })()}
+                            </TableCell>
+                          )}
+                          {visibility.status && (
+                            <TableCell>
+                              {product.is_active ? (
+                                <Badge variant="outline" className="border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-[10px] font-bold uppercase tracking-widest">
+                                  Active
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">
+                                  Archived
+                                </Badge>
+                              )}
+                            </TableCell>
+                          )}
                           <TableCell className="px-8 py-6 text-right">
                             <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <Button
