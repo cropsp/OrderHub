@@ -12,6 +12,9 @@
 - Sprint 9 status: `DONE` (Attachments & Designer Workflow)
 - Sprint 10 status: `DONE` (Shop Management & Manual Entry)
 - UI Modernization (Block 11) status: `DONE` (Customers, Users, Imports, Dashboard unified)
+- Sprint PC-A status: `DONE` (Foundation: Pricing, Cost & Stock — commit `0bf0583`)
+- Sprint PC-B status: `DONE` (Product Detail Page — commit `f99494f`)
+- Sprint PC-B.1 status: `DONE` (Shopify-style Inline Product Editing — commit `bf9f8ba`)
 - Sprint PC-B.2 status: `DONE` (Column Visibility Picker on ProductsPage — commit `46783bf`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 
@@ -97,7 +100,7 @@ frontend/src/
 
 ### A. Product Catalog — Enhancement Sprints
 
-**Sprint PC-A — Foundation: Pricing, Cost & Stock** (Status: `NOT STARTED`)
+**Sprint PC-A — Foundation: Pricing, Cost & Stock** (Status: `DONE` — commit `0bf0583`)
 
 Goal: Add price, cost_price, and stock_quantity to ProductVariant. Update form and list view.
 
@@ -109,7 +112,7 @@ Goal: Add price, cost_price, and stock_quantity to ProductVariant. Update form a
 | PC-A-4 | Update products list: add Price Range, Stock, Status badge columns | frontend | TODO |
 | PC-A-5 | Update `ProductsPage.tsx`: show archived filter tab | frontend | TODO |
 
-**Sprint PC-B — Product Detail Page** (Status: `NOT STARTED`)
+**Sprint PC-B — Product Detail Page** (Status: `DONE` — commit `f99494f`; PC-B.1 inline-edit follow-up `bf9f8ba`; PC-B.2 column picker `46783bf`)
 
 Goal: Replace modal-only flow with a full-page product view at `/products/:id`.
 
