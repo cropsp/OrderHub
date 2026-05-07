@@ -2,25 +2,14 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, Package, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import axios from 'axios';
+import { useProducts } from '@/hooks/useProducts';
 
 type Variant = {
   id: string;
   sku: string | null;
   variant_name: string | null;
-  price: number | null;
-  product_title: string; // From the API which should include it or we handle it
-};
-
-type Product = {
-  id: string;
-  title: string;
-  variants: Array<{
-    id: string;
-    sku: string | null;
-    variant_name: string | null;
-    price: number | null;
-  }>;
+  price: number | string | null;
+  product_title: string;
 };
 
 type ProductVariantSelectorProps = {
@@ -37,9 +26,9 @@ export function ProductVariantSelector({
   className 
 }: ProductVariantSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [products, setProducts] = useState<Product[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const { data: products = [], isLoading: loading, isError } = useProducts(shopId);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -51,24 +40,6 @@ export function ProductVariantSelector({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Fetch products when dropdown opens
-  useEffect(() => {
-    if (isOpen && shopId && products.length === 0) {
-      const fetchProducts = async () => {
-        setLoading(true);
-        try {
-          const resp = await axios.get(`/api/shops/${shopId}/products`);
-          setProducts(resp.data);
-        } catch (err) {
-          console.error("Failed to fetch products", err);
-        } finally {
-          setLoading(false);
-        }
-      };
-      fetchProducts();
-    }
-  }, [isOpen, shopId, products.length]);
 
   // Filter variants based on search text — pure derivation, no effect needed.
   const filteredVariants = useMemo<Array<Variant & { productId: string }>>(() => {
@@ -98,7 +69,8 @@ export function ProductVariantSelector({
 
   const handleSelect = (v: Variant) => {
     const title = v.variant_name ? `${v.product_title} (${v.variant_name})` : v.product_title;
-    onChange(title, v.id, v.price || undefined);
+    const priceNum = v.price != null ? Number(v.price) : NaN;
+    onChange(title, v.id, Number.isFinite(priceNum) && priceNum > 0 ? priceNum : undefined);
     setIsOpen(false);
   };
 
@@ -130,6 +102,10 @@ export function ProductVariantSelector({
             <div className="flex items-center justify-center py-6 text-xs text-zinc-500">
                <Loader2 className="mr-2 size-3 animate-spin" />
                Searching Catalog...
+            </div>
+          ) : isError ? (
+            <div className="py-6 text-center text-xs text-rose-400/80">
+               Failed to load catalog — try again.
             </div>
           ) : filteredVariants.length > 0 ? (
             <div className="space-y-1">
