@@ -92,6 +92,12 @@ export default function ProductsPage() {
     return shops.some(s => s.id === selectedShopId) ? selectedShopId : null
   }, [shops, selectedShopId])
 
+  const activeShop = useMemo(
+    () => shops?.find(s => s.id === effectiveShopId) ?? null,
+    [shops, effectiveShopId]
+  )
+  const isManual = activeShop?.platform === 'manual'
+
   useEffect(() => {
     if (selectedShopId !== null) {
       localStorage.setItem(SHOP_KEY, selectedShopId)
@@ -158,37 +164,40 @@ export default function ProductsPage() {
   }
 
   return (
-    <ShellPage 
-      title="Product Catalog" 
-      description="Manage physical specifications for your manual store inventory."
+    <ShellPage
+      title="Product Catalog"
+      description="Manage product catalog and physical specifications."
     >
       <div className="space-y-6">
         {/* Header Actions */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/20 p-6 rounded-3xl border border-zinc-800/50 backdrop-blur-sm">
-          <ShopSelector 
-            selectedShopId={selectedShopId} 
-            onShopChange={setSelectedShopId} 
+          <ShopSelector
+            selectedShopId={selectedShopId}
+            onShopChange={setSelectedShopId}
+            manualOnly={false}
           />
-          
-          <div className="flex items-center gap-3">
-            <Button 
-              variant="outline" 
-              onClick={() => setIsImportOpen(true)}
-              disabled={!effectiveShopId}
-              className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
-            >
-              <FileSpreadsheet className="size-4 mr-2 text-teal-500" />
-              Bulk Import
-            </Button>
-            <Button
-              onClick={() => { setEditingProduct(null); setIsFormOpen(true); }}
-              disabled={!effectiveShopId}
-              className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg shadow-teal-900/20"
-            >
-              <Plus className="size-4 mr-2" />
-              Add Product
-            </Button>
-          </div>
+
+          {isManual && (
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setIsImportOpen(true)}
+                disabled={!effectiveShopId}
+                className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
+              >
+                <FileSpreadsheet className="size-4 mr-2 text-teal-500" />
+                Bulk Import
+              </Button>
+              <Button
+                onClick={() => { setEditingProduct(null); setIsFormOpen(true); }}
+                disabled={!effectiveShopId}
+                className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg shadow-teal-900/20"
+              >
+                <Plus className="size-4 mr-2" />
+                Add Product
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Content */}
@@ -198,7 +207,7 @@ export default function ProductsPage() {
                 <Filter className="size-8 text-zinc-700" />
              </div>
              <h3 className="text-lg font-bold text-zinc-300">No shop selected</h3>
-             <p className="text-sm text-zinc-500 mt-1">Please select a manual shop to manage its product catalog.</p>
+             <p className="text-sm text-zinc-500 mt-1">Please select a shop to view its product catalog.</p>
           </div>
         ) : (
           <div className="space-y-4">

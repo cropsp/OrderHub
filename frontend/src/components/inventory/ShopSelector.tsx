@@ -13,12 +13,26 @@ interface ShopSelectorProps {
   selectedShopId: string | null
   onShopChange: (id: string) => void
   className?: string
+  /** When true (default), only MANUAL-platform shops are listed. Set false to list all platforms. */
+  manualOnly?: boolean
 }
 
-export default function ShopSelector({ selectedShopId, onShopChange, className }: ShopSelectorProps) {
+export default function ShopSelector({
+  selectedShopId,
+  onShopChange,
+  className,
+  manualOnly = true,
+}: ShopSelectorProps) {
   const { data: shops, isLoading } = useShops()
-  
-  const manualShops = (shops || []).filter(s => s.platform === 'manual')
+
+  const filteredShops = (shops || []).filter(s => manualOnly ? s.platform === 'manual' : true)
+
+  const placeholder = isLoading
+    ? 'Loading shops...'
+    : manualOnly
+      ? 'Select a manual shop'
+      : 'Select a shop'
+  const emptyText = manualOnly ? 'No manual shops found.' : 'No shops found.'
 
   return (
     <div className={cn("flex items-center gap-3", className)}>
@@ -26,28 +40,28 @@ export default function ShopSelector({ selectedShopId, onShopChange, className }
         <Store className="size-4" />
         <span className="text-xs font-bold uppercase tracking-wider">Active Shop:</span>
       </div>
-      
-      <Select 
-        value={selectedShopId || ''} 
+
+      <Select
+        value={selectedShopId || ''}
         onValueChange={onShopChange}
-        disabled={isLoading || manualShops.length === 0}
+        disabled={isLoading || filteredShops.length === 0}
       >
         <SelectTrigger className="w-[280px] border-zinc-800 bg-zinc-900/50 text-zinc-100">
-          <SelectValue placeholder={isLoading ? "Loading shops..." : "Select a manual shop"} />
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent className="border-zinc-800 bg-zinc-950">
-          {manualShops.map((shop) => (
-            <SelectItem 
-              key={shop.id} 
+          {filteredShops.map((shop) => (
+            <SelectItem
+              key={shop.id}
               value={shop.id}
               className="focus:bg-teal-500/10 focus:text-teal-400"
             >
               {shop.name}
             </SelectItem>
           ))}
-          {manualShops.length === 0 && !isLoading && (
+          {filteredShops.length === 0 && !isLoading && (
             <div className="p-2 text-xs text-zinc-500 text-center">
-              No manual shops found.
+              {emptyText}
             </div>
           )}
         </SelectContent>

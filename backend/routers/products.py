@@ -22,9 +22,9 @@ async def list_products(
     shop_id: uuid.UUID,
     is_active: Optional[bool] = Query(True),
     db: AsyncSession = Depends(get_db),
-    shop=Depends(require_platform(ShopPlatform.MANUAL.value))
+    shop=Depends(get_shop_for_user)
 ):
-    """List all products for a manual shop."""
+    """List all products for a shop (any platform). Access is gated by get_shop_for_user."""
     service = CatalogService(db)
     return await service.get_products(shop_id, is_active=is_active)
 
