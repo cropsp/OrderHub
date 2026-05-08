@@ -143,6 +143,15 @@ class CatalogService:
         await self.db.execute(delete(PackagingBox).filter(PackagingBox.id == box_id))
         await self.db.commit()
 
+    async def find_product_by_external_ref(self, shop_id: uuid.UUID, external_ref: str) -> Optional[Product]:
+        query = (
+            select(Product)
+            .filter(Product.shop_id == shop_id, Product.external_ref == external_ref)
+            .options(selectinload(Product.variants))
+        )
+        result = await self.db.execute(query)
+        return result.scalar_one_or_none()
+
     # --- SKU Uniqueness Check ---
     async def is_sku_taken(self, shop_id: uuid.UUID, sku: str, exclude_variant_id: Optional[uuid.UUID] = None) -> bool:
         query = select(ProductVariant).join(Product).filter(

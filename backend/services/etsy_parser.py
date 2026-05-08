@@ -3,17 +3,118 @@ import io
 import uuid
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, Optional, Set
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.shop import Shop
 from models.order import Order, OrderItem, OrderStatus, OrderStatusHistory
+from models.product import Product, ProductVariant
+from models.shop import Shop
 from schemas.common import ImportResult
+from services.catalog_service import CatalogService
 from services.customer_service import upsert_customer
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_effective_sku(listing_id: str, raw_sku: Optional[str], used_in_listing: Set[str]) -> str:
+    """Generate an SKU when CSV is blank: etsy-{listing_id} for the first variant,
+    etsy-{listing_id}-{n} (n>=2) for subsequent ones, skipping any already used."""
+    cleaned = (raw_sku or "").strip()
+    if cleaned:
+        return cleaned
+    base = f"etsy-{listing_id}"
+    if base not in used_in_listing:
+        return base
+    n = 2
+    while f"{base}-{n}" in used_in_listing:
+        n += 1
+    return f"{base}-{n}"
+
+
+def _parse_decimal(raw: Any) -> Optional[Decimal]:
+    if raw in (None, "", " "):
+        return None
+    try:
+        return Decimal(str(raw).strip())
+    except (InvalidOperation, ValueError):
+        return None
+
+
+async def _ensure_catalog_row(
+    db: AsyncSession,
+    shop: Shop,
+    catalog_service: CatalogService,
+    row: Dict[str, Any],
+    catalog_cache: Dict[str, Dict[str, Any]],
+    counters: Dict[str, int],
+) -> Optional[ProductVariant]:
+    """Lazily create Product + ProductVariant rows for a CSV row.
+    Returns the variant the OrderItem should link to, or None when catalog work was skipped."""
+    listing_id = (row.get("Listing ID") or "").strip()
+    if not listing_id:
+        return None
+
+    cache = catalog_cache.get(listing_id)
+    if cache is None:
+        existing_product = await catalog_service.find_product_by_external_ref(shop.id, listing_id)
+        cache = {
+            "product": existing_product,
+            "skus_in_listing": set(),
+            "variants_by_sku": {},
+        }
+        if existing_product is not None:
+            for v in existing_product.variants:
+                if v.sku:
+                    cache["skus_in_listing"].add(v.sku)
+                    cache["variants_by_sku"][v.sku] = v
+        catalog_cache[listing_id] = cache
+
+    effective_sku = _compute_effective_sku(listing_id, row.get("SKU"), cache["skus_in_listing"])
+
+    cached_variant = cache["variants_by_sku"].get(effective_sku)
+    if cached_variant is not None:
+        return cached_variant
+
+    if await catalog_service.is_sku_taken(shop.id, effective_sku):
+        return None
+
+    product = cache["product"]
+    if product is None:
+        product = Product(
+            id=uuid.uuid4(),
+            shop_id=shop.id,
+            title=(row.get("Item Name") or "Unknown Item")[:500],
+            external_ref=listing_id,
+        )
+        db.add(product)
+        cache["product"] = product
+        counters["products_created"] += 1
+
+    variations_text = (row.get("Variations") or "").strip() or None
+    if variations_text and len(variations_text) > 255:
+        variations_text = variations_text[:255]
+
+    variant = ProductVariant(
+        id=uuid.uuid4(),
+        product_id=product.id,
+        sku=effective_sku,
+        variant_name=variations_text,
+        weight_g=0,
+        length_mm=0,
+        width_mm=0,
+        height_mm=0,
+        price=_parse_decimal(row.get("Price")),
+    )
+    db.add(variant)
+
+    cache["skus_in_listing"].add(effective_sku)
+    cache["variants_by_sku"][effective_sku] = variant
+    counters["variants_created"] += 1
+
+    return variant
 
 
 async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user_id: uuid.UUID) -> ImportResult:
@@ -30,7 +131,10 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
     skipped = 0
     errors = []
     total_processed_rows = 0
-    
+    catalog_cache: Dict[str, Dict[str, Any]] = {}
+    catalog_counters: Dict[str, int] = {"products_created": 0, "variants_created": 0}
+    catalog_service = CatalogService(db)
+
     # Group rows by Sale ID
     orders_data: Dict[str, list[Dict[str, Any]]] = {}
     rows_map: Dict[str, list[int]] = {}  # sale_id -> list of row numbers
@@ -130,6 +234,17 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
             # Order Items
             for row in rows:
                  # In etsy CSV sometimes it contains multiple quantities, some rows represent different items
+                 variant: Optional[ProductVariant] = None
+                 try:
+                     variant = await _ensure_catalog_row(
+                         db, shop, catalog_service, row, catalog_cache, catalog_counters
+                     )
+                 except Exception:
+                     logger.exception(
+                         "Catalog auto-create failed for sale_id=%s listing_id=%s; continuing with order import",
+                         sale_id, row.get("Listing ID")
+                     )
+
                  item = OrderItem(
                      order_id=order.id,
                      title=row.get("Item Name", "Unknown Item"),
@@ -138,10 +253,11 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
                      currency=row.get("Currency", "USD"),
                      sku=row.get("SKU"),
                      listing_id=row.get("Listing ID"),
-                     variations=row.get("Variations")
+                     variations=row.get("Variations"),
+                     product_variant_id=variant.id if variant is not None else None,
                  )
                  db.add(item)
-                 
+
                  # Append to order title if not already
                  if order.title == f"Etsy Order {sale_id}":
                       order.title = item.title
@@ -154,4 +270,10 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
 
     await db.flush() # Caller commits
 
-    return ImportResult(imported=imported, skipped=skipped, errors=errors)
+    return ImportResult(
+        imported=imported,
+        skipped=skipped,
+        errors=errors,
+        products_created=catalog_counters["products_created"],
+        variants_created=catalog_counters["variants_created"],
+    )

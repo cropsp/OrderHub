@@ -32,3 +32,5 @@ class ImportResult(BaseModel):
     imported: int
     skipped: int
     errors: list[dict]
+    products_created: int = 0
+    variants_created: int = 0
