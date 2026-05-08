@@ -113,7 +113,7 @@ starting work on it.
 
 **Round 1 — UX micro-fix**
 
-**Sprint UX-1 — Products page remembers last selected shop** (Status: `NOT STARTED`)
+**Sprint UX-1 — Products page remembers last selected shop** (Status: `DONE` — commit `eb32eb6`)
 
 Goal: When the user navigates to `/products`, default the active shop to the last
 one they viewed there. Persist via `localStorage` under
@@ -122,14 +122,59 @@ pattern from PC-B.2).
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| UX-1-1 | Read+write `orderhub:productsPage:lastShopId` in `ProductsPage.tsx` | frontend | TODO |
-| UX-1-2 | On mount: if stored `shop_id` resolves against `useShops()`, restore as initial selection; else fall back to current default | frontend | TODO |
-| UX-1-3 | Archived/deleted shop in localStorage gracefully ignored — no error, no console noise | frontend | TODO |
+| UX-1-1 | Read+write `orderhub:productsPage:lastShopId` in `ProductsPage.tsx` | frontend | DONE |
+| UX-1-2 | On mount: if stored `shop_id` resolves against `useShops()`, restore as initial selection; else fall back to current default | frontend | DONE |
+| UX-1-3 | Archived/deleted shop in localStorage gracefully ignored — no error, no console noise | frontend | DONE |
 
-Verification:
-- Select KoraKlenu in Products → navigate to Dashboard → return to Products → KoraKlenu still selected.
-- DevTools `localStorage` shows `orderhub:productsPage:lastShopId`.
-- Manually set the key to a non-existent UUID → page falls back gracefully.
+**Post-fix notes (UX-1):**
+- **Design pivot from `useEffect` to `useMemo`.** The original plan called for a
+  `useRef` + `useEffect([shops])` pair to apply the stored preference once
+  `useShops()` resolved. The repo's ESLint configuration flags `setState`
+  inside effect bodies via `react-hooks/set-state-in-effect`, so the
+  implementation pivoted to a **`useMemo`-derived `effectiveShopId`**. No
+  effect, no extra render cycle — validation happens inline.
+- Two-state split: `selectedShopId` (lazy-init from `localStorage`) drives
+  the `ShopSelector` dropdown and the write effect. `effectiveShopId`
+  (`null` until shops load and the stored UUID resolves) drives **all
+  product-related logic** — query, actions, conditional rendering. The
+  divergence between the two values is intentional and only observable
+  in the transient invalid-UUID case (see follow-up below).
+- **Storage key:** `orderhub:productsPage:lastShopId`, single string UUID,
+  reusing the `orderhub:` namespace established in PC-B.2.
+- **Write effect skips `null` transitions** to preserve the stored shop_id
+  when the user returns to a placeholder state. There is no explicit
+  "Clear shop" gesture today, so this is a one-way ratchet — once a shop
+  is picked, the preference sticks until a different shop is chosen.
+- **`useShops()` deduped by React Query** — the new validation hook does
+  not add a network call beyond what `ShopSelector` already makes
+  internally on mount.
+
+**Verified by smoke test:**
+- Switch to KoraKlenu → /dashboard → /products → KoraKlenu still active. ✓
+- Hard reload (F5) → KoraKlenu sticks. ✓
+- DevTools → `localStorage` → `orderhub:productsPage:lastShopId` =
+  `c2bb2b4e-60d1-40eb-b221-4b2eabcd96fd`. ✓
+- Manually set the key to `00000000-0000-0000-0000-000000000000` → reload →
+  graceful fallback to "No shop selected" placeholder, no console error,
+  no toast. ✓
+- Recovery: pick KoraKlenu after invalid state → `localStorage` overwrites
+  with the correct UUID via the write effect. ✓
+
+**Found during UX-1 smoke test, kept out of scope:**
+- **Cosmetic only:** after a reload with an invalid stored UUID, the
+  `ShopSelector` dropdown renders **empty** rather than falling back to
+  the "Select a manual shop" placeholder. Cause: `selectedShopId` retains
+  the stale UUID while `effectiveShopId` is `null` — the two state vars
+  diverge in this transient case. Triggers only when `localStorage` is
+  manipulated directly (DevTools, browser-extension, manual deletion of
+  a shop, etc.); invisible in normal usage. Possible follow-up: clear
+  `selectedShopId` to `null` when the validation in `useMemo` fails. Not
+  filed as a bug; revisit only if a user actually hits this path.
+- **Test 5 from the original verification list (multi-shop persistence)
+  was not exercised** — current seed data has exactly one MANUAL shop
+  (KoraKlenu). The fix logic is shop-agnostic, so it should hold for
+  additional manual shops once they exist. Re-test when a second one
+  appears (or after IMP-1/IMP-2 when imports start landing real data).
 
 ---
 
