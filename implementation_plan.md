@@ -17,6 +17,7 @@
 - Sprint PC-B.1 status: `DONE` (Shopify-style Inline Product Editing — commit `bf9f8ba`)
 - Sprint PC-B.2 status: `DONE` (Column Visibility Picker on ProductsPage — commit `46783bf`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
+- **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
 ## Architecture Schematic
 
@@ -97,6 +98,141 @@ frontend/src/
 ```
 
 ## Unified Backlog (Pending Tasks & Fixes)
+
+### Active Roadmap — Bug-Hunt & Imports (2026-05-08)
+
+Source-of-truth for current focus. Sprints below are sequenced from most-critical
+to least-critical based on the 2026-05-08 planning conversation. Sprints land in
+`task.md` one at a time, get reviewed with the planning agent, then executed by
+Claude Code. As each closes, its `Status` flips to `DONE` and post-fix notes are
+captured here. The "Explicitly deferred" table at the bottom is exhaustive — if
+a backlog item isn't in either an active sprint or that table, surface it before
+starting work on it.
+
+---
+
+**Round 1 — UX micro-fix**
+
+**Sprint UX-1 — Products page remembers last selected shop** (Status: `NOT STARTED`)
+
+Goal: When the user navigates to `/products`, default the active shop to the last
+one they viewed there. Persist via `localStorage` under
+`orderhub:productsPage:lastShopId` (mirrors the `orderhub:productsTable:columnVisibility`
+pattern from PC-B.2).
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| UX-1-1 | Read+write `orderhub:productsPage:lastShopId` in `ProductsPage.tsx` | frontend | TODO |
+| UX-1-2 | On mount: if stored `shop_id` resolves against `useShops()`, restore as initial selection; else fall back to current default | frontend | TODO |
+| UX-1-3 | Archived/deleted shop in localStorage gracefully ignored — no error, no console noise | frontend | TODO |
+
+Verification:
+- Select KoraKlenu in Products → navigate to Dashboard → return to Products → KoraKlenu still selected.
+- DevTools `localStorage` shows `orderhub:productsPage:lastShopId`.
+- Manually set the key to a non-existent UUID → page falls back gracefully.
+
+---
+
+**Round 2 — Imports auto-populate catalog**
+
+**Sprint IMP-1 — Etsy CSV importer auto-creates Products** (Status: `NOT STARTED`)
+
+Goal: Inside the existing two-step CSV preview/confirm flow, also INSERT into
+`products` and `product_variants` for SKUs not already in catalog. Pull every
+field the CSV offers; the user adjusts visibility/details in catalog later.
+**Skip-on-existing** by `(shop_id, sku)` — full skip, no field updates (preserves
+local edits). Empty SKU is generated as `etsy-{listing_id}` for single-variant
+rows or `etsy-{listing_id}-{n}` for multi-variant. Set `external_ref = listing_id`.
+**No retroactive linking** of existing `order_items` to newly-created variants —
+that decision is parked until we observe IMP-1 in practice.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| IMP-1-1 | Extend Etsy CSV parser in `services/import_service.py` to emit Product/Variant inserts alongside Order/OrderItem inserts | backend | TODO |
+| IMP-1-2 | Skip-on-existing-SKU logic keyed by `(shop_id, sku)` — no field updates on collision | backend | TODO |
+| IMP-1-3 | Empty-SKU fallback: generate `etsy-{listing_id}[-{n}]` | backend | TODO |
+| IMP-1-4 | Set `external_ref = listing_id` on the appropriate level (verify against CSV structure during planning) | backend | TODO |
+| IMP-1-5 | Preview step surfaces "N new products / M new variants will be created" alongside existing order preview | backend + frontend | TODO |
+| IMP-1-6 | Tests: re-importing same CSV creates zero duplicates; partial CSV creates only the missing entries; user-edited prices preserved on re-import | backend tests | TODO |
+
+Verification (manual):
+- Import a fresh Etsy CSV → Products page shows N new entries.
+- Re-import the same CSV → no duplicates created; no error toast.
+- Manually edit a generated row's price in catalog → re-import → edit preserved.
+- Inspect one auto-created variant in DB → `external_ref` matches Etsy listing ID.
+
+---
+
+**Sprint IMP-2 — Shopify sync auto-creates Products** (Status: `NOT STARTED`)
+
+Goal: Mirror IMP-1 inside the Shopify sync service. Pull all product+variant data
+from Shopify API. Skip-if-exists by `(shop_id, sku)`. Use Shopify's `variant.id`
+as `external_ref`. Empty SKU (rare for Shopify) → `shopify-{product_id}-{variant_id}`.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| IMP-2-1 | Extend `services/shopify_sync.py` to call catalog ensure-product/variant per item | backend | TODO |
+| IMP-2-2 | Same skip-on-existing semantics as IMP-1 | backend | TODO |
+| IMP-2-3 | Generated SKU fallback for the empty-SKU edge case | backend | TODO |
+| IMP-2-4 | Tests: incremental Shopify sync does not duplicate products on repeated runs | backend tests | TODO |
+
+---
+
+**Round 3 — Nova Poshta initiative (separate cadence, no CC)**
+
+**Sprint NP-DISC — Research, audit, and sandbox confirmation** (Status: `NOT STARTED`)
+
+Goal: Produce `docs/integrations/nova-poshta-audit-2026-05.md`. **No code changes** —
+discovery only. The planning agent drives the research and writes the doc;
+the user observes and approves the deliverable. Claude Code is **not** involved
+at this stage.
+
+The doc will contain:
+1. Competitive research — how 2-3 other CRM systems handle NP integration
+   (TTN creation, label printing, tracking, sender warehouse handling).
+2. Feature-by-feature audit of current OrderHub NP code
+   (`backend/services/nova_poshta_service.py`, `backend/routers/shipping.py`,
+   frontend NP forms) against the typical CRM feature set from #1.
+3. Confirmation of NP sandbox/test API existence + auth requirements.
+4. Prioritized fix list to drive subsequent NP-FIX-* sprints.
+
+Triggering context: a previous live test produced an unintended courier
+dispatch because no sender warehouse was selected on the TTN form. Rather
+than add a defensive validation immediately, the user wants to research the
+broader integration first, surface every related issue at once, and then
+test fixes against the sandbox API instead of risking live calls.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| NP-DISC-1 | Competitive research: 2-3 CRM systems' approach to NP | docs | TODO |
+| NP-DISC-2 | Code audit OrderHub vs typical NP feature set | docs | TODO |
+| NP-DISC-3 | NP sandbox/test API verification (existence, entrypoint, auth) | docs + small spike | TODO |
+| NP-DISC-4 | Deliverable: `docs/integrations/nova-poshta-audit-2026-05.md` with findings + prioritized fix list | docs | TODO |
+
+**Sprint NP-FIX-*** — TBD, defined after NP-DISC ships and the user approves
+the prioritized fix list. Each fix sprint follows the standard cycle
+(`task.md` → CC plan review → execute → smoke test → post-fix notes).
+
+---
+
+**Explicitly deferred (parked, no work this round)**
+
+Tracked here so the roadmap is exhaustive — none of these is forgotten,
+none is being worked on now. Each links to its existing detail elsewhere
+in this document where applicable, to avoid duplication.
+
+| ID | Task | Why deferred (2026-05-08) |
+|---|---|---|
+| BUG-4 | Orders list TOTAL + Dashboard widgets read stale `order.total_price` | Pending more user interaction with the system before deciding if it's a bug or by-design |
+| LINK-BACKFILL | Retroactively link historical `order_items` to catalog variants when their SKU appears in catalog | Decision blocked on observing IMP-1/IMP-2 behavior in practice |
+| PC-C | Sales Analytics per Product (see Section A) | Pure feature; revisit after current round closes |
+| Sprint 11 | Production & Deployment (see Section B) | System still local; prod is too early |
+| PERF-1 | Route-level chunk splitting (see Section B) | No measured perf issue yet |
+| TEST-1 | Vitest + Playwright smoke coverage (see Section B) | Out of current bug-hunting focus; revisit after IMP-2 |
+| PC-F-1 | Product photos (see Section A) | Requires new file-upload infrastructure |
+| Unlinked backfill (carried over from BUG-2/BUG-3 smoke tests) | UI gesture or migration to link historical Unlinked items in existing orders | Pre-existing constraint; no operational need yet |
+
+---
 
 ### A. Product Catalog — Enhancement Sprints
 
