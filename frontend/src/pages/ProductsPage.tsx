@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers, Archive, CheckCircle2, Columns3 } from 'lucide-react'
 import ShellPage from './ShellPage'
@@ -6,6 +6,7 @@ import ShopSelector from '@/components/inventory/ShopSelector'
 import ProductForm from '@/components/inventory/ProductForm'
 import CSVImportModal from '@/components/inventory/CSVImportModal'
 import { useProducts, useCreateProduct, useUpdateProduct, useDeleteProduct } from '@/hooks/useProducts'
+import { useShops } from '@/hooks/useShops'
 import { productsApi } from '@/api/products'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -52,11 +53,18 @@ const DEFAULT_VISIBILITY: Visibility = {
 }
 
 const STORAGE_KEY = 'orderhub:productsTable:columnVisibility'
+const SHOP_KEY = 'orderhub:productsPage:lastShopId'
 
 
 export default function ProductsPage() {
   const navigate = useNavigate()
-  const [selectedShopId, setSelectedShopId] = useState<string | null>(null)
+  const [selectedShopId, setSelectedShopId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(SHOP_KEY)
+    } catch {
+      return null
+    }
+  })
   const [searchQuery, setSearchQuery] = useState('')
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
@@ -77,9 +85,22 @@ export default function ProductsPage() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(visibility))
   }, [visibility])
 
+  const { data: shops } = useShops()
+
+  const effectiveShopId = useMemo(() => {
+    if (!shops || !selectedShopId) return null
+    return shops.some(s => s.id === selectedShopId) ? selectedShopId : null
+  }, [shops, selectedShopId])
+
+  useEffect(() => {
+    if (selectedShopId !== null) {
+      localStorage.setItem(SHOP_KEY, selectedShopId)
+    }
+  }, [selectedShopId])
+
   const visibleColumnCount = 2 + Object.values(visibility).filter(Boolean).length
 
-  const { data: products, isLoading } = useProducts(selectedShopId || '', viewMode === 'active')
+  const { data: products, isLoading } = useProducts(effectiveShopId || '', viewMode === 'active')
   const createProduct = useCreateProduct()
   const updateProduct = useUpdateProduct()
   const deleteProduct = useDeleteProduct()
@@ -90,18 +111,18 @@ export default function ProductsPage() {
   )
 
   const handleSave = async (data: any) => {
-    if (!selectedShopId) return
+    if (!effectiveShopId) return
     if (editingProduct) {
-      await updateProduct.mutateAsync({ id: editingProduct.id, shopId: selectedShopId, data })
+      await updateProduct.mutateAsync({ id: editingProduct.id, shopId: effectiveShopId, data })
     } else {
-      await createProduct.mutateAsync({ shopId: selectedShopId, data })
+      await createProduct.mutateAsync({ shopId: effectiveShopId, data })
     }
   }
 
   const handleDelete = (product: any) => {
-    if (!selectedShopId) return
+    if (!effectiveShopId) return
     if (window.confirm(`Are you sure you want to archive "${product.title}"?`)) {
-      deleteProduct.mutate({ id: product.id, shopId: selectedShopId })
+      deleteProduct.mutate({ id: product.id, shopId: effectiveShopId })
     }
   }
 
@@ -153,15 +174,15 @@ export default function ProductsPage() {
             <Button 
               variant="outline" 
               onClick={() => setIsImportOpen(true)}
-              disabled={!selectedShopId}
+              disabled={!effectiveShopId}
               className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
             >
               <FileSpreadsheet className="size-4 mr-2 text-teal-500" />
               Bulk Import
             </Button>
-            <Button 
+            <Button
               onClick={() => { setEditingProduct(null); setIsFormOpen(true); }}
-              disabled={!selectedShopId}
+              disabled={!effectiveShopId}
               className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg shadow-teal-900/20"
             >
               <Plus className="size-4 mr-2" />
@@ -171,7 +192,7 @@ export default function ProductsPage() {
         </div>
 
         {/* Content */}
-        {!selectedShopId ? (
+        {!effectiveShopId ? (
           <div className="flex flex-col items-center justify-center p-20 border-2 border-dashed border-zinc-800 rounded-3xl bg-zinc-900/5">
              <div className="size-16 rounded-2xl bg-zinc-900 flex items-center justify-center mb-4">
                 <Filter className="size-8 text-zinc-700" />
@@ -412,8 +433,8 @@ export default function ProductsPage() {
       <CSVImportModal 
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
-        onPreview={(file) => productsApi.bulkImportPreview(selectedShopId!, file)}
-        onConfirm={(token) => productsApi.bulkImportConfirm(selectedShopId!, token)}
+        onPreview={(file) => productsApi.bulkImportPreview(effectiveShopId!, file)}
+        onConfirm={(token) => productsApi.bulkImportConfirm(effectiveShopId!, token)}
         title="Import Products Catalog"
         description="Upload a CSV file to bulk-import products and variants into this shop."
         templateColumns={['title', 'sku', 'weight_g', 'length_mm', 'width_mm', 'height_mm']}
