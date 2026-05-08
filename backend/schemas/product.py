@@ -9,10 +9,10 @@ class ProductVariantBase(BaseModel):
     sku: Optional[str] = Field(None, max_length=100)
     variant_name: Optional[str] = Field(None, max_length=255)
     external_ref: Optional[str] = Field(None, max_length=255)
-    weight_g: int = Field(..., gt=0)
-    length_mm: int = Field(..., gt=0)
-    width_mm: int = Field(..., gt=0)
-    height_mm: int = Field(..., gt=0)
+    weight_g: int = Field(..., ge=0)
+    length_mm: int = Field(..., ge=0)
+    width_mm: int = Field(..., ge=0)
+    height_mm: int = Field(..., ge=0)
     price: Optional[Decimal] = Field(None, ge=0)
     cost_price: Optional[Decimal] = Field(None, ge=0)
     stock_quantity: int = Field(0, ge=0)
@@ -20,7 +20,10 @@ class ProductVariantBase(BaseModel):
 
 
 class ProductVariantCreate(ProductVariantBase):
-    pass
+    weight_g: int = Field(..., gt=0)
+    length_mm: int = Field(..., gt=0)
+    width_mm: int = Field(..., gt=0)
+    height_mm: int = Field(..., gt=0)
 
 
 class ProductVariantUpdate(BaseModel):
