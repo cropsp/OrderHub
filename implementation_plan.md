@@ -258,30 +258,77 @@ newly-created variants (parked).
 
 ---
 
-**Sprint BUG-5 — Blank-SKU dedup by Variations** (Status: `NOT STARTED`)
+**Sprint BUG-5 — Blank-SKU dedup by Variations** (Status: `DONE` — commit `28440f7`)
 
-Goal: Surfaced during IMP-1 smoke test against a real Etsy CSV. The current
-`_compute_effective_sku` helper increments a per-listing counter on **every**
-blank-SKU row, regardless of whether that row represents a logically distinct
-variant. Real-world Etsy data has many rows with the same listing + same blank
-SKU + same Variations (just different buyers). Result: listing 4343151753 in
-LeatherCraft UA produced **5 catalog variants** where only **2 distinct
-Variations** exist in the source CSV (`Color:Red,Pakning:Single Bat ID` × 3
-rows + `Color:Red,Pakning:Bat ID with Gift Box` × 2 rows).
+Goal: Surfaced during IMP-1 smoke test against a real Etsy CSV. The original
+`_compute_effective_sku` helper incremented a per-listing positional counter on
+**every** blank-SKU row, regardless of whether that row represented a logically
+distinct variant. Real-world Etsy data has many rows with the same listing +
+same blank SKU + same Variations (just different buyers); listing 4343151753
+in LeatherCraft UA produced **5 catalog variants** where only **2 distinct
+Variations** existed in the source CSV.
 
-Fix shape: when SKU is blank, dedupe by `(listing_id, normalized Variations)`
-within the import. Two reasonable shapes — pick the smaller diff in plan mode:
-- **(a)** Generated SKU keyed by content:
-  `etsy-{listing_id}-{hash(variations)[:8]}` (deterministic across imports;
-  same Variations → same generated SKU → `is_sku_taken` short-circuits on
-  re-import).
-- **(b)** Per-import map `(listing_id, normalized_variations) → variant`,
-  build the generated SKU once per unique Variations within the listing.
+Fix: content-keyed SKU generation. New `_normalize_variations(raw)` helper
+strips all whitespace and lowercases the Variations text; the result is
+md5-hashed, truncated to 8 hex chars, and appended as
+`etsy-{listing_id}-{hash}`. Empty Variations → `etsy-{listing_id}` (no suffix).
+Same Variations → same generated SKU → `is_sku_taken` short-circuits on
+re-import; variant_name preserves the **original untouched** Variations text
+(first-writer-wins).
 
-After the fix lands: **wipe LeatherCraft UA orders + products** in the test DB,
-**reimport the same CSV** with the fix, verify listing 4343151753 yields
-**exactly 2 variants** (collapse 5 → 2). Tasks defined in `task.md` at sprint
-start.
+**Post-sprint notes:**
+- **Plan deviation accepted: strip-all-whitespace, not collapse-to-single-space.**
+  The original task.md spec said "collapse internal runs of whitespace into
+  single spaces", but CC noticed that didn't satisfy the verification test
+  demanding `"Color:Red, Pakning:Single"` and `"Color:Red,Pakning:Single"`
+  (one space after comma vs none) collapse to the same SKU. Switched to
+  `re.sub(r"\s+", "", raw.strip()).lower()` — strip all whitespace before
+  hashing. Trade-off: word boundaries inside a single value (e.g. `"Bat ID"`
+  → `"BatID"` for hashing only) lose meaning. **`variant_name` preserves
+  the human form** so the catalog UI is unaffected. False-positive risk
+  (two truly distinct variations differing only by whitespace) is
+  vanishingly rare in real Etsy data — sellers don't author variants like
+  `"Sky Blue"` vs `"SkyBlue"`. Acceptable trade-off; documented here so
+  future readers don't think it's a bug.
+- **Hash collision is impossible by construction within a shop**: full SKU
+  always includes the `listing_id` prefix. Even if two distinct listings
+  happen to share Variations text and therefore share an 8-char suffix
+  (observed: `Color:Black` → `4da64648` for listings 4346731923, 4349699409,
+  4359285143 in this test data), the full SKUs `etsy-4346731923-4da64648`
+  / `etsy-4349699409-4da64648` / `etsy-4359285143-4da64648` are pairwise
+  unique. `is_sku_taken` checks the full string — no collision.
+- **`cache["skus_in_listing"]` removed.** Helper signature changed from
+  `_compute_effective_sku(listing_id, raw_sku, used_in_listing: Set[str])`
+  to `_compute_effective_sku(listing_id, raw_sku, variations)`. The set
+  is no longer needed because generation is content-deterministic.
+  In-import idempotency is still covered by the existing
+  `cache["variants_by_sku"]` map (same SKU appearing twice in a single
+  import returns the cached variant).
+- 7 new pytest cases covering BUG-5 regression + new edge cases (empty,
+  whitespace-only, case differences, distinct variations, mixed
+  empty/non-empty within a listing); 2 obsolete tests
+  (`subsequent_blanks_get_numeric_suffix`,
+  `skips_already_taken_numeric_suffixes`) removed; 4 existing tests
+  updated for the new helper signature. Total: **19/19 catalog tests +
+  43/43 backend suite green**.
+- **Smoke test confirmed (wipe + reimport ritual):**
+  - LeatherCraft UA wiped: 24 orders + 7 products deleted via
+    SQL `DELETE` (FK cascade on `orders.id` and `products.id` did the rest
+    — order_items, status_history, attachments, product_variants all
+    cleaned in two `DELETE` statements).
+  - Same Etsy CSV re-imported via `/imports`. Listing 4343151753
+    produced **2 variants** (collapse 5 → 2 confirmed). Total
+    LeatherCraft UA dropped from 11 → **8 variants** (7 products × correct
+    variant counts).
+  - SKUs of the auto-imported variants: `etsy-4343151753-dbaa9d00`
+    (`Color:Red,Pakning:Bat ID with Gift Box`) and
+    `etsy-4343151753-ab0def3e` (`Color:Red,Pakning:Single Bat ID`).
+  - `variant_name` on each preserves the **first-writer-wins original**
+    Variations text — untouched case, untouched whitespace, untouched
+    punctuation.
+  - **Idempotency check**: same CSV re-uploaded a second time →
+    response shows `products_created=0, variants_created=0`; catalog
+    unchanged. Hash-deterministic generation working as designed.
 
 ---
 
