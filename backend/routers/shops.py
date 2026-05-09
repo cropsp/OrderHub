@@ -196,8 +196,12 @@ async def manual_sync_shop(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
         
     try:
-        count = await sync_shop_orders(db, shop, current_user)
-        return {"status": "success", "synced_count": count}
+        sync_result = await sync_shop_orders(db, shop, current_user)
+        return {
+            "status": "success",
+            "synced_count": sync_result.imported,
+            **sync_result.model_dump(),
+        }
     except Exception as e:
         # Shopify import errors (auth failure, rate-limit, malformed payload) are actionable
         # for the operator triggering the sync; surface them. Traceback still goes to logs.

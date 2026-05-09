@@ -12,9 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.order import Order, OrderItem, OrderStatus, OrderStatusHistory
-from models.product import Product, ProductVariant
+from models.product import ProductVariant
 from models.shop import Shop
 from schemas.common import ImportResult
+from services.catalog_import import ensure_catalog_row
 from services.catalog_service import CatalogService
 from services.customer_service import upsert_customer
 
@@ -75,67 +76,29 @@ async def _ensure_catalog_row(
     catalog_cache: Dict[str, Dict[str, Any]],
     counters: Dict[str, int],
 ) -> Optional[ProductVariant]:
-    """Lazily create Product + ProductVariant rows for a CSV row.
-    Returns the variant the OrderItem should link to, or None when catalog work was skipped."""
+    """CSV-row wrapper. Resolves the Etsy-specific effective SKU (BUG-5 hash logic
+    for blank-SKU rows) and delegates to the shared catalog_import.ensure_catalog_row.
+    """
     listing_id = (row.get("Listing ID") or "").strip()
     if not listing_id:
         return None
 
-    cache = catalog_cache.get(listing_id)
-    if cache is None:
-        existing_product = await catalog_service.find_product_by_external_ref(shop.id, listing_id)
-        cache = {
-            "product": existing_product,
-            "variants_by_sku": {},
-        }
-        if existing_product is not None:
-            for v in existing_product.variants:
-                if v.sku:
-                    cache["variants_by_sku"][v.sku] = v
-        catalog_cache[listing_id] = cache
-
     effective_sku = _compute_effective_sku(listing_id, row.get("SKU"), row.get("Variations"))
-
-    cached_variant = cache["variants_by_sku"].get(effective_sku)
-    if cached_variant is not None:
-        return cached_variant
-
-    if await catalog_service.is_sku_taken(shop.id, effective_sku):
-        return None
-
-    product = cache["product"]
-    if product is None:
-        product = Product(
-            id=uuid.uuid4(),
-            shop_id=shop.id,
-            title=(row.get("Item Name") or "Unknown Item")[:500],
-            external_ref=listing_id,
-        )
-        db.add(product)
-        cache["product"] = product
-        counters["products_created"] += 1
-
     variations_text = (row.get("Variations") or "").strip() or None
-    if variations_text and len(variations_text) > 255:
-        variations_text = variations_text[:255]
 
-    variant = ProductVariant(
-        id=uuid.uuid4(),
-        product_id=product.id,
+    return await ensure_catalog_row(
+        db,
+        shop,
+        catalog_service,
+        external_product_id=listing_id,
+        product_title=row.get("Item Name") or "Unknown Item",
         sku=effective_sku,
         variant_name=variations_text,
-        weight_g=0,
-        length_mm=0,
-        width_mm=0,
-        height_mm=0,
+        external_variant_ref=None,
         price=_parse_decimal(row.get("Price")),
+        catalog_cache=catalog_cache,
+        counters=counters,
     )
-    db.add(variant)
-
-    cache["variants_by_sku"][effective_sku] = variant
-    counters["variants_created"] += 1
-
-    return variant
 
 
 async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user_id: uuid.UUID) -> ImportResult:
