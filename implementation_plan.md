@@ -180,31 +180,108 @@ pattern from PC-B.2).
 
 **Round 2 — Imports auto-populate catalog**
 
-**Sprint IMP-1 — Etsy CSV importer auto-creates Products** (Status: `NOT STARTED`)
+**Sprint IMP-1 — Etsy CSV importer auto-creates Products** (Status: `DONE` — commit `2d4b2f1`)
 
-Goal: Inside the existing two-step CSV preview/confirm flow, also INSERT into
-`products` and `product_variants` for SKUs not already in catalog. Pull every
-field the CSV offers; the user adjusts visibility/details in catalog later.
-**Skip-on-existing** by `(shop_id, sku)` — full skip, no field updates (preserves
-local edits). Empty SKU is generated as `etsy-{listing_id}` for single-variant
-rows or `etsy-{listing_id}-{n}` for multi-variant. Set `external_ref = listing_id`.
-**No retroactive linking** of existing `order_items` to newly-created variants —
-that decision is parked until we observe IMP-1 in practice.
+Goal: During Etsy CSV import, also INSERT into `products` and `product_variants`
+for SKUs not already in catalog. Pull every catalog-relevant field the CSV
+offers; the user adjusts visibility / cost / dimensions later in the catalog
+UI. **Skip-on-existing** by `(shop_id, sku)` — full skip, no field updates
+(preserves local edits). Empty SKU is generated as `etsy-{listing_id}` for the
+first blank variant, `etsy-{listing_id}-{n}` for subsequent. `external_ref =
+listing_id` on Product. **No retroactive linking** of existing `order_items` to
+newly-created variants (parked).
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| IMP-1-1 | Extend Etsy CSV parser in `services/import_service.py` to emit Product/Variant inserts alongside Order/OrderItem inserts | backend | TODO |
-| IMP-1-2 | Skip-on-existing-SKU logic keyed by `(shop_id, sku)` — no field updates on collision | backend | TODO |
-| IMP-1-3 | Empty-SKU fallback: generate `etsy-{listing_id}[-{n}]` | backend | TODO |
-| IMP-1-4 | Set `external_ref = listing_id` on the appropriate level (verify against CSV structure during planning) | backend | TODO |
-| IMP-1-5 | Preview step surfaces "N new products / M new variants will be created" alongside existing order preview | backend + frontend | TODO |
-| IMP-1-6 | Tests: re-importing same CSV creates zero duplicates; partial CSV creates only the missing entries; user-edited prices preserved on re-import | backend tests | TODO |
+| IMP-1-1 | Extend `services/etsy_parser.py` `parse_etsy_csv` to emit Product/Variant inserts alongside Order/OrderItem inserts | backend | DONE |
+| IMP-1-2 | Skip-on-existing-SKU logic keyed by `(shop_id, sku)` — full skip, no field updates | backend | DONE |
+| IMP-1-3 | Empty-SKU fallback: generate `etsy-{listing_id}[-{n}]` | backend | DONE |
+| IMP-1-4 | Set `external_ref = listing_id` on Product; Variant `external_ref` left null (CSV carries no per-variation external id) | backend | DONE |
+| IMP-1-5 | `ImportResult` extended with `products_created` and `variants_created` counters (default 0 — backwards-compatible with non-Etsy imports) | backend | DONE |
+| IMP-1-6 | Tests: 15 new vitest cases covering skip-on-existing, empty-SKU fallback, lazy Product insert, in-import idempotency, blank Listing ID skip, FK linking, etc. | backend tests | DONE |
 
-Verification (manual):
-- Import a fresh Etsy CSV → Products page shows N new entries.
-- Re-import the same CSV → no duplicates created; no error toast.
-- Manually edit a generated row's price in catalog → re-import → edit preserved.
-- Inspect one auto-created variant in DB → `external_ref` matches Etsy listing ID.
+**Post-sprint notes:**
+- **Plan deviation: no preview step exists for Etsy CSV.** The original
+  `task.md` framed the change as "extend the existing two-step CSV
+  preview/confirm flow" — that two-step flow is for **bulk product CSV
+  import** (different code path). Etsy CSV for **orders** is
+  single-step (`POST /api/imports/etsy` parses + commits in one request).
+  Adopted: extend `ImportResult` with two counters; the response surfaces
+  the catalog-side numbers without needing a new preview UI. Frontend
+  toast surface deferred — backend correctness verified via DevTools
+  Network response and direct API calls.
+- **Mapping rule (Q1 from planning):** `Product = unique Listing ID per
+  shop` (identity = `(shop_id, external_ref=listing_id)`). `Variant =
+  unique (Listing ID, effective_sku) within that listing` where
+  `effective_sku = csv.SKU` if non-blank, otherwise the generated
+  fallback. `Variations` text does **not** participate in identity — it
+  is informational only and goes into `ProductVariant.variant_name`
+  verbatim, truncated to 255. Two CSV rows of the same listing with
+  matching SKU but different Variations collapse to one variant; first
+  writer wins on `variant_name`. **This rule has a known gap on
+  blank-SKU rows — see BUG-5 below.**
+- **Hook placement (Q3):** inline single-pass. New helper
+  `_ensure_catalog_row(db, shop, row, catalog_cache)` runs before each
+  `db.add(OrderItem)` in `parse_etsy_csv`. Per-import in-memory cache
+  `dict[listing_id, dict]` survives across rows of one CSV (avoids
+  duplicate Product inserts within a single import).
+- **Backend gate option (Q6):** Option (B) — kept
+  `require_platform(MANUAL)` on the LIST endpoint as well as POST +
+  bulk-CSV. Catalog rows landed in DB but were unreachable through any
+  UI; resolved separately by **CAT-VIS-1** (see Bug Fixes 2026-05-08).
+- **Lazy Product insert (Q7):** Product row is appended to the session
+  only after **at least one variant** clears the
+  `is_sku_taken(shop_id, effective_sku)` check. A listing whose every
+  variant SKU collides with existing shop-wide SKUs leaves zero new
+  rows behind — no orphan Products.
+- **Optional Q5 — FK link to OrderItem accepted.** Freshly-inserted
+  `OrderItem` rows now set `product_variant_id` to the just-created
+  variant's id, so the "Unlinked" badge is gone for new imports
+  going forward. Snapshot fields (`snapshot_weight_g`, etc.) left
+  `None` to avoid polluting parcel calculation with the IMP-1 zero
+  sentinel; user backfills physical dimensions later, then existing
+  service flows refresh snapshots.
+- **Pydantic schema gotcha caught at planning time:** the existing
+  `CatalogService.create_product()` is unusable from the importer
+  because `ProductVariantCreate` enforces `gt=0` on the four physical
+  dimension fields, conflicting with the IMP-1 sentinel-`0` rule. The
+  importer instantiates `Product` and `ProductVariant` ORM models
+  directly with `db.add(...)` and a single `db.flush()` to get
+  `product_id` before inserting variants. (This same `gt=0` constraint
+  caused **BUG-6** when CAT-VIS-1 later opened the Read path —
+  resolved by splitting the validators Create-only.)
+- Smoke verified: a real Etsy CSV imported to LeatherCraft UA produced
+  7 unique Products (one per Listing ID), 11 Variants (incl. 5
+  spurious for listing 4343151753 — see BUG-5), FK link working on
+  every freshly-imported `OrderItem` ("Personalized Bat ID Card
+  Holder" order shows no "Unlinked" badge after import).
+
+---
+
+**Sprint BUG-5 — Blank-SKU dedup by Variations** (Status: `NOT STARTED`)
+
+Goal: Surfaced during IMP-1 smoke test against a real Etsy CSV. The current
+`_compute_effective_sku` helper increments a per-listing counter on **every**
+blank-SKU row, regardless of whether that row represents a logically distinct
+variant. Real-world Etsy data has many rows with the same listing + same blank
+SKU + same Variations (just different buyers). Result: listing 4343151753 in
+LeatherCraft UA produced **5 catalog variants** where only **2 distinct
+Variations** exist in the source CSV (`Color:Red,Pakning:Single Bat ID` × 3
+rows + `Color:Red,Pakning:Bat ID with Gift Box` × 2 rows).
+
+Fix shape: when SKU is blank, dedupe by `(listing_id, normalized Variations)`
+within the import. Two reasonable shapes — pick the smaller diff in plan mode:
+- **(a)** Generated SKU keyed by content:
+  `etsy-{listing_id}-{hash(variations)[:8]}` (deterministic across imports;
+  same Variations → same generated SKU → `is_sku_taken` short-circuits on
+  re-import).
+- **(b)** Per-import map `(listing_id, normalized_variations) → variant`,
+  build the generated SKU once per unique Variations within the listing.
+
+After the fix lands: **wipe LeatherCraft UA orders + products** in the test DB,
+**reimport the same CSV** with the fix, verify listing 4343151753 yields
+**exactly 2 variants** (collapse 5 → 2). Tasks defined in `task.md` at sprint
+start.
 
 ---
 
