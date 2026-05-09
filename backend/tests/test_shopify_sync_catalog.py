@@ -649,3 +649,95 @@ def test_router_response_preserves_synced_count_key():
     assert response["skipped"] == 2
     assert response["products_created"] == 3
     assert response["variants_created"] == 4
+
+
+# ---------- BUG-8: order title resolution ----------
+
+
+@pytest.mark.asyncio
+async def test_order_title_uses_first_line_item_for_single_item_order():
+    """BUG-8 regression: title comes from line item, not Shopify order code."""
+    shop = _make_shop()
+    db = _make_db()
+    svc = _make_catalog_service()
+    user = MagicMock(); user.id = uuid4()
+
+    payload = _graphql_payload([_order_node(
+        order_gid="gid://shopify/Order/91890",
+        name="#91890_1580",
+        line_items=[_line_item(
+            title="Heavy Mushroom Keychain", quantity=1, price="19.00",
+            sku="HMK-1",
+            product_gid="gid://shopify/Product/1100",
+            variant_gid="gid://shopify/ProductVariant/1200")],
+    )])
+
+    with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
+         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync.CatalogService", return_value=svc), \
+         patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
+        await sync_shop_orders(db, shop, user)
+
+    order_create = mock_create.await_args.args[1]
+    assert order_create.title == "Heavy Mushroom Keychain"
+    assert order_create.title != "#91890_1580"
+
+
+@pytest.mark.asyncio
+async def test_order_title_uses_first_line_item_with_multiple_items():
+    """Multi-item order: first line item wins (mirrors Etsy parser behaviour)."""
+    shop = _make_shop()
+    db = _make_db()
+    svc = _make_catalog_service()
+    user = MagicMock(); user.id = uuid4()
+
+    payload = _graphql_payload([_order_node(
+        order_gid="gid://shopify/Order/91891",
+        name="#91890_1581",
+        line_items=[
+            _line_item(title="Wallet", quantity=1, price="49.99", sku="WAL-X",
+                       product_gid="gid://shopify/Product/1101",
+                       variant_gid="gid://shopify/ProductVariant/1201"),
+            _line_item(title="Belt", quantity=1, price="29.00", sku="BLT-X",
+                       product_gid="gid://shopify/Product/1102",
+                       variant_gid="gid://shopify/ProductVariant/1202"),
+            _line_item(title="Keychain", quantity=1, price="9.00", sku="KCH-X",
+                       product_gid="gid://shopify/Product/1103",
+                       variant_gid="gid://shopify/ProductVariant/1203"),
+        ],
+    )])
+
+    with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
+         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync.CatalogService", return_value=svc), \
+         patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
+        await sync_shop_orders(db, shop, user)
+
+    order_create = mock_create.await_args.args[1]
+    assert order_create.title == "Wallet"
+    assert len(order_create.items) == 3
+
+
+@pytest.mark.asyncio
+async def test_order_title_falls_back_to_node_name_when_no_line_items():
+    """Defensive: zero line items → fall back to Shopify's node.name."""
+    shop = _make_shop()
+    db = _make_db()
+    svc = _make_catalog_service()
+    user = MagicMock(); user.id = uuid4()
+
+    payload = _graphql_payload([_order_node(
+        order_gid="gid://shopify/Order/91892",
+        name="#91890_1582",
+        line_items=[],
+    )])
+
+    with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
+         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync.CatalogService", return_value=svc), \
+         patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
+        await sync_shop_orders(db, shop, user)
+
+    order_create = mock_create.await_args.args[1]
+    assert order_create.title == "#91890_1582"
+    assert order_create.items == []

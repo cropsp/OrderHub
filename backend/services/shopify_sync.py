@@ -279,7 +279,8 @@ async def sync_shop_orders(db: AsyncSession, shop: Shop, system_user) -> ImportR
             order_create_payload = OrderCreate(
                 external_id=external_id,
                 shop_id=shop.id,
-                title=node.get("name") or f"Order #{external_id}",
+                title=(items_payload[0].title if items_payload
+                       else node.get("name") or f"Order #{external_id}"),
                 total_price=float(money.get("amount", 0) or 0),
                 currency=money.get("currencyCode", "USD"),
                 ordered_at=datetime.fromisoformat(node["createdAt"].replace("Z", "+00:00")),
