@@ -332,18 +332,95 @@ re-import; variant_name preserves the **original untouched** Variations text
 
 ---
 
-**Sprint IMP-2 — Shopify sync auto-creates Products** (Status: `NOT STARTED`)
+**Sprint IMP-2 — Shopify sync auto-creates Products + line items** (Status: `DONE` — commit `afbfd6c`)
 
-Goal: Mirror IMP-1 inside the Shopify sync service. Pull all product+variant data
-from Shopify API. Skip-if-exists by `(shop_id, sku)`. Use Shopify's `variant.id`
-as `external_ref`. Empty SKU (rare for Shopify) → `shopify-{product_id}-{variant_id}`.
+Goal: Initially scoped as "mirror IMP-1 for Shopify" — but the existing Shopify
+sync turned out **not** to ingest line items at all (the GraphQL query never
+fetched `lineItems`, so OrderHub-side `OrderItem` rows were empty for every
+synced order). IMP-2 therefore became three coupled changes in one sprint:
+extend the GraphQL query to pull line items, map them into `OrderItemCreate`
+payloads, and add catalog auto-create with the same skip-on-existing semantics
+as IMP-1. Skip-if-exists by `(shop_id, sku)`; Shopify `variant.id` numeric
+tail → `Variant.external_ref`; empty SKU →
+`shopify-{shopify_product_id}-{shopify_variant_id}`.
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| IMP-2-1 | Extend `services/shopify_sync.py` to call catalog ensure-product/variant per item | backend | TODO |
-| IMP-2-2 | Same skip-on-existing semantics as IMP-1 | backend | TODO |
-| IMP-2-3 | Generated SKU fallback for the empty-SKU edge case | backend | TODO |
-| IMP-2-4 | Tests: incremental Shopify sync does not duplicate products on repeated runs | backend tests | TODO |
+| IMP-2-1 | Extract IMP-1's catalog ensure logic to a shared helper `services/catalog_import.py` (`ensure_catalog_row` + `_weight_to_grams`) | backend | DONE |
+| IMP-2-2 | Etsy parser refactor: `_ensure_catalog_row` becomes a thin wrapper that resolves the BUG-5 effective SKU then delegates to the shared helper | backend | DONE |
+| IMP-2-3 | Extend Shopify `ORDERS_QUERY` to fetch `lineItems(first: 50)` with `variant { id, sku, title, product { id title }, inventoryItem.measurement.weight { value, unit } }` | backend | DONE |
+| IMP-2-4 | Rewrite `sync_shop_orders`: build `OrderItemCreate` per line item, call `ensure_catalog_row` per item, explicit `db.flush()` before `create_order`, return `ImportResult` (counters + errors), per-order error isolation | backend | DONE |
+| IMP-2-5 | Router `POST /shops/{id}/sync` response shape: merge `synced_count` (back-compat) with full `ImportResult` payload | backend | DONE |
+| IMP-2-6 | 28 new pytest cases (`test_shopify_sync_catalog.py`): GID parsing, weight-unit conversion (parametrized G/KG/OZ/LB), fresh sync, re-sync (zero), blank-SKU fallback, blocked-SKU lazy insert, in-sync dedup, flush ordering, null variant/product, "Default Title" sentinel, error isolation, router response | backend tests | DONE |
+
+**Post-sprint notes:**
+- **Q1 — Catalog helper extracted.** New `backend/services/catalog_import.py`
+  hosts `ensure_catalog_row(...)` with a platform-agnostic signature
+  (already-resolved SKU + product / variant fields + cache + counters).
+  Etsy parser keeps `_compute_effective_sku` (BUG-5 hash logic) locally and
+  delegates the rest. Confirmed second-consumer pattern: the abstraction
+  earns its keep when there are two real callers, not one. **Helper does
+  no `db.flush()`** — caller controls the unit-of-work boundary. **Cache
+  key is `external_product_id` only** — each invocation is per-shop scope,
+  so collision is impossible within a call (documented in helper's
+  docstring).
+- **Q2 — Real weight pulled from Shopify.** New `_weight_to_grams(weight)`
+  helper accepts the raw `{value, unit}` GraphQL subobject and converts to
+  grams: GRAMS×1, KILOGRAMS×1000, OUNCES×28.3495, POUNDS×453.592, rounded
+  to int. Falls back to `0` when the field is null/missing or unit is
+  unknown. Length / width / height stay `0` because Shopify doesn't
+  expose those via the standard Admin API query.
+- **Q3 — `ImportResult` reused, not duplicated.** The schema already had
+  the right shape (`imported, skipped, errors, products_created,
+  variants_created`) after IMP-1 extended it; reuse avoids a parallel
+  `SyncResult` schema with the same semantics. `errors` for Shopify
+  carries per-order failures (catch-and-continue) instead of CSV's
+  per-row, but the structural meaning is the same. Router preserves
+  back-compat by returning
+  `{"status": "success", "synced_count": result.imported, **result.model_dump()}` —
+  any frontend consumer of `synced_count` still works, new counters are
+  present.
+- **Critical implementation insight: explicit `await db.flush()` before
+  `create_order`.** `_apply_variant_snapshot` (`order_service.py:158-163`)
+  runs `select(ProductVariant).join(Product)` to fetch the variant before
+  copying its weight/dims/title onto the OrderItem. SQLAlchemy's default
+  autoflush *would* surface our pending `db.add(...)` catalog inserts —
+  but relying on autoflush is fragile. CC added an explicit flush after
+  the catalog loop, before `create_order`, so the unit-of-work boundary
+  is defensive and obvious. Without it,
+  `_apply_variant_snapshot` raises `HTTPException(400, "Product variant
+  not found...")` and aborts the order. Caught by **test #7
+  (`test_snapshot_fields_copied`)** which would have failed otherwise.
+- **"Default Title" sentinel.** Shopify products without variations get a
+  single variant with `title = "Default Title"`. Mapping that verbatim to
+  `variant_name` would make the catalog UI noisy. The sync stores
+  `variant_name = None` when the variant title is `"Default Title"` or
+  empty.
+- **Per-order error isolation.** A single bad order (e.g. malformed line
+  item, missing variant data) is caught, logged via `logger.exception`,
+  and appended to `errors`. The sync continues on the remaining orders.
+  Test #15 covers this.
+- **Smoke verified at endpoint level (real Shopify E2E deferred):**
+  the test DB's `MyShopify Store` has no Shopify access token
+  (`has_shopify_token: false`). `POST /shops/{id}/sync` returns
+  **200** with body
+  `{"status":"success","synced_count":0,"imported":0,"skipped":0,"errors":[],"products_created":0,"variants_created":0}` —
+  the no-credentials path early-returns gracefully (preserved from the
+  pre-IMP-2 behaviour), the new response shape is exactly as planned,
+  and **no spurious catalog rows are inserted** (`/products` for
+  MyShopify Store still returns 0). Live-data E2E (real lineItems →
+  Products + Variants + FK link) is deferred to the first prod-side
+  sync; we're trusting the 28 unit tests + 19 unchanged IMP-1 tests
+  (refactored `_ensure_catalog_row` wrapper still exercises the same
+  paths through the shared helper).
+- **Known limitations** (called out, not blocking):
+  - `lineItems(first: 50)` cap per order — orders with >50 line items
+    will silently truncate. Realistic Etsy/Shopify orders are 1–5 items,
+    so this is purely defensive. Add Shopify-side pagination as a
+    follow-up if it ever surfaces.
+  - GraphQL query cost increased ~500–800 points (within Shopify's
+    1000-point default budget). Watch production logs if cost warnings
+    appear; throttle `first: 50` orders if needed.
 
 ---
 
