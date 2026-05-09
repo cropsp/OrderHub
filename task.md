@@ -12,14 +12,14 @@
 
 _No active task. See [implementation_plan.md](implementation_plan.md) → Active Roadmap for the unified backlog._
 
-**Round 2 (Imports auto-populate catalog) is complete:** UX-1 + IMP-1 + BUG-5 +
-IMP-2 all shipped and verified. The catalog read+edit path works end-to-end
-for Etsy CSV imports and is wired for Shopify sync (live E2E deferred until
-real Shopify credentials are available in the test DB).
+**Round 2 (Imports auto-populate catalog) is fully complete:** UX-1 + IMP-1 +
+BUG-5 + IMP-2 + BUG-8 all shipped, all verified end-to-end against real data
+(Etsy CSV for Etsy shops; live Shopify dev store for Shopify shops). The
+catalog read+edit+import path works for both platforms.
 
 **Next on deck:** **NP-DISC** — Nova Poshta research + audit + sandbox API
-verification. This is a **discovery sprint, no Claude Code involvement** —
-the planning agent drives the research and writes
+verification. Discovery sprint, no Claude Code involvement; the planning
+agent drives the research and writes
 `docs/integrations/nova-poshta-audit-2026-05.md`. The user observes and
 approves the deliverable, after which subsequent NP-FIX-* sprints are
 defined.

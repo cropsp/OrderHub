@@ -400,19 +400,53 @@ tail → `Variant.external_ref`; empty SKU →
   item, missing variant data) is caught, logged via `logger.exception`,
   and appended to `errors`. The sync continues on the remaining orders.
   Test #15 covers this.
-- **Smoke verified at endpoint level (real Shopify E2E deferred):**
-  the test DB's `MyShopify Store` has no Shopify access token
-  (`has_shopify_token: false`). `POST /shops/{id}/sync` returns
-  **200** with body
-  `{"status":"success","synced_count":0,"imported":0,"skipped":0,"errors":[],"products_created":0,"variants_created":0}` —
-  the no-credentials path early-returns gracefully (preserved from the
-  pre-IMP-2 behaviour), the new response shape is exactly as planned,
-  and **no spurious catalog rows are inserted** (`/products` for
-  MyShopify Store still returns 0). Live-data E2E (real lineItems →
-  Products + Variants + FK link) is deferred to the first prod-side
-  sync; we're trusting the 28 unit tests + 19 unchanged IMP-1 tests
-  (refactored `_ensure_catalog_row` wrapper still exercises the same
-  paths through the shared helper).
+- **Live-Shopify E2E smoke (post-commit):** the user pointed
+  `MyShopify Store` (renamed to **Lamamarka Shopify**) at a real
+  Shopify dev store URL `08f330-ef.myshopify.com` and pasted a real
+  Admin API token. `POST /shops/{id}/sync` returned 200 with
+  `imported=50, skipped=0, products_created=11, variants_created=14,
+  errors=[]`. Verified through the API and the browser:
+  - **Line items pulled.** Each synced order has the right number of
+    `OrderItem` rows (e.g. order `7148183421084` → 1 item: "Heavy
+    Mushroom Keychain", qty 1, unit_price $14.99).
+  - **Real weights from Shopify.** All 14 variants got non-zero
+    `weight_g` (distribution: 100g × 10, 200g × 2, 300g × 2). Q2 unit
+    conversion verified end-to-end against real `inventoryItem.measurement.weight`
+    payloads.
+  - **FK link populated.** `OrderItem.product_variant_id` set on
+    every imported item; the catalog detail page shows no "Unlinked"
+    badge.
+  - **Snapshot fields copied.** `OrderItem.snapshot_weight_g`,
+    `snapshot_title` populated correctly via `_apply_variant_snapshot`
+    — the explicit `db.flush()` ordering is observably correct in
+    production data.
+  - **Lazy Product insert + dedup verified.** "Heavy Mushroom
+    Keychain" appears in multiple orders → 1 Product, 1 Variant in
+    catalog, all order items FK-linked to the same row.
+  - **All variants got fallback SKUs** (`shopify-{product_id}-{variant_id}`).
+    Lamamarka's Shopify variants have no SKU values assigned —
+    legitimate for a small handmade catalog. Real-SKU code path
+    works (covered by tests #3, #6) but had no real data to exercise
+    on this shop.
+  - **Idempotency verified.** Second sync on the same data:
+    `imported=0, skipped=50, products_created=0, variants_created=0,
+    errors=[]`. Hash + `(shop_id, sku)` shop-wide dedup short-circuits
+    every path.
+- **Cosmetic notes from the live smoke (not filed as bugs):**
+  - **"Unknown Shopify Customer".** Shopify returned `null` for
+    `customer.firstName/lastName` on every imported order — likely
+    a missing app permission scope (`read_customers`) on the dev
+    store's private app. The sync handles this gracefully via the
+    existing `or "Unknown Shopify Customer"` fallback at
+    `shopify_sync.py:157`. If the user wants real customer names,
+    grant the missing scope on the Shopify side; no OrderHub code
+    change required.
+  - **Order title = Shopify `name` (`91890_1580`)** rather than the
+    line-item title. The original sync code (pre-IMP-2) used
+    `node.get("name")` for the order title and IMP-2 preserved that
+    behaviour; the Etsy parser uses the first item title instead.
+    Different by design — flag if the operator finds it confusing,
+    but not in scope for IMP-2.
 - **Known limitations** (called out, not blocking):
   - `lineItems(first: 50)` cap per order — orders with >50 line items
     will silently truncate. Realistic Etsy/Shopify orders are 1–5 items,
@@ -421,6 +455,62 @@ tail → `Variant.external_ref`; empty SKU →
   - GraphQL query cost increased ~500–800 points (within Shopify's
     1000-point default budget). Watch production logs if cost warnings
     appear; throttle `first: 50` orders if needed.
+
+---
+
+**Sprint BUG-8 — Shopify order title from first line item, not order code** (Status: `DONE` — commit `c91e321`)
+
+Goal: Surfaced during IMP-2 live smoke against the real Lamamarka Shopify
+store. The orders list PRODUCT column showed Shopify's order code (e.g.
+`91890_1580`) instead of the line-item product title — Etsy-imported orders
+already showed real product names because `etsy_parser.py:146-147` overrides
+the synthetic placeholder with the first item's title. Shopify sync at
+`shopify_sync.py:282` set `title = node.get("name") or f"Order #{external_id}"`
+and never overrode, so the Shopify `order.name` (sequence code) leaked into
+the OrderHub `Order.title` field.
+
+Fix: single-expression change. When IMP-2 finishes building `items_payload`
+inside the per-order try-block, prefer the first item's title; fall back to
+`node.name` only when zero line items are present.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| BUG-8-1 | Replace `title=node.get("name") or f"Order #{external_id}"` at `shopify_sync.py:282` with conditional that prefers `items_payload[0].title` when non-empty | backend | DONE |
+| BUG-8-2 | 3 new pytest cases in `test_shopify_sync_catalog.py`: single-item regression, multi-item first-wins, empty-line-items fallback | backend tests | DONE |
+
+**Post-sprint notes:**
+- Final expression:
+  ```python
+  title=(items_payload[0].title if items_payload
+         else node.get("name") or f"Order #{external_id}"),
+  ```
+  `items_payload` is built ~24 lines above the call site in the same try
+  block, so it's already populated when `OrderCreate(...)` is constructed.
+- **`"Unknown Item"` fallback inherited.** `OrderItemCreate.title` is set
+  from `li.get("title") or "Unknown Item"` at line 259 — so a malformed
+  Shopify line item with empty title becomes `"Unknown Item"` in the
+  OrderItem AND propagates that same value to `Order.title`. No extra
+  defensive code needed at the title site; the safety net is upstream.
+- **Q3 verified concretely.** CC ran
+  `grep -n "order\.title\|\.title ==" backend/tests/test_shopify_sync_catalog.py`
+  in plan mode and found one match at line 451
+  (`assert items[0].title == "Custom Engraving"`) which is a line-item
+  assertion, not `order.title`. **Zero existing tests needed
+  rewriting.** The 28 IMP-2 tests + 71-test suite stay green.
+- 3 new tests added; total backend suite **74/74 green**.
+- **Smoke verified end-to-end (post wipe+resync):**
+  - Lamamarka Shopify wiped (50 orders + 11 products via two `DELETE`
+    statements, FK CASCADE handled the rest).
+  - Same Shopify sync re-triggered → identical counts (50 orders, 11
+    products, 14 variants — sync is deterministic).
+  - All 50 order titles in DB now match line-item product names
+    (verified via API); **0 orders carry the `91890_*` code format**
+    that was characteristic of the bug.
+  - Browser smoke: `/orders` filtered by Lamamarka Shopify → PRODUCT
+    column shows real names ("Heavy Mushroom Keychain",
+    "Heavy-Duty Belt Carabiner", "Heavy-Duty Carabiner with Two",
+    "Belt with Face", "Compact Commander Carabiner", …). Order detail
+    page top title also reflects the line item.
 
 ---
 
