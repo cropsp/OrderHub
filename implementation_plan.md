@@ -490,6 +490,114 @@ landed before the code commit so git history reads as discrete docs vs. fix chan
   historical orders) — at that point it becomes a UX/migration design
   decision, not a technical debt item.
 
+**Bug Fixes (2026-05-08)**
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| CAT-VIS-1 | Expose Etsy/Shopify shop catalogs in Products UI (read/edit-only) | backend + frontend | DONE — commit `a5d713d` |
+| BUG-6 | `ProductVariantRead` 500s on zero-dimension rows; split `gt=0` validators Create-only | backend | DONE — commit `71c75b2` |
+| BUG-7 | Frontend blocked edit of zero-dimension variants; switched to diff-based variant patch | frontend | DONE — commit `0ef1f6d` |
+
+**Post-fix notes (CAT-VIS-1):**
+- `backend/routers/products.py` line 25 swapped
+  `require_platform(MANUAL)` → `get_shop_for_user` on the LIST endpoint
+  only. POST + bulk-CSV preview/confirm endpoints retain the MANUAL gate
+  (verified: 4 routes share the gate at lines 25/37/103/139; only the
+  GET list relaxed). Decision rationale documented as Option B in
+  `task.md` at planning time.
+- `frontend/src/components/inventory/ShopSelector.tsx` gained a
+  `manualOnly?: boolean` prop, defaulting to `true` so existing call
+  sites (`PackagingPage.tsx:58-61`) keep manual-only behaviour without
+  edits. `ProductsPage.tsx` opts out via `manualOnly={false}`.
+- `frontend/src/pages/ProductsPage.tsx` derives `isManual` via a new
+  `useMemo` against the loaded shops list, then **hides** Add Product /
+  Bulk Import buttons when active shop is non-MANUAL (preferred over
+  disabling — fewer noise, the user already understands platform-driven
+  imports from the Imports tab). Header copy and empty-state copy moved
+  from MANUAL-specific to platform-neutral
+  ("Manage product catalog and physical specifications.").
+- 6 new pytest cases (`tests/test_products_platform_gate.py`):
+  list endpoint accepts etsy/shopify/manual; `require_platform("manual")`
+  still blocks etsy/shopify and allows manual.
+- Smoke test confirmed: dropdown lists all four shops; KoraKlenu shows
+  buttons + manual catalog; LeatherCraft UA shows IMP-1 catalog with
+  buttons hidden (after BUG-6 unblocked the Read serialization);
+  MyShopify Store shows empty state cleanly; `/packaging` unchanged.
+
+**Post-fix notes (BUG-6):**
+- After CAT-VIS-1 opened the read path, `GET /api/shops/{etsy_shop_id}/products`
+  returned **500** for any shop with IMP-1-imported variants.
+  `ProductVariantBase` (`backend/schemas/product.py:12-15`) declared
+  `weight_g/length_mm/width_mm/height_mm` with `gt=0`, and
+  `ProductVariantRead` inherited from it (line 40). FastAPI's response-
+  model serialization re-validated those fields on every read and raised
+  `ValidationError` against IMP-1's deliberate `0` sentinel. KoraKlenu
+  (manual, real dimensions) returned 200 fine; only IMP-1-touched shops
+  surfaced the bug.
+- Fix: relaxed `ProductVariantBase` to `ge=0` on the four dimension
+  fields; re-tightened to `gt=0` only on `ProductVariantCreate` by
+  overriding those fields. `ProductVariantRead` inherits the relaxed
+  Base and serializes zero-dimension rows cleanly. `ProductVariantUpdate`
+  was deliberately **not** relaxed — its `gt=0` is correct and is
+  separately addressed by BUG-7's diff semantics on the frontend (so a
+  PATCH never sends an explicit `0` for an unchanged field).
+- 10 new pytest cases (`tests/test_product_variant_schema.py`): Read
+  accepts zero dimensions (regression guard), Create accepts positive +
+  rejects zero per-field (parametrized), Update rejects zero per-field
+  (parametrized — guards against future drift on the strict Update path).
+- Smoke confirmed: LeatherCraft UA catalog renders 7 products / 11
+  variants with `0g` weights visible (post BUG-7, the user can edit them
+  in place); KoraKlenu unchanged.
+
+**Post-fix notes (BUG-7):**
+- BUG-6 unblocked the Read path but the Write path was still broken:
+  `frontend/src/pages/ProductDetailPage.tsx`'s `handleSave` (lines
+  196-204 client guard) demanded all four dimensions `> 0` on **every**
+  variant in the draft, regardless of whether the user touched them.
+  The patch builder (lines 219-233) also serialized every field
+  verbatim — even with the client guard relaxed, the backend's
+  `ProductVariantUpdate.gt=0` would 422 on untouched zero-dimension
+  fields.
+- Fix: extracted module-level `diffVariant(draft, original)` helper
+  that compares per-field with mode-aware semantics:
+  - **Numeric** (weight/dims/stock) — coerce draft to `Number(...)`,
+    compare via `===`. NaN → omitted from patch.
+  - **Decimal-string** (price/cost_price) — normalize both sides via
+    `Number(...)` so `'130.00' === '130'` reads as no change. Empty
+    draft + non-null original → emit `field: null` (clear-to-null).
+  - **String-or-null** (sku/variant_name) — normalize empty string
+    ↔ null to a single canonical "empty"; emit `null` when the user
+    cleared a previously-populated field.
+  Returns either a partial `ProductVariantPatch` of changed fields
+  (always including `id`) or `null` if nothing changed (caller skips
+  the variant entirely → free win on no-op patches).
+- `handleSave` now validates **only** the fields present in the diff
+  for existing variants. New variants (no `id`) keep today's full-payload
+  + strict validation, extracted into a sibling `validateNewVariant`
+  helper. Toast wording unchanged.
+- 9 new vitest cases (`__tests__/ProductDetailPage.diffVariant.test.ts`):
+  zero-sentinel guard (the BUG-7 regression), weight 0 → 120 isolation,
+  cost_price clear-to-null, Decimal `'130.00' === '130'` normalization
+  (KoraKlenu regression guard), sku empty↔null normalization,
+  KoraKlenu price-only diff, plus `validateNewVariant` accept/reject
+  cases.
+- Smoke test confirmed all 5 task.md verification steps:
+  weight 0→120 saves with dims staying 0, weight→0 rejects, new
+  variant with 0 dims rejects, cost_price clear→null persists,
+  KoraKlenu Brown price 130→135 doesn't touch Black variant.
+
+**End-of-day rollup (2026-05-08):**
+The catalog read+edit path is now end-to-end functional for Etsy/Shopify
+auto-imported rows. The user can finally see what IMP-1 imported and
+fill in physical dimensions / cost prices one at a time. The **only
+remaining data-correctness issue from this batch** is **BUG-5**
+(blank-SKU dedup-by-Variations) — visible right now as listing
+4343151753 ("Personalized Spidey ID Card Holder") having 5 catalog
+variants where it should have 2 ("Single Bat ID" × 3 rows + "Bat ID
+with Gift Box" × 2 rows in the source CSV, all with empty SKU,
+collapsed today by per-row counter instead of per-Variations key).
+Wipe-and-reimport of LeatherCraft UA is queued right after BUG-5 lands.
+
 ### C. Nova Poshta Full Audit Fixes (Completed 2026-04-23)
 
 Comprehensive overhaul based on the [NP Audit Report](file:///home/serhii/projects/OrderHub/agents/skills/np-audit/SKILL.md).
