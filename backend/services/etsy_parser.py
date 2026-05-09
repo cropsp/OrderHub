@@ -1,10 +1,12 @@
 import csv
+import hashlib
 import io
+import re
 import uuid
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,19 +21,41 @@ from services.customer_service import upsert_customer
 logger = logging.getLogger(__name__)
 
 
-def _compute_effective_sku(listing_id: str, raw_sku: Optional[str], used_in_listing: Set[str]) -> str:
-    """Generate an SKU when CSV is blank: etsy-{listing_id} for the first variant,
-    etsy-{listing_id}-{n} (n>=2) for subsequent ones, skipping any already used."""
+def _normalize_variations(raw: Optional[str]) -> str:
+    """Normalize Variations text for content-keyed SKU bucketing.
+
+    Strips all whitespace (outer + inner) and lowercases. Aggressive on
+    purpose: real Etsy CSVs are inconsistent about spaces around commas
+    (`"a, b"` vs `"a,b"`) and casing — both should bucket identically.
+    Inner spaces inside terms (`"Bat ID"`) lose word boundaries here, but
+    that's fine for hash keying since identical groups still match
+    identically; the human-readable form is preserved separately in
+    `variant_name`.
+    """
+    if not raw:
+        return ""
+    return re.sub(r"\s+", "", raw).lower()
+
+
+def _compute_effective_sku(
+    listing_id: str,
+    raw_sku: Optional[str],
+    variations: Optional[str],
+) -> str:
+    """Generate an SKU when CSV is blank, keyed by normalized Variations content.
+
+    - Explicit SKU → returned as-is (stripped).
+    - Empty Variations → etsy-{listing_id} (single-variant listing case).
+    - Non-empty Variations → etsy-{listing_id}-{md5(normalized)[:8]}.
+    """
     cleaned = (raw_sku or "").strip()
     if cleaned:
         return cleaned
-    base = f"etsy-{listing_id}"
-    if base not in used_in_listing:
-        return base
-    n = 2
-    while f"{base}-{n}" in used_in_listing:
-        n += 1
-    return f"{base}-{n}"
+    normalized = _normalize_variations(variations)
+    if not normalized:
+        return f"etsy-{listing_id}"
+    digest = hashlib.md5(normalized.encode("utf-8")).hexdigest()[:8]
+    return f"etsy-{listing_id}-{digest}"
 
 
 def _parse_decimal(raw: Any) -> Optional[Decimal]:
@@ -62,17 +86,15 @@ async def _ensure_catalog_row(
         existing_product = await catalog_service.find_product_by_external_ref(shop.id, listing_id)
         cache = {
             "product": existing_product,
-            "skus_in_listing": set(),
             "variants_by_sku": {},
         }
         if existing_product is not None:
             for v in existing_product.variants:
                 if v.sku:
-                    cache["skus_in_listing"].add(v.sku)
                     cache["variants_by_sku"][v.sku] = v
         catalog_cache[listing_id] = cache
 
-    effective_sku = _compute_effective_sku(listing_id, row.get("SKU"), cache["skus_in_listing"])
+    effective_sku = _compute_effective_sku(listing_id, row.get("SKU"), row.get("Variations"))
 
     cached_variant = cache["variants_by_sku"].get(effective_sku)
     if cached_variant is not None:
@@ -110,7 +132,6 @@ async def _ensure_catalog_row(
     )
     db.add(variant)
 
-    cache["skus_in_listing"].add(effective_sku)
     cache["variants_by_sku"][effective_sku] = variant
     counters["variants_created"] += 1
 

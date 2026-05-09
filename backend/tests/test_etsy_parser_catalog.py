@@ -1,11 +1,12 @@
-"""IMP-1 — Etsy CSV importer auto-creates Products / ProductVariants.
+"""IMP-1 + BUG-5 — Etsy CSV importer auto-creates Products / ProductVariants.
 
 Covers the catalog auto-create path in services.etsy_parser:
-- effective SKU generation (empty-SKU fallback)
+- effective SKU generation (content-keyed by normalized Variations)
 - _ensure_catalog_row decision matrix (lazy Product insert, shop-wide SKU dedup,
   in-import idempotency, missing Listing ID handling)
 - parse_etsy_csv counter threading and default dimension sentinel.
 """
+import re
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -18,6 +19,9 @@ from services.etsy_parser import (
     _ensure_catalog_row,
     parse_etsy_csv,
 )
+
+
+HASHED_SKU_RE = re.compile(r"^etsy-[A-Za-z0-9_-]+-[0-9a-f]{8}$")
 
 
 def _make_shop():
@@ -46,29 +50,51 @@ def _make_catalog_service(*, existing_product=None, taken_skus=None):
 
 
 def test_effective_sku_explicit_passes_through():
-    assert _compute_effective_sku("123", "  CUSTOM-SKU  ", set()) == "CUSTOM-SKU"
+    assert _compute_effective_sku("123", "  CUSTOM-SKU  ", None) == "CUSTOM-SKU"
+    assert _compute_effective_sku("123", "  CUSTOM-SKU  ", "Color: Red") == "CUSTOM-SKU"
 
 
-def test_effective_sku_first_blank_no_suffix():
-    assert _compute_effective_sku("123", "", set()) == "etsy-123"
-    assert _compute_effective_sku("123", None, set()) == "etsy-123"
-    assert _compute_effective_sku("123", "   ", set()) == "etsy-123"
+def test_effective_sku_empty_variations_no_suffix():
+    assert _compute_effective_sku("123", "", None) == "etsy-123"
+    assert _compute_effective_sku("123", None, None) == "etsy-123"
+    assert _compute_effective_sku("123", "   ", "") == "etsy-123"
+    assert _compute_effective_sku("123", "", "   ") == "etsy-123"
 
 
-def test_effective_sku_subsequent_blanks_get_numeric_suffix():
-    used = set()
-    sku1 = _compute_effective_sku("123", "", used)
-    used.add(sku1)
-    sku2 = _compute_effective_sku("123", "", used)
-    used.add(sku2)
-    sku3 = _compute_effective_sku("123", "", used)
-    used.add(sku3)
-    assert (sku1, sku2, sku3) == ("etsy-123", "etsy-123-2", "etsy-123-3")
+def test_effective_sku_same_variations_same_sku():
+    sku1 = _compute_effective_sku("L", "", "Color:Red,Size:M")
+    sku2 = _compute_effective_sku("L", "", "Color:Red,Size:M")
+    assert sku1 == sku2
+    assert re.match(r"^etsy-L-[0-9a-f]{8}$", sku1)
 
 
-def test_effective_sku_skips_already_taken_numeric_suffixes():
-    used = {"etsy-123", "etsy-123-2"}
-    assert _compute_effective_sku("123", "", used) == "etsy-123-3"
+def test_effective_sku_normalizes_whitespace():
+    sku1 = _compute_effective_sku("L", "", "Color:Red, Pakning:Single")
+    sku2 = _compute_effective_sku("L", "", "Color:Red,Pakning:Single")
+    sku3 = _compute_effective_sku("L", "", "  Color:Red,Pakning:Single  ")
+    assert sku1 == sku2 == sku3
+
+
+def test_effective_sku_normalizes_case():
+    sku1 = _compute_effective_sku("L", "", "Color:Red")
+    sku2 = _compute_effective_sku("L", "", "color:red")
+    sku3 = _compute_effective_sku("L", "", "COLOR:RED")
+    assert sku1 == sku2 == sku3
+
+
+def test_effective_sku_distinct_variations_distinct_skus():
+    sku_red = _compute_effective_sku("L", "", "Color:Red")
+    sku_blue = _compute_effective_sku("L", "", "Color:Blue")
+    assert sku_red != sku_blue
+    assert re.match(r"^etsy-L-[0-9a-f]{8}$", sku_red)
+    assert re.match(r"^etsy-L-[0-9a-f]{8}$", sku_blue)
+
+
+def test_effective_sku_idempotent_across_imports():
+    """Hash determinism: same inputs always produce same output across import runs."""
+    sku1 = _compute_effective_sku("L", "", "Color:Red")
+    sku2 = _compute_effective_sku("L", "", "Color:Red")
+    assert sku1 == sku2
 
 
 # ---------- _ensure_catalog_row ----------
@@ -199,8 +225,54 @@ async def test_ensure_catalog_blank_sku_fallback_within_listing():
 
     variants = [await _ensure_catalog_row(db, shop, svc, r, cache, counters) for r in rows]
 
-    assert [v.sku for v in variants] == ["etsy-111", "etsy-111-2", "etsy-111-3"]
+    skus = [v.sku for v in variants]
+    assert all(re.match(r"^etsy-111-[0-9a-f]{8}$", s) for s in skus)
+    assert len(set(skus)) == 3
     assert counters == {"products_created": 1, "variants_created": 3}
+
+
+@pytest.mark.asyncio
+async def test_ensure_catalog_dedups_blank_sku_by_variations():
+    """BUG-5: 5 rows under one listing with 2 distinct normalized Variations
+    groups (whitespace + case mixed across rows) → 1 Product + 2 Variants.
+    Calls 2..5 hit the variants_by_sku cache and return the same instances."""
+    shop = _make_shop()
+    db = _make_db()
+    svc = _make_catalog_service()
+    counters = {"products_created": 0, "variants_created": 0}
+    cache = {}
+    rows = [
+        # Group A: "color:red,pakning:single bat id" — 3 rows w/ whitespace+case variation
+        {"Listing ID": "L", "Item Name": "Holder", "SKU": "",
+         "Variations": "Color:Red,Pakning:Single Bat ID"},
+        {"Listing ID": "L", "Item Name": "Holder", "SKU": "",
+         "Variations": "color:red, pakning:single bat id"},
+        {"Listing ID": "L", "Item Name": "Holder", "SKU": "",
+         "Variations": "  Color:Red,Pakning:Single Bat ID  "},
+        # Group B: "color:red,pakning:bat id with gift box" — 2 rows
+        {"Listing ID": "L", "Item Name": "Holder", "SKU": "",
+         "Variations": "Color:Red,Pakning:Bat ID with Gift Box"},
+        {"Listing ID": "L", "Item Name": "Holder", "SKU": "",
+         "Variations": "COLOR:RED,PAKNING:BAT ID WITH GIFT BOX"},
+    ]
+
+    variants = [await _ensure_catalog_row(db, shop, svc, r, cache, counters) for r in rows]
+
+    assert counters == {"products_created": 1, "variants_created": 2}
+    # First-writer-wins: rows 0 and 3 produce the two ProductVariant instances;
+    # rows 1, 2 reuse row 0; row 4 reuses row 3.
+    assert variants[0] is variants[1] is variants[2]
+    assert variants[3] is variants[4]
+    assert variants[0] is not variants[3]
+    # Same product_id under one Product.
+    assert variants[0].product_id == variants[3].product_id
+    # Both SKUs match the hashed pattern; pairwise distinct.
+    skus = {variants[0].sku, variants[3].sku}
+    assert len(skus) == 2
+    assert all(re.match(r"^etsy-L-[0-9a-f]{8}$", s) for s in skus)
+    # variant_name preserves the first-writer original Variations text (untouched).
+    assert variants[0].variant_name == "Color:Red,Pakning:Single Bat ID"
+    assert variants[3].variant_name == "Color:Red,Pakning:Bat ID with Gift Box"
 
 
 @pytest.mark.asyncio
@@ -331,13 +403,20 @@ async def test_parse_etsy_csv_threads_counters_and_links_order_items():
     assert result.imported == 1
     assert result.skipped == 0
     assert result.products_created == 1
-    assert result.variants_created == 2  # two distinct empty-SKU variants → etsy-L-100, etsy-L-100-2
+    assert result.variants_created == 2  # two distinct Variations groups → two hashed SKUs
 
     from models.order import OrderItem
     items = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], OrderItem)]
     assert len(items) == 2
     assert all(i.product_variant_id is not None for i in items)
     assert all(i.snapshot_weight_g is None for i in items)  # snapshot copy intentionally skipped
+
+    # Each variant SKU must be content-keyed: etsy-L-100-{8 hex chars}, distinct.
+    variant_objs = [c.args[0] for c in db.add.call_args_list if isinstance(c.args[0], ProductVariant)]
+    skus = [v.sku for v in variant_objs]
+    assert len(skus) == 2
+    assert all(re.match(r"^etsy-L-100-[0-9a-f]{8}$", s) for s in skus)
+    assert len(set(skus)) == 2
 
 
 @pytest.mark.asyncio
