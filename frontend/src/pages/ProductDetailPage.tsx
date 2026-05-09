@@ -17,9 +17,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useToastStore } from '@/components/ui/Toast'
-import type { Product, ProductUpdate, ProductVariantPatch } from '@/types/inventory'
+import type { Product, ProductUpdate, ProductVariant, ProductVariantPatch } from '@/types/inventory'
 
-type VariantDraft = {
+export type VariantDraft = {
   _key: string
   id?: string
   sku: string
@@ -114,6 +114,117 @@ function emptyVariant(): VariantDraft {
   }
 }
 
+/**
+ * Build a partial ProductVariantPatch containing only the fields that changed
+ * between `draft` and `original`. Returns `null` when nothing changed, so the
+ * caller can drop no-op variants from the payload entirely.
+ *
+ * Comparison rules:
+ *   - integer fields (weight_g/length_mm/width_mm/height_mm/stock_quantity):
+ *     compare Number(draft) to original number.
+ *   - decimal fields (price/cost_price): normalize both sides to Number(...).
+ *     Empty draft + null/empty original → equal. Empty draft + non-null
+ *     original → emit `null` (clear-to-null).
+ *   - string-or-null fields (sku/variant_name): normalize empty ↔ null,
+ *     compare. Emit `null` for empty draft on change.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function diffVariant(
+  draft: VariantDraft,
+  original: ProductVariant,
+): ProductVariantPatch | null {
+  const patch: ProductVariantPatch = {}
+  let changed = false
+
+  if (Number(draft.weight_g) !== original.weight_g) {
+    patch.weight_g = Number(draft.weight_g)
+    changed = true
+  }
+  if (Number(draft.length_mm) !== original.length_mm) {
+    patch.length_mm = Number(draft.length_mm)
+    changed = true
+  }
+  if (Number(draft.width_mm) !== original.width_mm) {
+    patch.width_mm = Number(draft.width_mm)
+    changed = true
+  }
+  if (Number(draft.height_mm) !== original.height_mm) {
+    patch.height_mm = Number(draft.height_mm)
+    changed = true
+  }
+  if (Number(draft.stock_quantity) !== original.stock_quantity) {
+    patch.stock_quantity = Number(draft.stock_quantity)
+    changed = true
+  }
+
+  const priceOrigIsNull =
+    original.price === null || original.price === undefined || original.price === ''
+  if (draft.price === '') {
+    if (!priceOrigIsNull) {
+      patch.price = null
+      changed = true
+    }
+  } else {
+    const draftNum = Number(draft.price)
+    if (priceOrigIsNull || draftNum !== Number(original.price)) {
+      patch.price = draftNum
+      changed = true
+    }
+  }
+
+  const costOrigIsNull =
+    original.cost_price === null ||
+    original.cost_price === undefined ||
+    original.cost_price === ''
+  if (draft.cost_price === '') {
+    if (!costOrigIsNull) {
+      patch.cost_price = null
+      changed = true
+    }
+  } else {
+    const draftNum = Number(draft.cost_price)
+    if (costOrigIsNull || draftNum !== Number(original.cost_price)) {
+      patch.cost_price = draftNum
+      changed = true
+    }
+  }
+
+  const skuOrig = original.sku ?? ''
+  if (draft.sku !== skuOrig) {
+    patch.sku = draft.sku === '' ? null : draft.sku
+    changed = true
+  }
+  const nameOrig = original.variant_name ?? ''
+  if (draft.variant_name !== nameOrig) {
+    patch.variant_name = draft.variant_name === '' ? null : draft.variant_name
+    changed = true
+  }
+
+  if (!changed) return null
+  patch.id = original.id
+  return patch
+}
+
+/**
+ * Strict validation for a new variant (Add Variant flow). Returns an error
+ * message or `null` if the variant is acceptable. Mirrors backend
+ * ProductVariantUpdate.gt=0 + catalog_service required-presence guard.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function validateNewVariant(v: VariantDraft): string | null {
+  const dims = [v.weight_g, v.length_mm, v.width_mm, v.height_mm]
+  for (const x of dims) {
+    const n = Number(x)
+    if (!isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      return 'Each variant needs positive integer weight and dimensions'
+    }
+  }
+  if (v.price !== '' && !(Number(v.price) >= 0)) return 'Price must be ≥ 0'
+  if (v.cost_price !== '' && !(Number(v.cost_price) >= 0)) return 'Cost must be ≥ 0'
+  if (v.sku.length > 100) return 'SKU must be ≤ 100 characters'
+  return null
+}
+
 const cellInputCls =
   'w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-xs text-zinc-300 font-mono focus:outline-none focus:border-teal-500/40 focus:bg-zinc-900/40 hover:border-zinc-700/60 transition-colors'
 
@@ -193,44 +304,67 @@ export default function ProductDetailPage() {
   const handleSave = async () => {
     if (!draft || !product) return
 
+    const originalsById = new Map(product.variants.map(v => [v.id, v]))
+    const variants: ProductVariantPatch[] = []
+
     for (const v of draft.variants) {
-      const dims = [v.weight_g, v.length_mm, v.width_mm, v.height_mm]
-      for (const x of dims) {
-        const n = Number(x)
-        if (!isFinite(n) || n <= 0 || !Number.isInteger(n)) {
-          addToast('Each variant needs positive integer weight and dimensions', 'error')
+      if (!v.id) {
+        const err = validateNewVariant(v)
+        if (err) {
+          addToast(err, 'error')
           return
         }
+        variants.push({
+          weight_g: Number(v.weight_g),
+          length_mm: Number(v.length_mm),
+          width_mm: Number(v.width_mm),
+          height_mm: Number(v.height_mm),
+          sku: v.sku === '' ? null : v.sku,
+          variant_name: v.variant_name === '' ? null : v.variant_name,
+          price: v.price === '' ? null : Number(v.price),
+          cost_price: v.cost_price === '' ? null : Number(v.cost_price),
+          stock_quantity: v.stock_quantity === '' ? 0 : Number(v.stock_quantity),
+        })
+        continue
       }
-      if (v.price !== '' && !(Number(v.price) >= 0)) {
+
+      // Existing variant: diff against the loaded product. Validate only the
+      // fields that actually changed — IMP-1 sentinel zeros stay out of the
+      // payload and never trip the gt=0 backend guard.
+      const original = originalsById.get(v.id)
+      if (!original) continue
+      const patch = diffVariant(v, original)
+      if (!patch) continue
+
+      const dimKeys = ['weight_g', 'length_mm', 'width_mm', 'height_mm'] as const
+      for (const k of dimKeys) {
+        if (k in patch) {
+          const n = patch[k]
+          if (typeof n !== 'number' || !isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+            addToast('Each variant needs positive integer weight and dimensions', 'error')
+            return
+          }
+        }
+      }
+      if ('price' in patch && patch.price !== null && !(Number(patch.price) >= 0)) {
         addToast('Price must be ≥ 0', 'error')
         return
       }
-      if (v.cost_price !== '' && !(Number(v.cost_price) >= 0)) {
+      if (
+        'cost_price' in patch &&
+        patch.cost_price !== null &&
+        !(Number(patch.cost_price) >= 0)
+      ) {
         addToast('Cost must be ≥ 0', 'error')
         return
       }
-      if (v.sku.length > 100) {
+      if ('sku' in patch && typeof patch.sku === 'string' && patch.sku.length > 100) {
         addToast('SKU must be ≤ 100 characters', 'error')
         return
       }
-    }
 
-    const variants: ProductVariantPatch[] = draft.variants.map(v => {
-      const patch: ProductVariantPatch = {
-        weight_g: Number(v.weight_g),
-        length_mm: Number(v.length_mm),
-        width_mm: Number(v.width_mm),
-        height_mm: Number(v.height_mm),
-        sku: v.sku === '' ? null : v.sku,
-        variant_name: v.variant_name === '' ? null : v.variant_name,
-        price: v.price === '' ? null : Number(v.price),
-        cost_price: v.cost_price === '' ? null : Number(v.cost_price),
-        stock_quantity: v.stock_quantity === '' ? 0 : Number(v.stock_quantity),
-      }
-      if (v.id) patch.id = v.id
-      return patch
-    })
+      variants.push(patch)
+    }
 
     const data: ProductUpdate = {
       title: draft.title,
