@@ -514,9 +514,73 @@ inside the per-order try-block, prefer the first item's title; fall back to
 
 ---
 
+---
+
+**Sprint BUG-9 — Scheduler regression: consume `ImportResult` from `sync_shop_orders`** (Status: `DONE` — commit `de1112b`)
+
+Goal: Latent regression discovered during NP-DISC code audit. IMP-2 (commit
+`afbfd6c`) changed `sync_shop_orders` return type from `int` to
+`ImportResult`, but `backend/scheduler.py:42-44` still did `if count > 0`
+on the return value. `ImportResult > 0` raises `TypeError`; the
+scheduler's `try / except Exception` block silently caught it and rolled
+back. **Result:** every periodic 15-minute Shopify sync had been a silent
+no-op since IMP-2 landed. Manual sync via the UI was unaffected (different
+code path through `routers/shops.py`).
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| BUG-9-1 | `scheduler.py:42-49` — replace `count > 0` with `result.imported > 0`, conditional `(+N product[s], +N variant[s])` suffix on the success log when catalog counters non-zero, separate WARNING when `result.errors` non-empty | backend | DONE |
+| BUG-9-2 | New `tests/test_scheduler.py` — 3 cases: success+catalog suffix, partial-success warning, silent-on-zero | backend tests | DONE |
+
+**Post-sprint notes:**
+- **Q1 — Idle silence preserved.** Periodic ticks against shops with
+  zero new Shopify orders log nothing. Rationale: 96 lines/shop/day
+  of "0 new orders" noise was rejected. The absence of a "Failed to
+  sync …" line is the signal that the tick succeeded.
+- **Q2 — Conditional catalog suffix on the success log.** Format:
+  `Synced 3 orders for shop X` when only orders touched;
+  `Synced 3 orders for shop X (+1 product, +2 variants)` when
+  catalog also grew. Pluralization handled (`product` vs `products`,
+  `variant` vs `variants`). Symmetric for variants-only or
+  products-only edge cases.
+- **Q3 — Per-shop WARNING when `result.errors` is non-empty.** IMP-2
+  added per-order error isolation inside `sync_shop_orders` —
+  malformed line items are caught and appended to `result.errors`
+  rather than aborting the batch. The scheduler now surfaces the
+  count of those per-order failures as a `WARNING` per shop, so
+  ops watching `server.log` actually see partial failures instead
+  of them being invisible. The catastrophic `try / except` outside
+  the loop still catches network / GraphQL / DB-level failures and
+  rolls back the per-shop transaction.
+- **Net behavioural improvement** (caught by Opus during planning):
+  before the fix, every periodic tick logged a `Failed to sync
+  shop X: '>' not supported between instances of 'ImportResult'
+  and 'int'` line per Shopify shop. After the fix, idle shops
+  produce **zero** lines per tick — a strict reduction in log
+  noise compared to even the original int-returning version
+  (which at least worked but logged `Synced 0 orders` … wait, no,
+  the original also gated on `count > 0`, so silent. So we're at
+  parity with pre-IMP-2 behaviour.)
+- **`db.commit()` boundary unchanged.** Inside the `try` block,
+  unconditional commit on success path; rollback only inside the
+  `except`. Per-order failures from `result.errors` are intentionally
+  **not** rollback triggers — `sync_shop_orders` already isolated
+  them, partial progress is real progress.
+- **No new imports needed.** `ImportResult` is duck-typed via
+  attribute access; the scheduler doesn't import the schema class
+  itself.
+- 3 new pytest cases added; total backend suite **77/77 green**.
+- **Smoke test:** restart backend → wait one 15-minute scheduler tick
+  → tail `backend/logs/server.log` → confirm no `'>' not supported
+  between instances of 'ImportResult' and 'int'` errors. (Verified
+  passively by the human reviewer; unit tests already cover all three
+  behaviour paths so this is a sanity sweep, not a primary gate.)
+
+---
+
 **Round 3 — Nova Poshta initiative (separate cadence, no CC)**
 
-**Sprint NP-DISC — Research, audit, and sandbox confirmation** (Status: `NOT STARTED`)
+**Sprint NP-DISC — Research, audit, and sandbox confirmation** (Status: `DONE` — deliverable `docs/integrations/nova-poshta-audit-2026-05.md`)
 
 Goal: Produce `docs/integrations/nova-poshta-audit-2026-05.md`. **No code changes** —
 discovery only. The planning agent drives the research and writes the doc;
@@ -540,14 +604,69 @@ test fixes against the sandbox API instead of risking live calls.
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| NP-DISC-1 | Competitive research: 2-3 CRM systems' approach to NP | docs | TODO |
-| NP-DISC-2 | Code audit OrderHub vs typical NP feature set | docs | TODO |
-| NP-DISC-3 | NP sandbox/test API verification (existence, entrypoint, auth) | docs + small spike | TODO |
-| NP-DISC-4 | Deliverable: `docs/integrations/nova-poshta-audit-2026-05.md` with findings + prioritized fix list | docs | TODO |
+| NP-DISC-1 | Code audit OrderHub vs typical NP feature set | docs | DONE |
+| NP-DISC-2 | NP sandbox/test API verification (existence, entrypoint, auth) | docs + small spike | DONE |
+| NP-DISC-3 | Competitive research: 2-3 CRM systems' approach to NP | docs | DONE |
+| NP-DISC-4 | Deliverable: `docs/integrations/nova-poshta-audit-2026-05.md` with findings + prioritized fix list | docs | DONE |
 
-**Sprint NP-FIX-*** — TBD, defined after NP-DISC ships and the user approves
-the prioritized fix list. Each fix sprint follows the standard cycle
-(`task.md` → CC plan review → execute → smoke test → post-fix notes).
+**Post-sprint notes:**
+- **Deliverable:** `docs/integrations/nova-poshta-audit-2026-05.md` — full
+  audit doc with 19-row feature inventory, root-cause analysis of the
+  courier-dispatch incident, competitive reference against KeyCRM /
+  Eltrino / OpenCart NP plugins, and a prioritized fix list (NP-FIX-1
+  through NP-FIX-8 with S/M/L sizing).
+- **Key audit findings:**
+  - **Root cause of incident** is a single missing backend validation
+    in `routers/shipping.py:213-234`. `SenderAddress` is passed
+    verbatim from `shop.np_sender_warehouse_ref`; if that column is
+    `NULL`, NP silently downgrades the request to courier pickup.
+    Fix scope is one file, one validation block — that's NP-FIX-1.
+  - **Zero NP-related backend tests today.** Regardless of any other
+    fix, basic pytest coverage is a hard prerequisite — that's
+    NP-FIX-2.
+  - **No formal sandbox available for UA clients.** The new v1.0
+    Stage environment at `api-stage.novapost.pl/v.1.0/` explicitly
+    rejects UA phone numbers per the `/test-api-keys` contract.
+    Workaround: dev shop on a personal NP account (separate from
+    Lamamarka legal entity), captured in NP-FIX-3 as a manual
+    operator checklist.
+  - **OrderHub uses NP API v2.0**; v1.0 with JWT, webhooks, pickups
+    exists but migration is deferred (NP-FIX-8) — current v2.0 covers
+    operator pain on its own.
+- **5 open questions answered and locked in §7 of the audit doc:**
+  Q1 → dev shop on personal NP account, set up after NP-FIX-2 + 1
+  land. Q2 → strict sender-warehouse validation, no `?force=true`
+  override. Q3 → per-shop default Service Type (new
+  `Shop.np_default_service_type` column). Q4 → hybrid tracking poll:
+  4-hour batch + manual refresh button. Q5 → stay on v2.0; revisit
+  v1.0 only on external trigger.
+- **Latent regression caught during the audit:** while reading
+  `scheduler.py` to confirm NP-FIX-5 could plug into the existing
+  APScheduler infrastructure, surfaced **BUG-9** —
+  `sync_shop_orders` return type changed by IMP-2 but the scheduler
+  was still doing `count > 0` on a Pydantic model. Filed and fixed
+  before NP-FIX-* work began (commit `de1112b`). See BUG-9 entry
+  above.
+- **Updated 2026-05-09:** §7 fixes applied to the audit doc after
+  cross-referencing the live code:
+  - §2.4 — softened the `ttn_printed` claim to "no automatic flow
+    sets it; technically writable via generic `PATCH /orders/{id}`"
+    (the field is exposed in schemas / frontend types, just not
+    surfaced through any deliberate UI).
+  - §3 feature inventory — corrected "Sender warehouse selection
+    in shop settings" from **Partial** to **Done** (the Logistics
+    (NP) tab in `pages/ShopsPage.tsx:407` does expose the
+    field — the gap is at TTN-create time, not at shop-edit time).
+  - §8 NP-FIX-5 description — removed the "verify scheduler exists"
+    hedge after confirming `backend/scheduler.py` already runs
+    `AsyncIOScheduler` periodically.
+
+**Sprint NP-FIX-*** — defined and locked in `docs/integrations/nova-poshta-audit-2026-05.md`
+§6 + §8. Execution order: NP-FIX-2 → NP-FIX-1 → (user does NP-FIX-3 dev
+shop setup manually, ~20 min) → NP-FIX-4 → NP-FIX-5 → NP-FIX-6 →
+NP-FIX-7. NP-FIX-8 (v1.0 migration) deferred. Each follows the standard
+cycle (`task.md` → CC plan review → execute → smoke test → post-fix
+notes).
 
 ---
 

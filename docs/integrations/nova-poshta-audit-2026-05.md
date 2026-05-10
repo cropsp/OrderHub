@@ -121,7 +121,12 @@ counterparty Ref), `np_sender_contact_ref` (cached contact), `np_default_descrip
 ### 2.4 Order model (`backend/models/order.py:115, 137-139`)
 
 `shipping_np_cost`, `ttn_number`, `ttn_created_at`, `ttn_printed`. The
-`ttn_printed` flag exists but no endpoint sets it — see §3 finding.
+`ttn_printed` flag exists in the model + schemas + frontend types
+(`schemas/order.py:88`, `frontend/src/types/common.ts:116`) but **no
+automatic flow sets it** — there is no print endpoint, no tracking
+sync, no `getDocumentPrint` integration. Technically a `PATCH /orders/{id}`
+could set it manually if the frontend exposed the toggle, but no UI
+does today. See §3 finding.
 
 ### 2.5 Frontend (`frontend/src/components/orders/detail/DetailLogistics.tsx`)
 
@@ -141,7 +146,7 @@ button when `order.shipping_warehouse_ref` is missing
 | Mask API key in UI | Done | `Shop.has_np_api_key` flag in API response, raw key never returned | NP-P3 |
 | Recipient city search (debounced) | Done | `routers/shipping.py:44-66`, `frontend useDebounce.ts` 350ms | NP-P2 |
 | Recipient warehouse search | Done | `routers/shipping.py:68-90` | NP-P2 |
-| Sender warehouse selection in shop settings | **Partial** | `Shop.np_sender_warehouse_ref` column exists; no Shop-edit UI surfaces it explicitly | UI gap — see §4 |
+| Sender warehouse selection in shop settings | Done | `Shop.np_sender_warehouse_ref` column + Shop-edit modal Logistics (NP) tab (`pages/ShopsPage.tsx:407`) with city/warehouse Select dropdowns | NP-P3. Field is exposed for editing but **not required-validated at TTN-create time** — that's the §4 gap. |
 | Sender warehouse caching | Done | `Shop.np_sender_ref`, `np_sender_contact_ref` populated on first call | NP-P1 |
 | TTN create | Done | `routers/shipping.py:93-263` | Has the validation gap in §4 |
 | TTN delete / cancel | Done | `routers/shipping.py:266-305` | NP-P3 |
@@ -257,44 +262,131 @@ first, then user-visible UX gaps, then nice-to-haves).
 
 ---
 
-## 7. Open Questions for the User
+## 7. Decisions (locked 2026-05-09)
 
-1. **Do you have a test NP account ready?** If not, NP-FIX-3 becomes
-   the actual first sprint (we need a key before we can write tests
-   that exercise the full TTN path).
-2. **NP-FIX-1 fix shape — strict or lenient?** Strict: hard block at
-   400 when sender warehouse is missing, with a link to shop settings.
-   Lenient: 400 with the same error message but also a `?force=true`
-   query param to override (for advanced cases). I lean strict — there
-   is no legitimate reason to bypass this; the whole problem is
-   "I forgot to set it".
-3. **Service Type default (NP-FIX-4).** Today: hardcoded
-   `"WarehouseWarehouse"`. After we expose it: should the default still
-   be W2W, with the operator opting in to other types per-order? Or
-   should the default come from a per-shop setting? I lean per-shop
-   setting (matches `np_default_payer_type` etc.).
-4. **Tracking poll frequency (NP-FIX-5).** NP recommends polling at
-   most every 4-6 hours per shipment. For OrderHub: poll every 4
-   hours, batched? Or only on-demand when an operator opens the order
-   detail page?
-5. **API version migration (NP-FIX-8).** Acknowledge that this exists
-   and we're aware. Do you want to keep v2.0 indefinitely or set a
-   target sprint to evaluate v1.0?
+After reviewing this audit, the user confirmed the following positions
+on the open questions. Each decision is recorded here as a binding input
+to the NP-FIX-* sprints below — re-litigate explicitly only if new
+information appears.
+
+### Q1 — Test environment
+
+**Decision: dev shop on the user's personal NP account, set up after
+NP-FIX-2 + NP-FIX-1 land.** No formal sandbox is available for UA
+clients (the v1.0 stage environment at
+`api-stage.novapost.pl/v.1.0/` explicitly rejects UA phone numbers per
+the `/test-api-keys` endpoint contract). The user has a personal NP
+account separate from Lamamarka's business entity; an API key issued
+on that account, paired with a sender warehouse near the user's
+personal address, gives the closest practical equivalent of a sandbox.
+
+Implementation note: the dev-shop setup itself does **not** require
+any code changes. It's a manual operator workflow:
+
+1. Generate an API key on the personal NP account at
+   `new.novaposhta.ua → Settings → Security`.
+2. Create a new shop in OrderHub with `platform = MANUAL`.
+3. Configure NP credentials on that shop (api_key, sender name +
+   phone, sender city, sender warehouse — the warehouse should be a
+   nearby NP branch the user controls, not a home address).
+4. Use this shop for all real-API smoke tests of NP-FIX-4 onwards.
+
+This task is folded into NP-FIX-3 below as a documented checklist
+rather than a code sprint.
+
+### Q2 — NP-FIX-1 fix shape
+
+**Decision: strict.** Backend rejects with `400 Bad Request` when
+`shop.np_sender_city_ref` or `shop.np_sender_warehouse_ref` is not
+set. No `?force=true` override, no soft warning. The error message
+points the operator to Shops → Logistics (NP) settings.
+
+Rationale: the original incident is exactly the
+"I-forgot-to-configure-it" pattern. A bypass mechanism re-introduces
+the same risk. There is no legitimate use case for creating a TTN
+without a sender warehouse — NP itself silently downgrades to courier
+pickup, which is what bit us.
+
+### Q3 — Default Service Type (NP-FIX-4)
+
+**Decision: per-shop default, exposed via a new
+`Shop.np_default_service_type` column.** Symmetric with the existing
+`np_default_payer_type`, `np_default_payment_method`,
+`np_default_weight_kg`, `np_default_volume_m3` columns. Default value
+on creation: `"WarehouseWarehouse"` (matches today's hardcoded
+behaviour, no backwards regression). Operators can override per-order
+in the TTN form when needed.
+
+### Q4 — Tracking poll cadence (NP-FIX-5)
+
+**Decision: hybrid — batch poll every 4 hours + manual refresh
+button on the order detail panel.** Background batch covers the
+default flow without operator action; manual refresh gives the
+operator agency when they want a fresher status. This stays well
+within NP's recommended polling rate (≥ 4-6h per shipment) even
+if the operator hits Refresh aggressively, because the manual path
+hits only one TTN at a time.
+
+### Q5 — v2.0 vs v1.0 migration (NP-FIX-8)
+
+**Decision: stay on v2.0 for the foreseeable future.** Migration to
+v1.0 is large (different auth flow with JWT, different endpoint
+structure, different payload shapes) and the immediate NP-FIX list
+fully covers operator pain on v2.0. v1.0 has features v2.0 lacks
+(webhooks, pickups, formal sandbox), but those are
+nice-to-haves, not blockers. Re-evaluate only if NP announces v2.0
+sunset or if a v1.0-only feature becomes a hard requirement.
 
 ---
 
-## 8. Recommended Next Steps
+## 8. Recommended Next Steps (updated 2026-05-09)
 
-1. **User reviews this doc**, confirms scope, answers §7 questions.
-2. Start **NP-FIX-2** (test infrastructure) — smallest, lets every
-   subsequent fix land safely.
-3. Then **NP-FIX-1** (sender warehouse validation) — single file
-   backend change + small frontend tweak. Closes the original
-   incident.
-4. Live re-test on the test account to confirm the fix.
-5. Iterate through NP-FIX-4 → NP-FIX-7 by user priority.
-6. Re-evaluate v1.0 migration (NP-FIX-8) after the legacy fixes are
-   stable.
+1. **NP-FIX-2 — pytest infrastructure (CC sprint).** Mocks
+   `httpx.AsyncClient` and exercises the `NovaPoshtaClient` + router
+   paths without touching any real NP endpoint. This is the very
+   first NP test in the codebase and is a hard prerequisite for
+   every subsequent NP-FIX sprint. Does **not** require the dev
+   shop because all HTTP is mocked.
+2. **NP-FIX-1 — sender warehouse validation (CC sprint).** Pure
+   server-side guard: rejects the TTN-create request before any NP
+   API call when sender warehouse / city is unset. Verified through
+   the mocked tests added in NP-FIX-2 plus a manual smoke (temporarily
+   `NULL` `np_sender_warehouse_ref` on the Lamamarka shop via
+   `psql`, click "Generate TTN" in the UI, expect 400 toast, restore
+   the column). **Does not require the dev shop** because validation
+   blocks before NP is contacted.
+3. **NP-FIX-3 — dev shop setup (user manual step, ~15-20 min).**
+   The user creates the dev shop per the checklist in §7 Q1
+   above. Output: a new OrderHub shop with personal NP credentials,
+   ready to host dummy orders for E2E NP-API tests in subsequent
+   sprints. No code changes; the audit doc is the deliverable.
+4. **NP-FIX-4 — selectable Service Type (CC sprint).** Adds the
+   `Shop.np_default_service_type` column (Alembic migration), the
+   shop-edit UI control to set it, and a per-order override on the
+   TTN form. First sprint that uses the dev shop for E2E
+   verification.
+5. **NP-FIX-5 — tracking poll job + manual refresh (CC sprint).**
+   Plugs into the existing `backend/scheduler.py` (APScheduler
+   `AsyncIOScheduler`, already runs `run_shopify_sync` periodically)
+   — adds a parallel `run_np_tracking_poll` job that calls
+   `TrackingDocument.getStatusDocuments` for active TTNs and updates
+   `Order.shipping_status`. Plus a frontend refresh button on Order
+   Detail for on-demand refresh.
+6. **NP-FIX-6 — frontend NP error surfacing (CC sprint).**
+   Replace generic "Failed to communicate" toasts with NP's specific
+   error strings, which the v2.0 API already returns in
+   `data.errors[]` (see `services/nova_poshta.py:42-45`). The
+   backend currently flattens these into a 400 detail string —
+   that's the surface to expand.
+7. **NP-FIX-7 — TTN print PDF (CC sprint).** Requires a new
+   NP method `getDocumentPrint` plus a frontend download path.
+8. **NP-FIX-8 — v1.0 migration (deferred).** Re-evaluate after
+   1-7 are stable, only on external trigger (sunset announcement,
+   webhook requirement, etc.).
+
+The standard cycle (`task.md` → CC plan review → execute → smoke →
+post-fix notes in `implementation_plan.md`) applies to every CC
+sprint above.
 
 ---
 
