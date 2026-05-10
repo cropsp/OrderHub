@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import type { OrderDetail } from '@/types/order';
 import { useSearchCities, useGetWarehouses, useGetParcelEstimate } from '@/hooks/useShipping';
+import { useShops } from '@/hooks/useShops';
 import { cn } from '@/lib/utils';
 import { useToastStore } from '@/components/ui/Toast';
 
@@ -39,6 +40,10 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
   const [isManual, setIsManual] = useState(order.parcel_override);
 
   const { data: estimate, isFetching: isEstimating } = useGetParcelEstimate(order.id, !order.ttn_number && order.shipping_country === 'UA');
+
+  const { data: shops } = useShops();
+  const orderShop = shops?.find(s => s.id === order.shop_id);
+  const showNpConfigBanner = !!orderShop?.has_np_token && !orderShop.is_np_ready;
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -410,6 +415,14 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
 
       {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
         <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
+          {showNpConfigBanner && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
+              <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-200/80 leading-snug">
+                Nova Poshta sender warehouse not configured for this shop. Set it in Shops → Logistics (NP) before creating a TTN.
+              </p>
+            </div>
+          )}
           {/* Estimation Context */}
           {estimate && (
             <div className="space-y-2">

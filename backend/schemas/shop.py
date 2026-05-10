@@ -70,6 +70,7 @@ class ShopResponse(ShopBase):
     has_shopify_token: bool = False
     has_shopify_webhook_secret: bool = False
     has_np_token: bool = False
+    is_np_ready: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

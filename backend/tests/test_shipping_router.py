@@ -230,6 +230,56 @@ async def test_create_ttn_returns_400_when_recipient_warehouse_ref_missing():
 
 
 @pytest.mark.asyncio
+async def test_create_ttn_returns_400_when_sender_city_ref_missing():
+    """NP-FIX-1: shop with API key but no sender city ref → 400 before any NP call."""
+    db = MagicMock()
+    shop = _make_shop()
+    shop.np_sender_city_ref = None
+    order = _make_order(shop=shop)
+
+    np_client_cls = MagicMock()
+
+    with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
+         patch("routers.shipping.NovaPoshtaClient", np_client_cls):
+        with pytest.raises(HTTPException) as exc:
+            await create_np_ttn(
+                order_id=order.id,
+                body=_ttn_body(),
+                current_user=_make_user(),
+                db=db,
+            )
+
+    assert exc.value.status_code == 400
+    assert "sender warehouse is not configured" in exc.value.detail
+    np_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_ttn_returns_400_when_sender_warehouse_ref_missing():
+    """NP-FIX-1: shop with API key but no sender warehouse ref → 400 before any NP call."""
+    db = MagicMock()
+    shop = _make_shop()
+    shop.np_sender_warehouse_ref = None
+    order = _make_order(shop=shop)
+
+    np_client_cls = MagicMock()
+
+    with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
+         patch("routers.shipping.NovaPoshtaClient", np_client_cls):
+        with pytest.raises(HTTPException) as exc:
+            await create_np_ttn(
+                order_id=order.id,
+                body=_ttn_body(),
+                current_user=_make_user(),
+                db=db,
+            )
+
+    assert exc.value.status_code == 400
+    assert "sender warehouse is not configured" in exc.value.detail
+    np_client_cls.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_ttn_happy_path_with_cached_sender_refs():
     """Shop has cached sender refs → skips sender NP calls. Recipient is found
     via get_counterparties (existing). create_internet_document returns TTN.

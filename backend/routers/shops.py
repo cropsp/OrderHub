@@ -42,7 +42,8 @@ async def list_shops(
         **s.__dict__,
         "has_shopify_token": bool(s.shopify_access_token_encrypted),
         "has_shopify_webhook_secret": bool(s.shopify_webhook_secret_encrypted),
-        "has_np_token": bool(s.np_api_key_encrypted)
+        "has_np_token": bool(s.np_api_key_encrypted),
+        "is_np_ready": bool(s.np_api_key_encrypted) and bool(s.np_sender_city_ref) and bool(s.np_sender_warehouse_ref),
     }) for s in shops]
 
 
@@ -85,6 +86,7 @@ async def create_shop(
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
         "has_shopify_webhook_secret": bool(shop.shopify_webhook_secret_encrypted),
         "has_np_token": bool(shop.np_api_key_encrypted),
+        "is_np_ready": bool(shop.np_api_key_encrypted) and bool(shop.np_sender_city_ref) and bool(shop.np_sender_warehouse_ref),
         "order_count": 0
     })
     return resp
@@ -113,6 +115,7 @@ async def get_shop(
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
         "has_shopify_webhook_secret": bool(shop.shopify_webhook_secret_encrypted),
         "has_np_token": bool(shop.np_api_key_encrypted),
+        "is_np_ready": bool(shop.np_api_key_encrypted) and bool(shop.np_sender_city_ref) and bool(shop.np_sender_warehouse_ref),
         "order_count": order_count
     })
     return resp

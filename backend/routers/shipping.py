@@ -119,9 +119,16 @@ async def create_np_ttn(
 
     if not order.shipping_city_ref or not order.shipping_warehouse_ref:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail="Order is missing Nova Poshta city or warehouse reference. "
                    "Please select them using the shipping editor."
+        )
+
+    if not shop.np_sender_city_ref or not shop.np_sender_warehouse_ref:
+        raise HTTPException(
+            status_code=400,
+            detail="Shop's Nova Poshta sender warehouse is not configured. "
+                   "Set it in Shops → Logistics (NP).",
         )
 
     np_api_key = decrypt_value(shop.np_api_key_encrypted)
