@@ -39,10 +39,31 @@ async def run_shopify_sync():
 
         for shop in shops:
             try:
-                count = await sync_shop_orders(db, shop, system_user)
-                if count > 0:
-                    logger.info(f"Synced {count} orders for shop {shop.name}")
-                # Commit changes for this shop
+                result = await sync_shop_orders(db, shop, system_user)
+
+                if result.imported > 0:
+                    suffix_parts = []
+                    if result.products_created > 0:
+                        suffix_parts.append(
+                            f"+{result.products_created} "
+                            f"product{'s' if result.products_created != 1 else ''}"
+                        )
+                    if result.variants_created > 0:
+                        suffix_parts.append(
+                            f"+{result.variants_created} "
+                            f"variant{'s' if result.variants_created != 1 else ''}"
+                        )
+                    suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+                    logger.info(
+                        f"Synced {result.imported} orders for shop {shop.name}{suffix}"
+                    )
+
+                if result.errors:
+                    logger.warning(
+                        f"Shopify sync for shop {shop.name} completed with "
+                        f"{len(result.errors)} per-order error(s)"
+                    )
+
                 await db.commit()
             except Exception as e:
                 logger.error(f"Failed to sync shop {shop.name}: {e}")
