@@ -86,8 +86,21 @@ class NovaPoshtaClient:
         return data[0]
 
     async def get_contact_persons(self, counterparty_ref: str) -> list:
-        """Get contact persons for a counterparty."""
-        return await self._post("Counterparty", "getContactPersons", {"Ref": counterparty_ref})
+        """Get contact persons for a counterparty.
+
+        Calls NP API method `Counterparty.getCounterpartyContactPersons`,
+        which works for both PrivatePerson and Organization API keys.
+        The earlier name `getContactPersons` (no `Counterparty` prefix)
+        returned "Method not found" for PrivatePerson keys because NP
+        internally redirected the call to a non-existent
+        `CounterpartyGeneral_getContactPersons` model. Verified via
+        direct curl against api.novaposhta.ua on 2026-05-10:
+        `getCounterpartyContactPersons` returns "Ref is not specified"
+        (i.e. method exists, parameter validation reachable) for a
+        PrivatePerson key, while `getContactPersons` returns "Method
+        not found" — proof of the rename being the correct fix.
+        """
+        return await self._post("Counterparty", "getCounterpartyContactPersons", {"Ref": counterparty_ref})
 
     async def delete_internet_document(self, document_refs: str) -> bool:
         """Delete an existing waybill (TTN)."""

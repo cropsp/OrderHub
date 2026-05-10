@@ -152,3 +152,38 @@ async def test_create_internet_document_raises_on_empty_response():
     with patch.object(NovaPoshtaClient, "_post", new=AsyncMock(return_value=[])):
         with pytest.raises(Exception, match="empty response"):
             await client.create_internet_document({"foo": "bar"})
+
+
+@pytest.mark.asyncio
+async def test_get_contact_persons_calls_correct_np_method_name():
+    """NP-FIX-3a regression guard: client must call
+    Counterparty.getCounterpartyContactPersons, not the
+    PrivatePerson-incompatible getContactPersons.
+
+    The unprefixed name causes NP to redirect internally to a
+    non-existent CounterpartyGeneral_getContactPersons model,
+    which fails with "Method not found" for PrivatePerson API keys.
+    The prefixed name works for both PrivatePerson and Organization
+    keys.
+    """
+    client = NovaPoshtaClient("api-key")
+
+    with patch.object(
+        NovaPoshtaClient,
+        "_post",
+        new=AsyncMock(return_value=[{"Ref": "contact-uuid"}]),
+    ) as mock_post:
+        result = await client.get_contact_persons("counterparty-uuid")
+
+    assert mock_post.await_count == 1
+    call = mock_post.await_args_list[0]
+    assert call.args == (
+        "Counterparty",
+        "getCounterpartyContactPersons",
+        {"Ref": "counterparty-uuid"},
+    ), (
+        "NP-FIX-3a regression: client must use "
+        "'getCounterpartyContactPersons'. The earlier name "
+        "'getContactPersons' breaks for PrivatePerson API keys."
+    )
+    assert result == [{"Ref": "contact-uuid"}]
