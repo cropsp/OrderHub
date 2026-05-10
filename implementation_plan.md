@@ -737,6 +737,88 @@ across two new files, with **zero changes to production code**.
 
 ---
 
+**Sprint NP-FIX-1 — Sender-warehouse validation + passive warning banner** (Status: `DONE` — commit `193f74a`)
+
+Goal: Close the courier-dispatch incident documented in
+`docs/integrations/nova-poshta-audit-2026-05.md` §4. A TTN was created
+against a shop with `np_sender_warehouse_ref = NULL`; the backend
+forwarded the missing field to NP's `InternetDocument.save`, NP silently
+downgraded the request to courier pickup, and a courier showed up at
+the customer's address. NP-FIX-1 added strict backend rejection before
+any NP API call, plus a passive amber banner on the order Logistics
+panel so the operator sees the misconfig ahead of click-time, not at
+click-time.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| NP-FIX-1-1 | Backend pre-flight check in `routers/shipping.py:create_np_ttn` — `HTTPException(400)` when `shop.np_sender_city_ref` or `shop.np_sender_warehouse_ref` is null/empty | backend | DONE |
+| NP-FIX-1-2 | Add `is_np_ready: bool` to `ShopResponse` schema (combined flag = `has_np_token AND np_sender_city_ref AND np_sender_warehouse_ref`) and populate it at every `ShopResponse` build site in `routers/shops.py` | backend | DONE |
+| NP-FIX-1-3 | Frontend amber banner in `DetailLogistics.tsx`, rendered when `orderShop.has_np_token && !orderShop.is_np_ready`, placed inside the pre-TTN block (hidden after a TTN exists) | frontend | DONE |
+| NP-FIX-1-4 | Extend `frontend/src/types/shop.ts` `ShopListItem` with `is_np_ready: boolean` | frontend | DONE |
+| NP-FIX-1-5 | 3 new pytest cases in `tests/test_shipping_router.py` covering city-ref-missing, warehouse-ref-missing, and a happy-path regression with both refs populated | backend tests | DONE |
+
+**Post-sprint notes:**
+- **Q1 → combined `is_np_ready`.** The two granular fields
+  (`np_sender_city_ref`, `np_sender_warehouse_ref`) move together in
+  practice — the shop-edit form sets them in the same dialog tab — and
+  the combined flag answers "is this shop ready to ship via NP?" 1:1.
+  Implementation at `schemas/shop.py:73` (`is_np_ready: bool = False`)
+  with population at the three `ShopResponse`-building sites in
+  `routers/shops.py` (list, get-by-id, create/update). Frontend banner
+  trivially renders on `has_np_token && !is_np_ready`.
+- **Q2 → banner above Create TTN, hidden when TTN exists.** Lifecycle
+  match: the misconfig only matters pre-TTN. Once a TTN exists the
+  shop was either configured correctly or the bad TTN already shipped.
+  Banner JSX lives inside the pre-TTN render block (`!isEditing &&
+  !order.ttn_number && order.shipping_country === 'UA' &&
+  canManageShipping`); no separate banner component, inline
+  amber-on-zinc styling matches the existing two warnings in this
+  panel (parcel-partial / no-packaging).
+- **Q3 → toast surfaces backend `detail` verbatim.** No special-case
+  mapping for the sender-warehouse error. The same red-error toast
+  path that today surfaces every other NP-related 400 carries this
+  string too. Operator sees the actionable copy
+  *"Shop's Nova Poshta sender warehouse is not configured. Set it in
+  Shops → Logistics (NP)."* with no extra wiring.
+- **CC deviation: `frontend/src/types/shop.ts` instead of `common.ts`.**
+  task.md called for `types/common.ts`, but CC discovered `Shop` type
+  already lived in `types/shop.ts` (along with `ShopListItem`,
+  `ShopCreate`, `ShopUpdate`) and added `is_np_ready` there to keep
+  Shop-related fields colocated. Same shape, more accurate file. No
+  consumer side-effects.
+- **Order of checks (locked in task.md spec).** Validation block lives
+  at `shipping.py:127-132`, **after** the existing recipient-field
+  checks (lines 117-125) and **before** any NP API call. Operator
+  can't be surprised by "configure sender warehouse" before they've
+  noticed they don't even have an NP key — the existing
+  `np_api_key_encrypted` check at line 109 still fires first.
+- **No `?force=true` override.** Per audit-doc §7 Q2 — strict-only.
+  An operator who clicks Create TTN despite the banner gets a 400; no
+  bypass exists in the codebase.
+- **Test count:** 97 → **100 passing** (+3 new cases). New cases:
+  `test_create_ttn_returns_400_when_sender_city_ref_missing`,
+  `test_create_ttn_returns_400_when_sender_warehouse_ref_missing`,
+  `test_create_ttn_happy_path_with_cached_sender_refs` (regression
+  guard). Each missing-ref case also asserts `NovaPoshtaClient` was
+  never instantiated — proving the validation gate runs **before** any
+  NP API contact.
+- **Manual smoke (verified 2026-05-10).** Smoke shop = KoraKlenu
+  (`c2bb2b4e-60d1-40eb-b221-4b2eabcd96fd`), `np_sender_warehouse_ref`
+  temporarily nulled via `docker compose exec postgres psql` (backup
+  ref `61ff74ac-3dee-11e6-a9f2-005056887b8d`, restored after).
+  Confirmed: (1) amber banner visible above Create TTN button with the
+  spec-mandated copy, (2) toast on click matched the backend `detail`
+  verbatim, (3) `POST /api/shipping/np-ttn/{id}` returned `400`,
+  (4) **zero requests to `api.novaposhta.ua`** — validation gated the
+  call, (5) banner disappeared after the warehouse ref was restored.
+  All five criteria green.
+- **Closes:** the courier-dispatch incident root cause from
+  `docs/integrations/nova-poshta-audit-2026-05.md` §4. Lamamarka
+  Shopify, KoraKlenu manual, and any future NP-using shop are now
+  protected from the silent-downgrade behaviour at TTN-create time.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
