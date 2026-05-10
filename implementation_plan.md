@@ -835,6 +835,37 @@ in this document where applicable, to avoid duplication.
 | TEST-1 | Vitest + Playwright smoke coverage (see Section B) | Out of current bug-hunting focus; revisit after IMP-2 |
 | PC-F-1 | Product photos (see Section A) | Requires new file-upload infrastructure |
 | Unlinked backfill (carried over from BUG-2/BUG-3 smoke tests) | UI gesture or migration to link historical Unlinked items in existing orders | Pre-existing constraint; no operational need yet |
+| NP-UX-1 | Hide Logistics (NP) tab in Edit Store Settings modal when `has_np_token = false` | Cosmetic — the tab currently renders for every shop, including those that never integrated NP (Lamamarka Shopify, LeatherCraft UA, Leather by Mykola). Deferral cause: depends on the open architectural question below — does tab visibility tie to *credentials presence* (cheap, but hides the only entry point for first-time NP setup) or to *regional intent* (proper, but the data anchor doesn't exist). |
+
+---
+
+**Open Architectural Questions (parking lot, no work in flight)**
+
+Discovered during BUG-10 / NP-FIX-1 review (2026-05-10). Not work items,
+not deferrals — open design problems with no obvious answer that we
+explicitly chose not to force a decision on.
+
+- **Shop-level region / country.** OrderHub's `Shop` model has no
+  `country`, `region`, `currency`, or `locale` column. Regional facts
+  (`shipping_country`, `currency`) live exclusively on `Order` and
+  `Customer`. Today the question *"is this shop Ukrainian?"* is
+  answered imperfectly by proxies — `has_np_token=true`, `name`
+  substring matching (e.g. `"UA"`), or aggregations over
+  `Order.shipping_country`. None is authoritative. NP-UX-1 (hide the
+  Logistics tab for non-UA shops) lands directly on this gap:
+  distinguishing *"non-UA shop"* from *"UA shop without an NP key
+  yet"* requires a region anchor we don't have. **Why we're not
+  fixing it now:** a rigid shop→region binding misses real-world
+  cases — a Shopify shop that occasionally ships to UA, a manual
+  shop spanning two countries, or a future channel routing to
+  multiple regions. No elegant alternative is obvious without deeper
+  UX research, and forcing a column now would lock in the wrong
+  shape. Park until a *bona fide* operational use case (e.g.
+  multi-region NP, per-shop default currency on order create,
+  region-scoped analytics) forces the issue — at that point the
+  right shape (boolean flag, ISO country code, multi-region join
+  table, or computed-from-orders view) will be far more obvious than
+  it is from cosmetic-UX speculation today.
 
 ---
 
