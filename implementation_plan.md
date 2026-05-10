@@ -755,7 +755,7 @@ click-time.
 | NP-FIX-1-2 | Add `is_np_ready: bool` to `ShopResponse` schema (combined flag = `has_np_token AND np_sender_city_ref AND np_sender_warehouse_ref`) and populate it at every `ShopResponse` build site in `routers/shops.py` | backend | DONE |
 | NP-FIX-1-3 | Frontend amber banner in `DetailLogistics.tsx`, rendered when `orderShop.has_np_token && !orderShop.is_np_ready`, placed inside the pre-TTN block (hidden after a TTN exists) | frontend | DONE |
 | NP-FIX-1-4 | Extend `frontend/src/types/shop.ts` `ShopListItem` with `is_np_ready: boolean` | frontend | DONE |
-| NP-FIX-1-5 | 3 new pytest cases in `tests/test_shipping_router.py` covering city-ref-missing, warehouse-ref-missing, and a happy-path regression with both refs populated | backend tests | DONE |
+| NP-FIX-1-5 | 2 new pytest cases in `tests/test_shipping_router.py` covering city-ref-missing and warehouse-ref-missing branches (the happy-path regression test was already added in NP-FIX-2) | backend tests | DONE |
 
 **Post-sprint notes:**
 - **Q1 → combined `is_np_ready`.** The two granular fields
@@ -795,13 +795,18 @@ click-time.
 - **No `?force=true` override.** Per audit-doc §7 Q2 — strict-only.
   An operator who clicks Create TTN despite the banner gets a 400; no
   bypass exists in the codebase.
-- **Test count:** 97 → **100 passing** (+3 new cases). New cases:
-  `test_create_ttn_returns_400_when_sender_city_ref_missing`,
-  `test_create_ttn_returns_400_when_sender_warehouse_ref_missing`,
-  `test_create_ttn_happy_path_with_cached_sender_refs` (regression
-  guard). Each missing-ref case also asserts `NovaPoshtaClient` was
-  never instantiated — proving the validation gate runs **before** any
-  NP API contact.
+- **Test count:** 97 → **99 passing** (+2 new cases). New cases:
+  `test_create_ttn_returns_400_when_sender_city_ref_missing` and
+  `test_create_ttn_returns_400_when_sender_warehouse_ref_missing`.
+  Each asserts `NovaPoshtaClient` was never instantiated — proving the
+  validation gate runs **before** any NP API contact.
+  The happy-path regression test
+  (`test_create_ttn_happy_path_with_cached_sender_refs`) shipped in
+  NP-FIX-2 and already covered the both-refs-populated path; nothing
+  to add there.
+  *(Earlier draft of this entry mistakenly counted the happy-path test
+  as new and said "97 → 100 (+3)". Corrected during NP-FIX-3a planning,
+  where running pytest after rollback showed the actual baseline of 99.)*
 - **Manual smoke (verified 2026-05-10).** Smoke shop = KoraKlenu
   (`c2bb2b4e-60d1-40eb-b221-4b2eabcd96fd`), `np_sender_warehouse_ref`
   temporarily nulled via `docker compose exec postgres psql` (backup
@@ -816,6 +821,140 @@ click-time.
   `docs/integrations/nova-poshta-audit-2026-05.md` §4. Lamamarka
   Shopify, KoraKlenu manual, and any future NP-using shop are now
   protected from the silent-downgrade behaviour at TTN-create time.
+
+---
+
+**Sprint NP-FIX-3 — Dev shop setup for real-NP smoke** (Status: `DONE` — verified manually 2026-05-10, no code commit)
+
+Goal: Per the NP-DISC audit roadmap, the next NP-FIX-* sprints
+(NP-FIX-4 onwards) need a real UA shop with a working PrivatePerson
+NP API key to validate against `api.novaposhta.ua`. NP-FIX-3 is the
+manual-setup ticket: configure such a shop end-to-end. No code
+changes; this is a data/config task whose deliverable is "we can
+create a real TTN against the real API".
+
+| ID | Task | Status |
+|---|---|---|
+| NP-FIX-3-1 | Pick a UA shop for testing — chose **KoraKlenu** (manual, MANUAL platform) over the previously NP-keyed Lamamarka Shopify (Lamamarka is not a UA-shipping shop; NP credentials there were a quasi-hack from IMP-2 testing and were cleared) | DONE |
+| NP-FIX-3-2 | Configure NP API key + sender metadata on KoraKlenu via Edit Store Settings → Logistics (NP) | DONE |
+| NP-FIX-3-3 | Register at least one PackagingBox for KoraKlenu in Inventory → Packaging (1 box `100×120×50, 50g/100g` registered, intentionally undersized for the test order to surface the engine "does not fit" path) | DONE |
+| NP-FIX-3-4 | Create a manual order on KoraKlenu with a UA recipient address (order #00001 "Скарбничка", Сергій Петренко, Бориспіль, Відділення №12) | DONE (pre-existed) |
+| NP-FIX-3-5 | End-to-end smoke: Generate NP Label → real TTN created on `api.novaposhta.ua` | DONE — TTN `20451435925384` created and visible in NP личный кабинет |
+
+**Post-sprint notes:**
+- **Final test order:** KoraKlenu → order #00001 → Generate NP Label
+  → green toast → real 14-digit TTN `20451435925384` populated on the
+  order, simultaneously visible in `my.novaposhta.ua` cabinet
+  (Описание: "Order #00001: Скарбничка...", Дата виїзду 10.05.2026,
+  30 грн delivery cost, "Готівка" payment method).
+- **Side-issues surfaced during this smoke** are tracked separately
+  (do not block NP-FIX-3 closure): NP-FIX-3a (wrong NP method name —
+  fixed below), NP-FIX-3b (sender phone field allowed free-form text
+  input that NP rejects — see Explicitly deferred), NP-UX-2 (TTN
+  delete fails when TTN was already removed on NP side — see
+  Explicitly deferred), packaging-engine "does not fit" warning
+  shown but does not block TTN — folded into PKG-1 design discussion.
+- **No code commit for NP-FIX-3 itself.** This sprint is the
+  configuration setup; the actual code change that made the smoke
+  succeed shipped in NP-FIX-3a (commit pending at the time of this
+  entry — see below).
+- **NP-DISC audit gap exposed.** The audit doc inventoried our
+  existing NP client surface but did not probe the live API. Three
+  smokes-worth of debugging today (NP-FIX-1 missing warehouse,
+  NP-FIX-3a wrong method name, sender-phone format) would have been
+  caught earlier had NP-DISC included a smoke checkpoint. Folded
+  into the NP-FIX-3a closure note below; no separate audit revision
+  spawned.
+
+---
+
+**Sprint NP-FIX-3a (Revision 2) — Correct NP API method name from `getContactPersons` to `getCounterpartyContactPersons`** (Status: `DONE` — commit pending; pytest 99 → 100 passing)
+
+Goal: Resolve the actual root cause of the courier-dispatch
+follow-up — the TTN-create flow could not resolve sender contact
+person on a PrivatePerson NP API key because our NP client called
+`Counterparty.getContactPersons` (no prefix), which NP internally
+redirects to a non-existent `CounterpartyGeneral_getContactPersons`
+model and returns "Method not found". The correct method name is
+**`Counterparty.getCounterpartyContactPersons`** (with the
+`Counterparty` prefix on the verb), which works for both
+PrivatePerson and Organization API keys per community SDK consensus
+and direct curl probe against `api.novaposhta.ua`.
+
+This sprint went through two revisions before landing the
+correct fix:
+
+- **Revision 1** (architectural inline-read of
+  `senders[0].ContactPerson.data[0].Ref` from `getCounterparties`
+  responses, plus type-aware guard) — implemented on a hypothesis
+  later disproven by curl. Issue #32 of `lis-dev/nova-poshta-api-2`
+  shows the verbatim response shape: NP API returns no
+  `ContactPerson` field at all in `getCounterparties` for
+  PrivatePerson senders. Rolled back fully via
+  `git checkout HEAD -- backend/{routers/shipping.py,services/nova_poshta.py,tests/test_shipping_router.py}`.
+- **Revision 2** (this sprint, what actually shipped): a single-token
+  rename in the NP client. Verified by direct curl: the wrong name
+  returns "Method CounterpartyGeneral_getContactPersons not found",
+  the right name returns "Ref is not specified" (i.e. method exists
+  and parameter validation is reachable on the same PrivatePerson
+  key) — the asymmetry is the proof.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| NP-FIX-3a-1 | Rename `Counterparty.getContactPersons` to `Counterparty.getCounterpartyContactPersons` at `services/nova_poshta.py:90` (the only line that constructs the NP method-name string for that call) | backend | DONE |
+| NP-FIX-3a-2 | Expand the docstring of `NovaPoshtaClient.get_contact_persons` with the curl-evidence note explaining why the rename was correct and which keys the method works for | backend docs | DONE |
+| NP-FIX-3a-3 | New regression test `test_get_contact_persons_calls_correct_np_method_name` in `tests/test_nova_poshta.py` (service-level; mocks `_post`, asserts the exact call args tuple `("Counterparty", "getCounterpartyContactPersons", {"Ref": ...})` — locks the method name in place against silent regression) | backend tests | DONE |
+
+**Post-sprint notes:**
+- **One-token fix.** The Python wrapper function name
+  `np_client.get_contact_persons(...)` did not change; only the
+  internal NP method-name string passed to `_post()` changed.
+  Every existing call site (`shipping.py:150`, `shipping.py:188`,
+  `test_shipping_router.py:300`) keeps working unchanged.
+  `routers/shipping.py` and `tests/test_shipping_router.py` were
+  not touched in this revision.
+- **Curl-evidence stored in code.** The expanded docstring at
+  `nova_poshta.py:88-90` cites the two curl probe results
+  (Method-not-found vs. Ref-not-specified) and the verification
+  date. A future reader can audit the rename rationale without
+  digging through commits or chat history.
+- **Test count:** 99 → **100 passing** (+1 regression-guard test).
+  Service-level placement matches the pattern of
+  `test_get_cities_passes_query_in_props` and
+  `test_get_warehouses_passes_city_ref_and_optional_query`.
+- **No fallback to the old name.** The unprefixed
+  `getContactPersons` works for nothing useful (errors for
+  PrivatePerson, undocumented for Organization in current SDKs);
+  no try/old/except/new wrapper was added.
+- **Manual smoke (verified 2026-05-10):**
+  - First click on Generate NP Label: `[SHIPPING] Resolving sender
+    refs from NP API for shop ...` → success → refs cached on
+    `Shop.np_sender_ref` and `Shop.np_sender_contact_ref` →
+    InternetDocument.save attempted → second-tier validation error
+    surfaced ("SendersPhone invalid format" — see NP-FIX-3b in
+    Explicitly deferred).
+  - After data fix on the sender phone field, second click: cached
+    sender refs used (`[SHIPPING] Using cached sender refs ...`),
+    InternetDocument.save succeeded, real TTN `20451435925384`
+    written to the order and visible in `my.novaposhta.ua`.
+  - **Critical regression-guard signal:** the very first network
+    request that the cold path made was
+    `Counterparty.getCounterpartyContactPersons` (with prefix),
+    not `getContactPersons` — confirmed both via DevTools network
+    payload inspection and by the absence of the
+    `CounterpartyGeneral_getContactPersons` error in
+    `backend/logs/server.log` after NP-FIX-3a took effect.
+- **NP-FIX-2 audit-coverage gap explicitly closed in scope.** The
+  service-level test that this sprint adds locks the method-name
+  string at the NP client layer — the right place. The earlier
+  NP-FIX-2 router-level happy-path test at
+  `test_create_ttn_happy_path_with_cached_sender_refs` only
+  exercised the cached-refs branch, where the network method name
+  is moot; that explains why NP-FIX-2 didn't catch the wrong name.
+- **Closes:** real-NP TTN flow on PrivatePerson API keys end-to-end.
+  Combined with NP-FIX-1 (sender-warehouse validation) and the
+  manual NP-FIX-3 dev-shop setup, the TTN happy-path is now
+  green against `api.novaposhta.ua`.
 
 ---
 
@@ -836,6 +975,8 @@ in this document where applicable, to avoid duplication.
 | PC-F-1 | Product photos (see Section A) | Requires new file-upload infrastructure |
 | Unlinked backfill (carried over from BUG-2/BUG-3 smoke tests) | UI gesture or migration to link historical Unlinked items in existing orders | Pre-existing constraint; no operational need yet |
 | NP-UX-1 | Hide Logistics (NP) tab in Edit Store Settings modal when `has_np_token = false` | Cosmetic — the tab currently renders for every shop, including those that never integrated NP (Lamamarka Shopify, LeatherCraft UA, Leather by Mykola). Deferral cause: depends on the open architectural question below — does tab visibility tie to *credentials presence* (cheap, but hides the only entry point for first-time NP setup) or to *regional intent* (proper, but the data anchor doesn't exist). |
+| NP-UX-2 | Idempotent TTN delete — clear `Order.ttn_number` even when NP returns "TTN not found" / "already deleted" | Discovered during NP-FIX-3a smoke (2026-05-10). After the operator manually deleted the test TTN in the NP cabinet, OrderHub's Delete TTN button kept failing with 400 because `routers/shipping.py:delete_np_ttn` treats any NP API error as fatal and rolls the transaction back. The operator was left with a stale `ttn_number` on the order and had to clear it via SQL. Fix: catch the specific NP error message(s) for "already deleted" / "not found" and treat them as effective successes — clear the local TTN reference anyway. Eventual consistency, not a sync gap. Low-priority: rare in practice (NP cabinet manual deletes are uncommon). |
+| NP-FIX-3b | Sender phone field — frontend validation + backend normalization | Discovered during NP-FIX-3a smoke (2026-05-10). The Sender Phone input on the Edit Store Settings → Logistics (NP) modal accepts arbitrary text; an operator entered a surname there and it propagated all the way into the NP `InternetDocument.save` payload, where NP rejected it with "SendersPhone invalid format". Two-part fix: (a) frontend regex/mask on the Phone field (UA mobile pattern `380XXXXXXXXX` or `0XXXXXXXXX`), and (b) backend normalization in `routers/shipping.py` mirroring the recipient-phone normalization at lines 175-178 (strip non-digits, prepend `38` if missing). Currently there is also no validation on Sender Name. Low-priority: only one operator (KoraKlenu owner) currently configures NP, and the workaround is "type the right thing". Bundle with PKG-1 frontend work if convenient. |
 
 ---
 
