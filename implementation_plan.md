@@ -670,6 +670,73 @@ notes).
 
 ---
 
+**Sprint NP-FIX-2 — Baseline pytest coverage for NP service + router** (Status: `DONE` — commit `898fa20`)
+
+Goal: Per the NP-DISC audit, the entire Nova Poshta integration shipped
+with **zero backend tests**. NP-FIX-1 (sender-warehouse validation) and
+NP-FIX-4 onwards (real-API smoke tests on the dev shop) needed a
+regression net first. This sprint added that net: 20 new pytest cases
+across two new files, with **zero changes to production code**.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| NP-FIX-2-1 | New `backend/tests/test_nova_poshta.py` — 8 service tests for `NovaPoshtaClient` + `_post` (retry contract, `success: false` → `NovaPoshtaAPIError` translation, wrapper-method call shape) | backend tests | DONE |
+| NP-FIX-2-2 | New `backend/tests/test_shipping_router.py` — 12 router tests across all 4 endpoints: validation branches (404/400 paths) + happy paths for TTN create + TTN delete | backend tests | DONE |
+
+**Post-sprint notes:**
+- **Q1 — Tenacity wait disabled cleanly via monkeypatch.** Test #4 in
+  `test_nova_poshta.py` proves `httpx.HTTPError` triggers exactly 3
+  retries while `NovaPoshtaAPIError` triggers exactly 1 attempt
+  (no retry, the NP-P0 invariant). Implementation:
+  `monkeypatch.setattr(NovaPoshtaClient._post.retry, "wait", wait_none())`.
+  `.retry.wait` is a public tenacity attribute on the `Retrying`
+  instance the decorator attaches to the function — mutating it is the
+  supported runtime-override pattern, and `monkeypatch` auto-restores
+  it after the test. Retry test runs in <100ms (vs. ~6s wall-clock if
+  we'd accepted the real exponential backoff). If a future tenacity
+  upgrade breaks `.retry.wait`, the fallback `c` from the spec — a
+  6-second test — still proves the right thing.
+- **Q3 — Direct-coroutine test style locked.** CC grepped
+  `backend/tests/` and found that all 7 pre-existing test files call
+  endpoint or service functions directly (no `TestClient`, no
+  `httpx.AsyncClient` against the FastAPI app). NP-FIX-2 mirrors this
+  precedent — `await create_np_ttn(order_id=..., body=...,
+  current_user=mock_user, db=mock_db)`, `pytest.raises(HTTPException)
+  as exc_info; assert exc_info.value.status_code == 400`. No
+  `app.dependency_overrides`, no client fixture, no auth-bypass
+  plumbing. Tighter and more consistent with the rest of the suite.
+- **Q4 — `routers.shipping.get_order_detail` patched at the
+  module-level binding.** Patching `services.order_service.get_order_detail`
+  would not take effect because `routers/shipping.py:20` does
+  `from services.order_service import get_order_detail` (binds at
+  import time). All TTN-related tests use
+  `@patch("routers.shipping.get_order_detail", AsyncMock(...))` and
+  similarly for `change_order_status`, `decrypt_value`, and
+  `NovaPoshtaClient`.
+- **Mock helper pattern.** `_mock_async_client(json_payload, *, raises=None)`
+  in `test_nova_poshta.py` returns a singleton mock honouring the
+  `async with httpx.AsyncClient() as client: await client.post(...)`
+  contract — `__aenter__`/`__aexit__` set up correctly so the
+  service code's `async with` block yields the same `client_instance`
+  on every retry. `client_instance.post.side_effect = [err, err,
+  success_response]` consumes one item per retry attempt across all
+  three `_post` invocations.
+- **Sanity grep clean** (per task.md verification): zero
+  `api.novaposhta.ua` references in `backend/tests/`; every
+  `NovaPoshtaClient` / `decrypt_value` reference in
+  `test_shipping_router.py` sits inside a `patch(...)` context.
+- **Test count:** 77 → **97 passing** (+20 new). Suite runtime stayed
+  at 1.97s — well within the +5-10s budget the task.md set as
+  acceptable.
+- **No production behaviour change.** This sprint is pure additive
+  test coverage; the existing 77 tests stay green untouched, and
+  no code under `backend/services/` or `backend/routers/` was
+  modified. The next NP-FIX sprint (NP-FIX-1, sender-warehouse
+  validation) lands behavioural changes that this baseline now
+  protects.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
