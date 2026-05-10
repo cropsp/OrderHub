@@ -222,7 +222,7 @@ export default function ShopsPage() {
         open={isDialogOpen}
         onOpenChange={setIsDialogOpen}
       >
-        <DialogContent className="max-w-3xl border-zinc-800 bg-zinc-950 text-zinc-100">
+        <DialogContent className="sm:max-w-3xl border-zinc-800 bg-zinc-950 text-zinc-100">
           <DialogHeader className="mb-4">
             <DialogTitle className="text-2xl font-bold tracking-tight">
               {editingShop.id ? 'Edit Store Settings' : 'Initialize New Store'}
