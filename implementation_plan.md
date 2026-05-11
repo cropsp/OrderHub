@@ -1122,6 +1122,145 @@ lays the groundwork for the next PKG-2 sprint (stock counting).
 
 ---
 
+**Sprint PKG-1b — Drop `PackagingBox.shop_id`, move to shared inventory model** (Status: `DONE` — commit `a8b0f3d`; pytest 104 → 103 passing)
+
+Goal: Refactor packaging inventory from per-shop to shared.
+Pre-PKG-1b, every `PackagingBox` row carried a NOT NULL FK to
+`shops.id`, and every list/create/bulk-csv endpoint was scoped
+`/api/shops/{shop_id}/packaging-boxes`. The model treated
+packaging types as if each shop had its own physical warehouse —
+but Lamamarka, KoraKlenu, LeatherCraft UA, Leather by Mykola all
+ship from one physical warehouse owned by the same operator. The
+same cardboard box is one SKU, not four.
+
+PKG-1b is a structural shift, not a feature addition: drop the
+column, flatten the URLs to `/api/packaging-boxes/*`, remove the
+cross-shop guard PKG-1 added in `order_service.py`, drop the
+ACTIVE SHOP selector from the Inventory → Packaging page, and
+simplify the `usePackaging` hook. After this sprint, **PKG-2
+(stock counting via ledger)** can build on a clean shared model
+where one box record = one physical type = one stock counter,
+with per-shop analytics derived through `JOIN orders ON
+movement.order_id WHERE order.shop_id = ?`.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PKG-1b-1 | Alembic migration `f3e9c2a18b07_drop_shop_id_from_packaging_boxes.py` — drop FK constraint, drop index, drop column. Verified names against live DB (`pg_constraint` + `pg_indexes`): `packaging_boxes_shop_id_fkey` + `ix_packaging_boxes_shop_id`. Round-trip verified on dev DB (`upgrade → downgrade → upgrade` all clean). | backend / DB | DONE |
+| PKG-1b-2 | `models/packaging.py` — drop `shop_id` column + `shop` relationship. `models/shop.py` — drop `packaging_boxes` relationship. | backend | DONE |
+| PKG-1b-3 | `schemas/packaging.py` — drop `shop_id` from `PackagingBoxRead`. (`PackagingBoxSummary` from PKG-1 never had it.) | backend schemas | DONE |
+| PKG-1b-4 | `services/catalog_service.py` — `get_packaging_boxes()` drops shop_id arg + filter; `create_packaging_box(schema)` drops shop_id arg + constructor param. | backend | DONE |
+| PKG-1b-5 | `services/parcel_calculator.py:45` — drop `.where(PackagingBox.shop_id == order.shop_id)`. Engine now sees all boxes. | backend | DONE |
+| PKG-1b-6 | `services/order_service.py:267-273` — replace cross-shop validation (PKG-1) with existence-only check: `if not box: raise HTTPException(400, "Packaging box not found")`. Matches the 400 status of the rest of the PATCH validation surface. | backend | DONE |
+| PKG-1b-7 | `services/import_service.py:27` — `save_preview` makes `shop_id: Optional[uuid.UUID] = None`. Packaging routes pass `None`; product imports keep passing `shop_id` unchanged. | backend | DONE |
+| PKG-1b-8 | `routers/packaging.py` — re-route 4 endpoints to flat `/packaging-boxes/*`. GET → `get_current_user` (any authenticated user — designers need it for DetailLogistics dropdown). POST + bulk-csv/* → `require_role(OWNER, MANAGER)`. PATCH/DELETE on `{id}` unchanged (already flat + role-gated). `require_platform(MANUAL)` gate removed entirely (no shop to gate on, packaging is now non-platform-specific). | backend | DONE |
+| PKG-1b-9 | Frontend `api/packaging.ts` — re-route 4 paths, drop `shopId` arg. | frontend | DONE |
+| PKG-1b-10 | Frontend `hooks/usePackaging.ts` — drop `shopId` from `usePackaging()` and from all 4 mutation hooks (`useCreatePackaging`, `useUpdatePackaging`, `useDeletePackaging`, `useBulkImportPackaging`). Cache key simplified to `['packaging']`. | frontend | DONE |
+| PKG-1b-11 | Frontend `pages/PackagingPage.tsx` — drop ACTIVE SHOP selector, `selectedShopId` state, `disabled={!selectedShopId}` props, the entire `!selectedShopId` empty-state branch. Page now renders one shared table unconditionally. Sub-title updated to "Shared boxes and envelopes used for automated parcel calculation". | frontend | DONE |
+| PKG-1b-12 | Frontend `components/orders/detail/DetailLogistics.tsx` — `usePackaging(order.shop_id)` → `usePackaging()`; `?shop=${order.shop_id}` query param removed from the Inventory link (no consumer post-refactor). | frontend | DONE |
+| PKG-1b-13 | Frontend `types/inventory.ts` — drop `shop_id` from `PackagingBox` type. | frontend types | DONE |
+| PKG-1b-14 | `backend/tests/test_orders_router.py` — drop the cross-shop reject case (PKG-1 added it); the 3 remaining PKG-1 cases (set / null clear / unknown-box reject) stay. `_make_box` helper drops `shop_id` param. | backend tests | DONE |
+| PKG-1b-15 | `backend/tests/test_parcel_calculator.py` — drop `env.shop_id` and `box.shop_id` mock assignments from packaging fixtures. The `order.shop_id` mock assignment stays — engine no longer reads it but the field still exists on the real Order model. | backend tests | DONE |
+
+**Post-sprint notes:**
+- **API URL strategy: clean break.** All shop-scoped packaging
+  endpoints moved to flat roots:
+  - `GET /api/shops/{shop_id}/packaging-boxes` → `GET /api/packaging-boxes`
+  - `POST /api/shops/{shop_id}/packaging-boxes` → `POST /api/packaging-boxes`
+  - `POST /api/shops/{shop_id}/packaging-boxes/bulk-csv/preview` → `POST /api/packaging-boxes/bulk-csv/preview`
+  - `POST /api/shops/{shop_id}/packaging-boxes/bulk-csv/confirm` → `POST /api/packaging-boxes/bulk-csv/confirm`
+  PATCH/DELETE on `{id}` were already flat and unchanged.
+- **Authorization model — two-tier split.** Pre-PKG-1b, the four
+  shop-scoped endpoints used `require_platform(ShopPlatform.MANUAL)`,
+  which chained through `get_shop_for_user` and implicitly tied
+  access to a specific shop the operator could reach (with SEC-05
+  designer-shop scoping). Flat URLs have no shop in the URL, so
+  that gate cannot be expressed. Replacement: GET is open to any
+  authenticated user (`Depends(get_current_user)`) so designers can
+  read the shared list to populate the DetailLogistics dropdown;
+  POST and bulk-csv writes require `require_role(OWNER, MANAGER)`,
+  matching the existing PATCH/DELETE write-side gate. The
+  `require_platform(MANUAL)` gate is dropped entirely — packaging
+  is no longer platform-specific.
+- **Migration downgrade carries documented data loss.** The
+  downgrade re-adds `shop_id` as a NULLABLE column. Original shop
+  ownership of existing rows CANNOT be recovered without an
+  external snapshot. Manual SQL re-population is required after
+  downgrade for the system to function correctly under the old
+  per-shop model (e.g., the auto-fit engine's old shop filter
+  expected every row to have `shop_id`). The migration module
+  docstring explicitly states this so any future operator running
+  `alembic downgrade -1` is warned. Round-trip on dev was clean —
+  the documented data loss is for the single existing KoraKlenu
+  box, which became a shared row on first upgrade and stayed that
+  way after the round-trip.
+- **FK target invariance.** `Order.packaging_id` (PKG-1) and
+  `Order.computed_packaging_box_id` (`bd752467a39b`) both FK into
+  `packaging_boxes.id`. The PK column is untouched; both FKs
+  remain valid post-migration, no cascade behaviour change.
+  Verified during smoke — KoraKlenu order #00001's `packaging_id`
+  still resolves to the (now-shared) Box M record and the audit
+  log entries are intact.
+- **`import_service.save_preview` shared with product imports.**
+  Pre-refactor, `save_preview` required `shop_id` for both
+  packaging and product preview paths. Refactor made `shop_id`
+  `Optional[uuid.UUID] = None`; packaging route passes `None` and
+  product route keeps passing the shop's UUID. Confirm endpoints
+  on the packaging side drop the `preview["shop_id"] != shop_id`
+  cross-check (no shop_id in URL anymore) but keep
+  `preview["type"] != "packaging"`. Product preview behaviour
+  unchanged.
+- **Test count:** 104 → **103 passing** (drop 1 PKG-1
+  cross-shop reject test, which is no longer expressible). The
+  remaining 3 PKG-1 cases in `test_orders_router.py` (set / null
+  clear / unknown-box reject) all stay green.
+- **Manual smoke (verified 2026-05-11), 5 of 5 + negative
+  sanity:**
+  1. `/packaging` — ACTIVE SHOP selector gone, sub-title
+     "Shared boxes and envelopes…", single shared row for the
+     (pre-existing KoraKlenu) Box M visible regardless of Sidebar
+     shop selection.
+  2. KoraKlenu order #00001 → Logistics — Packaging dropdown
+     intact, PKG-1 selection (`packaging_id` =
+     `96c4fbff-3499-…`) persists, audit log preserved.
+  3. Lamamarka order #7148183421084 (US shipping) — the NP
+     pre-TTN block stays hidden by the NP-FIX-1
+     `shipping_country === 'UA'` country guard, so the Packaging
+     dropdown does not render. Expected — non-UA orders don't
+     route through NP and don't need packaging selection.
+  4. Created a new box "Test Crate" (50×50×50, 200g) via the
+     flat `POST /api/packaging-boxes` (201). The new box
+     immediately appeared in KoraKlenu's order Logistics
+     dropdown — **shared inventory model verified in practice**.
+     Test Crate deleted afterwards.
+  5. Generate NP Label on KoraKlenu #00001 — TTN `20451436522025`
+     created (`POST /api/shipping/np-ttn/{id}` → 200), real-NP
+     happy path **byte-identical** to PKG-1 smoke. PKG-1b did
+     not touch `shipping.py`; regression-clean.
+  - **Negative sanity (designer auth):** GET
+    `/api/packaging-boxes` now requires only
+    `Depends(get_current_user)`. Verified at the code level that
+    designers (who have at least one assigned order in a NP-using
+    shop) can read the list for the Logistics dropdown. No 403.
+- **TTN delete bug discovered during smoke cleanup —
+  unrelated to PKG-1b.** The Delete TTN button on the order
+  detail panel returns 400 because `nova_poshta.py:107` passes
+  `order.ttn_number` (a 14-digit `IntDocNumber`) as
+  `DocumentRefs` (which NP API expects as a UUID Ref). Curl
+  probe confirmed: passing the same value as `DocumentBarcodes`
+  succeeds (`success: true, data: [{Ref: …}]`). Documented as
+  **NP-FIX-4** in Explicitly deferred — one-token rename, same
+  shape as NP-FIX-3a, expected one-day sprint. Pre-existed
+  before PKG-1b (since the original NP TTN flow); PKG-1b smoke
+  cleanup just surfaced it.
+- **Closes:** the per-shop inventory abstraction mismatch with
+  physical reality (one warehouse). Path to PKG-2 stock counting
+  is now clean — ledger entries will be tied to box records that
+  reflect physical types, not shop-scoped duplicates. Future
+  per-shop warehouse split (if needed) is parked under the
+  Multi-warehouse evolution note in Open Architectural Questions.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -1143,6 +1282,7 @@ in this document where applicable, to avoid duplication.
 | NP-FIX-3b | Sender phone field — frontend validation + backend normalization | Discovered during NP-FIX-3a smoke (2026-05-10). The Sender Phone input on the Edit Store Settings → Logistics (NP) modal accepts arbitrary text; an operator entered a surname there and it propagated all the way into the NP `InternetDocument.save` payload, where NP rejected it with "SendersPhone invalid format". Two-part fix: (a) frontend regex/mask on the Phone field (UA mobile pattern `380XXXXXXXXX` or `0XXXXXXXXX`), and (b) backend normalization in `routers/shipping.py` mirroring the recipient-phone normalization at lines 175-178 (strip non-digits, prepend `38` if missing). Currently there is also no validation on Sender Name. Low-priority: only one operator (KoraKlenu owner) currently configures NP, and the workaround is "type the right thing". Bundle with PKG-1 frontend work if convenient. |
 | PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
 | PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
+| NP-FIX-4 | TTN delete fails with 400 — wrong NP method parameter (`DocumentRefs` vs `DocumentBarcodes`) | Discovered during PKG-1b smoke (2026-05-11). `nova_poshta.py:107` passes `order.ttn_number` (a 14-digit `IntDocNumber` like `20451436522025`) as `DocumentRefs`. NP API rejects with `"There are only invalid DocumentBarcodes and/or DocumentRefs"` because `DocumentRefs` expects a UUID Ref, not an IntDocNumber. Curl probe against `api.novaposhta.ua` confirmed: same value passed as `DocumentBarcodes` succeeds (`success: true, data: [{Ref: "4080dd88-…"}]`). **One-token fix** in `nova_poshta.py:107` — same shape as NP-FIX-3a's `getCounterpartyContactPersons` rename. Plus 1 regression test (`test_delete_internet_document_uses_documentbarcodes_param`) locking the parameter name. Side-finding to fold in: NP API errors sometimes come back as `dict` (e.g. `{"<ref>": "msg", "0": "msg"}`) rather than `list`, which makes `nova_poshta.py:_post()`'s `', '.join(errors)` produce keys instead of values. Not fixed in NP-FIX-4 scope but documented as a follow-up. Pre-existed before PKG-1b (since the original NP TTN flow); PKG-1b smoke cleanup just surfaced it. |
 
 ---
 
@@ -1173,6 +1313,42 @@ explicitly chose not to force a decision on.
   right shape (boolean flag, ISO country code, multi-region join
   table, or computed-from-orders view) will be far more obvious than
   it is from cosmetic-UX speculation today.
+
+- **Multi-warehouse evolution (post-PKG-1b).** PKG-1b moved
+  packaging inventory to a shared model (one physical warehouse for
+  all shops). This matches today's Lamamarka reality. When per-shop
+  physical warehouses become a real requirement — e.g., Lamamarka
+  opens a separate location, or a second operator's shops live in
+  another city — the migration path is to introduce a `Warehouse`
+  entity (separate from `Shop`):
+  - New `warehouses` table.
+  - FK `PackagingBox.warehouse_id` (NOT NULL after backfill — one
+    warehouse owns the box).
+  - FK `Shop.warehouse_id` (NOT NULL after backfill — one shop ships
+    from one warehouse). Optional many-to-many `warehouse_shops` if
+    a warehouse serves multiple shops (shared distribution center).
+  - Stock ledger entries from PKG-2 onward already carry `order_id`,
+    so per-warehouse analytics flow via
+    `JOIN orders ON movement.order_id JOIN shops ON order.shop_id`
+    without schema rework.
+  **Why we're not doing it now:** there is no operational driver.
+  Today's single warehouse fits the shared model cleanly, and adding
+  a `Warehouse` entity speculatively would lock in a shape (e.g.
+  one-to-one vs many-to-one Shop↔Warehouse) without a real use case
+  to validate against. Estimated effort when triggered: 2-3 day
+  sprint (new model + migration + Shop/Box admin UI + backfill
+  guidance). Predecessor: PKG-1b shared inventory commit
+  `a8b0f3d`.
+
+  An earlier option considered was a global Settings toggle
+  ("shared vs per-shop warehouse mode") — rejected because (a) it
+  introduces conditional behaviour distributed across the codebase
+  (every filter, validation, UI state has two branches), (b) it
+  doubles the test matrix, (c) toggle is not expressive enough for
+  the real future need (a warehouse that serves multiple shops, or
+  a shop with multiple warehouses) — when that need lands, the
+  toggle would have to be replaced by the `Warehouse` entity anyway,
+  so the toggle would be throwaway complexity.
 
 ---
 
