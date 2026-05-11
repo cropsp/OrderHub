@@ -131,12 +131,25 @@ export interface Order {
   computed_packaging_box_id?: string | null
   parcel_override: boolean
 
+  // PKG-1 — operator-chosen packaging
+  packaging_id?: string | null
+  packaging?: PackagingBoxSummary | null
+
   // Nested relations (when loaded)
   shop?: Shop
   customer?: Customer
   items?: OrderItem[]
   status_history?: OrderStatusHistoryEntry[]
   attachments?: Attachment[]
+}
+
+export interface PackagingBoxSummary {
+  id: string
+  name: string
+  inner_length_mm: number
+  inner_width_mm: number
+  inner_height_mm: number
+  tare_weight_g: number
 }
 
 // ─── Pagination ─────────────────────────────────────────────

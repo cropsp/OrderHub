@@ -148,6 +148,14 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     parcel_override: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Operator-chosen packaging (PKG-1) — distinct from computed_packaging_box_id.
+    packaging_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("packaging_boxes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Notes
     customer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     custom_info: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -176,6 +184,9 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     attachments = relationship(
         "Attachment", back_populates="order", cascade="all, delete-orphan", lazy="selectin"
+    )
+    packaging = relationship(
+        "PackagingBox", foreign_keys=[packaging_id], lazy="selectin"
     )
 
     @property

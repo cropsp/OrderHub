@@ -14,6 +14,7 @@ from models.order import Order, OrderItem, OrderStatus, OrderStatusHistory, ALLO
 from models.user import User, UserRole
 from models.customer import Customer
 from models.product import Product, ProductVariant
+from models.packaging import PackagingBox
 from schemas.order import OrderCreate, OrderUpdate, OrderFilters, OrderItemCreate, OrderItemUpdate
 from services.customer_service import upsert_customer
 
@@ -261,7 +262,16 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only owner can modify financial fields"
         )
-        
+
+    # PKG-1: validate packaging belongs to this order's shop
+    if "packaging_id" in update_data and update_data["packaging_id"] is not None:
+        box = await db.get(PackagingBox, update_data["packaging_id"])
+        if not box or box.shop_id != order.shop_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Packaging box does not belong to this order's shop",
+            )
+
     changes = []
     for key, value in update_data.items():
         old_val = getattr(order, key)

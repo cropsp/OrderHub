@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Phone, ClipboardList, Edit2, Check, Loader2, Search, MapPin, X, RefreshCw, AlertTriangle, Info } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Phone, ClipboardList, Edit2, Check, Loader2, Search, MapPin, X, RefreshCw, AlertTriangle, Info, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import type { OrderDetail } from '@/types/order';
 import { useSearchCities, useGetWarehouses, useGetParcelEstimate } from '@/hooks/useShipping';
 import { useShops } from '@/hooks/useShops';
+import { usePackaging } from '@/hooks/usePackaging';
 import { cn } from '@/lib/utils';
 import { useToastStore } from '@/components/ui/Toast';
 
@@ -38,6 +40,47 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
   const [width, setWidth] = useState<number>(0);
   const [height, setHeight] = useState<number>(0);
   const [isManual, setIsManual] = useState(order.parcel_override);
+  const [packagingId, setPackagingId] = useState<string | null>(order.packaging_id ?? null);
+  const [isUpdatingPackaging, setIsUpdatingPackaging] = useState(false);
+
+  const { data: packagingList = [] } = usePackaging(order.shop_id);
+  const selectedBox = useMemo(() => {
+    if (!packagingId) return null;
+    return packagingList.find(b => b.id === packagingId) ?? (order.packaging ?? null);
+  }, [packagingId, packagingList, order.packaging]);
+  const ttnExists = !!order.ttn_number;
+  const isPackagingOverridden = !!selectedBox && (
+    Number(length) !== selectedBox.inner_length_mm ||
+    Number(width) !== selectedBox.inner_width_mm ||
+    Number(height) !== selectedBox.inner_height_mm
+  );
+
+  const handlePackagingChange = async (newId: string | null) => {
+    setPackagingId(newId);
+    if (newId) {
+      const box = packagingList.find(b => b.id === newId);
+      if (box) {
+        setLength(box.inner_length_mm);
+        setWidth(box.inner_width_mm);
+        setHeight(box.inner_height_mm);
+        setIsManual(true);
+      }
+    }
+    if (!onUpdate) return;
+    setIsUpdatingPackaging(true);
+    try {
+      await onUpdate({ packaging_id: newId });
+    } finally {
+      setIsUpdatingPackaging(false);
+    }
+  };
+
+  const handleResetPackagingDefaults = () => {
+    if (!selectedBox) return;
+    setLength(selectedBox.inner_length_mm);
+    setWidth(selectedBox.inner_width_mm);
+    setHeight(selectedBox.inner_height_mm);
+  };
 
   const { data: estimate, isFetching: isEstimating } = useGetParcelEstimate(order.id, !order.ttn_number && order.shipping_country === 'UA');
 
@@ -378,9 +421,22 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
             </div>
           )}
 
+          {!isEditing && ttnExists && (order.packaging ?? selectedBox) && (
+            <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 pt-2 border-t border-zinc-800/30">
+              <Package size={11} className="text-zinc-600" />
+              <span className="text-zinc-500">Packaged in:</span>
+              <span className="font-semibold text-zinc-300">
+                {(order.packaging ?? selectedBox)!.name}
+              </span>
+              <span className="text-zinc-600">
+                ({(order.packaging ?? selectedBox)!.inner_length_mm}×{(order.packaging ?? selectedBox)!.inner_width_mm}×{(order.packaging ?? selectedBox)!.inner_height_mm} mm)
+              </span>
+            </div>
+          )}
+
           {!isEditing && order.ttn_number && (
             <div className="space-y-2">
-              <div 
+              <div
                 className="mt-2 p-3 rounded-xl bg-teal-500/5 border border-teal-500/10 hover:bg-teal-500/10 transition-all cursor-pointer group active:scale-[0.98] relative"
                 onClick={() => {
                   navigator.clipboard.writeText(order.ttn_number!);
@@ -415,6 +471,36 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
 
       {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
         <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
+          <div className="space-y-1">
+            <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1 flex items-center gap-1">
+              <Package size={10} /> Packaging
+            </label>
+            {packagingList.length === 0 ? (
+              <div className="text-[10px] text-zinc-500 italic px-2 py-1.5 rounded bg-zinc-900/50 border border-zinc-800">
+                No packaging configured —{' '}
+                <Link
+                  to={`/inventory/packaging?shop=${order.shop_id}`}
+                  className="text-teal-400 hover:underline"
+                >
+                  add boxes in Inventory → Packaging
+                </Link>
+              </div>
+            ) : (
+              <select
+                value={packagingId ?? ''}
+                onChange={e => handlePackagingChange(e.target.value || null)}
+                disabled={isUpdatingPackaging}
+                className="w-full h-8 text-[11px] bg-zinc-900 border border-zinc-800 rounded px-2 text-zinc-100 focus:outline-none focus:ring-1 focus:ring-teal-500/40 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <option value="">— None —</option>
+                {packagingList.map(box => (
+                  <option key={box.id} value={box.id}>
+                    {box.name} ({box.inner_length_mm}×{box.inner_width_mm}×{box.inner_height_mm} mm)
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           {showNpConfigBanner && (
             <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
               <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
@@ -552,7 +638,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
             </div>
             <div className="space-y-1">
               <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Height (mm)</label>
-              <Input 
+              <Input
                 type="number"
                 className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
                 value={height}
@@ -563,8 +649,24 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               />
             </div>
           </div>
-          
-          <Button 
+
+          {selectedBox && isPackagingOverridden && (
+            <div className="flex items-center justify-between gap-2 px-1">
+              <span className="text-[9px] font-bold text-amber-500 uppercase tracking-widest flex items-center gap-1">
+                <AlertTriangle size={10} /> Selected packaging dimensions overridden
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 px-1.5 text-[9px] text-teal-500 hover:text-teal-400 hover:bg-teal-500/10 gap-1 font-bold"
+                onClick={handleResetPackagingDefaults}
+              >
+                <RefreshCw size={10} /> Reset to defaults
+              </Button>
+            </div>
+          )}
+
+          <Button
             className={cn(
               "w-full h-9 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all gap-2 shadow-lg",
               order.shipping_warehouse_ref 

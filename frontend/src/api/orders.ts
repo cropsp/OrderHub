@@ -19,7 +19,10 @@ export const ordersApi = {
     return data
   },
 
-  update: async (orderId: string, payload: any): Promise<OrderListItem> => {
+  update: async (
+    orderId: string,
+    payload: Record<string, unknown> & { packaging_id?: string | null },
+  ): Promise<OrderListItem> => {
     const { data } = await client.patch<OrderListItem>(`/orders/${orderId}`, payload)
     return data
   },

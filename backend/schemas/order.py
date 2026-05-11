@@ -8,6 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from models.order import OrderStatus
+from schemas.packaging import PackagingBoxSummary
 
 
 # ─── Order Items ───────────────────────────────────────────
@@ -103,6 +104,9 @@ class OrderListResponse(OrderBase):
     customer_name: str | None = None
     platform: str | None = None
 
+    # Packaging (PKG-1) — operator-chosen box for this order
+    packaging_id: uuid.UUID | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -110,6 +114,7 @@ class OrderResponse(OrderListResponse):
     """Full order data including nested relations."""
     items: list[OrderItemResponse] = []
     status_history: list[StatusHistoryResponse] = []
+    packaging: PackagingBoxSummary | None = None
 
 
 class OrderItemCreate(BaseModel):
@@ -181,7 +186,10 @@ class OrderUpdate(BaseModel):
     # TTN
     ttn_number: str | None = None
     ttn_printed: bool | None = None
-    
+
+    # Packaging (PKG-1) — operator-chosen box (nullable to clear selection)
+    packaging_id: uuid.UUID | None = None
+
     # Shipping
     shipping_name: str | None = None
     shipping_phone: str | None = None

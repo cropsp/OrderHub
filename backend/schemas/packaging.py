@@ -40,3 +40,15 @@ class PackagingBoxRead(PackagingBoxBase):
     shop_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class PackagingBoxSummary(BaseModel):
+    """Minimal projection embedded in OrderResponse (PKG-1)."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    inner_length_mm: int
+    inner_width_mm: int
+    inner_height_mm: int
+    tare_weight_g: int
