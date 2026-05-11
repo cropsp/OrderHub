@@ -41,13 +41,13 @@ async def calculate_parcel_estimate(db: AsyncSession, order_id: str) -> ParcelEs
     if unlinked_items_count > 0:
         warnings.append(f"{unlinked_items_count} item(s) have no dimensions linked — calculation is partial")
 
-    # 3. Fetch packaging
-    stmt_pkg = select(PackagingBox).where(PackagingBox.shop_id == order.shop_id)
+    # 3. Fetch packaging (shared inventory — no shop filter)
+    stmt_pkg = select(PackagingBox)
     res_pkg = await db.execute(stmt_pkg)
     all_packaging = res_pkg.scalars().all()
-    
+
     if not all_packaging:
-        warnings.append("No packaging configured for this shop — add boxes or envelopes in Inventory → Packaging")
+        warnings.append("No packaging configured — add boxes or envelopes in Inventory → Packaging")
     
     selected_pkg = None
     

@@ -2,7 +2,6 @@ export type PackagingType = 'BOX' | 'ENVELOPE';
 
 export interface PackagingBox {
   id: string;
-  shop_id: string;
   name: string;
   packaging_type: PackagingType;
   inner_length_mm: number;

@@ -104,18 +104,15 @@ class CatalogService:
             await self.db.commit()
 
     # --- Packaging Operations ---
-    async def get_packaging_boxes(self, shop_id: uuid.UUID) -> List[PackagingBox]:
-        query = select(PackagingBox).filter(PackagingBox.shop_id == shop_id).order_by(
+    async def get_packaging_boxes(self) -> List[PackagingBox]:
+        query = select(PackagingBox).order_by(
             PackagingBox.packaging_type, PackagingBox.sort_order
         )
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def create_packaging_box(self, shop_id: uuid.UUID, schema: PackagingBoxCreate) -> PackagingBox:
-        box = PackagingBox(
-            shop_id=shop_id,
-            **schema.model_dump()
-        )
+    async def create_packaging_box(self, schema: PackagingBoxCreate) -> PackagingBox:
+        box = PackagingBox(**schema.model_dump())
         self.db.add(box)
         await self.db.commit()
         await self.db.refresh(box)

@@ -43,7 +43,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
   const [packagingId, setPackagingId] = useState<string | null>(order.packaging_id ?? null);
   const [isUpdatingPackaging, setIsUpdatingPackaging] = useState(false);
 
-  const { data: packagingList = [] } = usePackaging(order.shop_id);
+  const { data: packagingList = [] } = usePackaging();
   const selectedBox = useMemo(() => {
     if (!packagingId) return null;
     return packagingList.find(b => b.id === packagingId) ?? (order.packaging ?? null);
@@ -479,7 +479,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               <div className="text-[10px] text-zinc-500 italic px-2 py-1.5 rounded bg-zinc-900/50 border border-zinc-800">
                 No packaging configured —{' '}
                 <Link
-                  to={`/inventory/packaging?shop=${order.shop_id}`}
+                  to="/inventory/packaging"
                   className="text-teal-400 hover:underline"
                 >
                   add boxes in Inventory → Packaging

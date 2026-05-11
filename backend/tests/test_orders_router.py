@@ -1,10 +1,13 @@
-"""PKG-1 — packaging_id cross-shop validation on order update.
+"""PKG-1 / PKG-1b — packaging_id validation on order update.
 
 The PATCH /api/orders/{id} flows through services.order_service.update_order.
-These tests cover the new packaging_id paths in that service:
-  1. happy path — supplied packaging belongs to the order's shop
+These tests cover the packaging_id paths in that service:
+  1. happy path — supplied packaging exists -> set
   2. null clear — packaging_id=None unsets a previous selection
-  3. cross-shop reject — packaging belongs to a different shop -> 400
+  3. unknown-box reject — packaging not found -> 400
+
+The cross-shop reject case (PKG-1) was removed in PKG-1b when
+PackagingBox.shop_id was dropped (shared inventory model).
 """
 import pytest
 from uuid import uuid4
@@ -35,10 +38,9 @@ def _make_order(shop_id, packaging_id=None):
     return order
 
 
-def _make_box(box_id, shop_id):
+def _make_box(box_id):
     box = MagicMock()
     box.id = box_id
-    box.shop_id = shop_id
     return box
 
 
@@ -47,7 +49,7 @@ async def test_update_order_sets_packaging_id_happy_path():
     shop_id = uuid4()
     box_id = uuid4()
     order = _make_order(shop_id)
-    box = _make_box(box_id, shop_id)
+    box = _make_box(box_id)
     user = _make_user(UserRole.OWNER)
 
     db = AsyncMock()
@@ -75,25 +77,6 @@ async def test_update_order_null_clears_packaging_id():
     assert result.packaging_id is None
     # null path must not look up the box
     db.get.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_update_order_cross_shop_packaging_rejected():
-    order_shop_id = uuid4()
-    other_shop_id = uuid4()
-    foreign_box_id = uuid4()
-    order = _make_order(order_shop_id)
-    foreign_box = _make_box(foreign_box_id, other_shop_id)
-    user = _make_user(UserRole.OWNER)
-
-    db = AsyncMock()
-    db.get.return_value = foreign_box
-
-    payload = OrderUpdate(packaging_id=foreign_box_id)
-    with pytest.raises(HTTPException) as exc:
-        await update_order(db, order, payload, user)
-    assert exc.value.status_code == 400
-    assert "does not belong to this order's shop" in exc.value.detail
 
 
 @pytest.mark.asyncio

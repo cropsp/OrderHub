@@ -4,11 +4,10 @@ import { useToastStore } from '@/components/ui/Toast'
 import type { PackagingBoxCreate, PackagingBoxUpdate } from '@/types/inventory'
 import { getApiErrorMessage } from '@/types/api'
 
-export function usePackaging(shopId: string) {
+export function usePackaging() {
   return useQuery({
-    queryKey: ['packaging', shopId],
-    queryFn: () => packagingApi.listPackaging(shopId),
-    enabled: !!shopId,
+    queryKey: ['packaging'],
+    queryFn: () => packagingApi.listPackaging(),
   })
 }
 
@@ -17,10 +16,10 @@ export function useCreatePackaging() {
   const addToast = useToastStore(s => s.addToast)
 
   return useMutation({
-    mutationFn: ({ shopId, data }: { shopId: string; data: PackagingBoxCreate }) =>
-      packagingApi.createPackaging(shopId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
+    mutationFn: ({ data }: { data: PackagingBoxCreate }) =>
+      packagingApi.createPackaging(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
       addToast('Packaging created successfully', 'success')
     },
     onError: (error) => {
@@ -34,10 +33,10 @@ export function useUpdatePackaging() {
   const addToast = useToastStore(s => s.addToast)
 
   return useMutation({
-    mutationFn: ({ id, shopId, data }: { id: string; shopId: string; data: PackagingBoxUpdate }) =>
+    mutationFn: ({ id, data }: { id: string; data: PackagingBoxUpdate }) =>
       packagingApi.updatePackaging(id, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
       addToast('Packaging updated successfully', 'success')
     },
     onError: (error) => {
@@ -51,10 +50,10 @@ export function useDeletePackaging() {
   const addToast = useToastStore(s => s.addToast)
 
   return useMutation({
-    mutationFn: ({ id, shopId }: { id: string; shopId: string }) =>
+    mutationFn: ({ id }: { id: string }) =>
       packagingApi.deletePackaging(id),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
       addToast('Packaging deleted successfully', 'success')
     },
     onError: (error) => {
@@ -68,10 +67,10 @@ export function useBulkImportPackaging() {
   const addToast = useToastStore(s => s.addToast)
 
   return useMutation({
-    mutationFn: ({ shopId, importToken }: { shopId: string; importToken: string }) =>
-      packagingApi.bulkImportConfirm(shopId, importToken),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['packaging', variables.shopId] })
+    mutationFn: ({ importToken }: { importToken: string }) =>
+      packagingApi.bulkImportConfirm(importToken),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
       addToast('Import completed successfully', 'success')
     },
     onError: (error) => {

@@ -263,13 +263,13 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
             detail="Only owner can modify financial fields"
         )
 
-    # PKG-1: validate packaging belongs to this order's shop
+    # PKG-1b: packaging is shared inventory; only verify existence.
     if "packaging_id" in update_data and update_data["packaging_id"] is not None:
         box = await db.get(PackagingBox, update_data["packaging_id"])
-        if not box or box.shop_id != order.shop_id:
+        if not box:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Packaging box does not belong to this order's shop",
+                detail="Packaging box not found",
             )
 
     changes = []

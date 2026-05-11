@@ -24,7 +24,7 @@ class ImportService:
             del cls._storage[k]
 
     @classmethod
-    def save_preview(cls, shop_id: uuid.UUID, data: List[Dict], import_type: str) -> str:
+    def save_preview(cls, shop_id: Optional[uuid.UUID], data: List[Dict], import_type: str) -> str:
         cls._cleanup()
         token = f"import_{uuid.uuid4().hex}"
         cls._storage[token] = {

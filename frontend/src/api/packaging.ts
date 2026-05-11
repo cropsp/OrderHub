@@ -2,13 +2,13 @@ import client from './client'
 import type { PackagingBox, PackagingBoxCreate, PackagingBoxUpdate } from '@/types/inventory'
 
 export const packagingApi = {
-  listPackaging: async (shopId: string) => {
-    const response = await client.get<PackagingBox[]>(`/shops/${shopId}/packaging-boxes`)
+  listPackaging: async () => {
+    const response = await client.get<PackagingBox[]>('/packaging-boxes')
     return response.data
   },
 
-  createPackaging: async (shopId: string, data: PackagingBoxCreate) => {
-    const response = await client.post<PackagingBox>(`/shops/${shopId}/packaging-boxes`, data)
+  createPackaging: async (data: PackagingBoxCreate) => {
+    const response = await client.post<PackagingBox>('/packaging-boxes', data)
     return response.data
   },
 
@@ -21,17 +21,17 @@ export const packagingApi = {
     await client.delete(`/packaging-boxes/${id}`)
   },
 
-  bulkImportPreview: async (shopId: string, file: File) => {
+  bulkImportPreview: async (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await client.post(`/shops/${shopId}/packaging-boxes/bulk-csv/preview`, formData, {
+    const response = await client.post('/packaging-boxes/bulk-csv/preview', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
     return response.data
   },
 
-  bulkImportConfirm: async (shopId: string, importToken: string) => {
-    const response = await client.post(`/shops/${shopId}/packaging-boxes/bulk-csv/confirm`, {
+  bulkImportConfirm: async (importToken: string) => {
+    const response = await client.post('/packaging-boxes/bulk-csv/confirm', {
       import_token: importToken
     })
     return response.data
