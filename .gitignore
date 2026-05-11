@@ -33,3 +33,6 @@ backend/logs/
 *.db
 *.sqlite3
 scratch/
+
+# Internal audit / historical docs (kept locally, not pushed)
+docs/integrations/nova-poshta-audit-2026-05.md
