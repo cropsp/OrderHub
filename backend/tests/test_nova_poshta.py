@@ -187,3 +187,36 @@ async def test_get_contact_persons_calls_correct_np_method_name():
         "'getContactPersons' breaks for PrivatePerson API keys."
     )
     assert result == [{"Ref": "contact-uuid"}]
+
+
+@pytest.mark.asyncio
+async def test_delete_internet_document_uses_documentbarcodes_param():
+    """NP-FIX-4 regression guard: client must pass the
+    IntDocNumber under the `DocumentBarcodes` key, not
+    `DocumentRefs`. The latter expects a UUID Ref (which we don't
+    store), so a `DocumentRefs` payload triggers NP's
+    "There are only invalid DocumentBarcodes and/or DocumentRefs"
+    error on every TTN delete attempt.
+    """
+    client = NovaPoshtaClient("api-key")
+
+    with patch.object(
+        NovaPoshtaClient,
+        "_post",
+        new=AsyncMock(return_value=[{"Ref": "4080dd88-4d29-11f1-a1d5-48df37b921da"}]),
+    ) as mock_post:
+        result = await client.delete_internet_document("20451436522025")
+
+    assert mock_post.await_count == 1
+    call = mock_post.await_args_list[0]
+    assert call.args == (
+        "InternetDocument",
+        "delete",
+        {"DocumentBarcodes": "20451436522025"},
+    ), (
+        "NP-FIX-4 regression: client must use "
+        "'DocumentBarcodes' (matches our IntDocNumber data). "
+        "The earlier name 'DocumentRefs' expects a UUID Ref we "
+        "do not store, and is rejected by NP on every call."
+    )
+    assert result is True

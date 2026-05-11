@@ -102,9 +102,22 @@ class NovaPoshtaClient:
         """
         return await self._post("Counterparty", "getCounterpartyContactPersons", {"Ref": counterparty_ref})
 
-    async def delete_internet_document(self, document_refs: str) -> bool:
-        """Delete an existing waybill (TTN)."""
-        await self._post("InternetDocument", "delete", {"DocumentRefs": document_refs})
+    async def delete_internet_document(self, document_barcode: str) -> bool:
+        """Delete an existing waybill (TTN) by its IntDocNumber.
+
+        Calls NP API method `InternetDocument.delete` with the
+        `DocumentBarcodes` parameter (accepts a single IntDocNumber as
+        a string). The earlier name `DocumentRefs` was wrong for our
+        data: we store `Order.ttn_number = IntDocNumber` (14 digits),
+        not the UUID Ref of the document. `DocumentRefs` expects a
+        UUID; passing an IntDocNumber there triggers:
+        *"There are only invalid DocumentBarcodes and/or
+        DocumentRefs"*. Verified via direct curl against
+        `api.novaposhta.ua` on 2026-05-11: passing the same
+        IntDocNumber as `DocumentBarcodes` returns
+        `{"success": true, "data": [{"Ref": "<uuid>"}]}`.
+        """
+        await self._post("InternetDocument", "delete", {"DocumentBarcodes": document_barcode})
         return True
 
 
