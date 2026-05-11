@@ -958,6 +958,170 @@ correct fix:
 
 ---
 
+**Sprint PKG-1 — Manual Packaging Select on Order Detail Logistics** (Status: `DONE` — commit pending; pytest 100 → 104 passing)
+
+Goal: Add the missing third mode to the Shipping & Logistics panel
+on Order Detail. Today there are two: AUTO-CALCULATED (engine sums
+variant dims × qty, optionally fits a registered PackagingBox) and
+MANUAL OVERRIDE (raw L/W/H typed by operator). When the engine
+can't fit a registered box (content larger than every box,
+max-weight too low, or no boxes registered), the operator's only
+option is to abandon the engine and type raw values — and the
+intent of *"I packed this in Box M"* is lost.
+
+PKG-1 adds an explicit **Packaging dropdown** at the top of the
+panel. Operator picks a registered box; its inner dimensions
+auto-fill the L/W/H inputs. Manual edits stay allowed and DO NOT
+unlink the box — an amber warning surfaces the divergence, and a
+Reset affordance restores the box's stored values. The selection
+persists via a new nullable `Order.packaging_id` FK column. This
+lays the groundwork for the next PKG-2 sprint (stock counting).
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PKG-1-1 | Alembic migration adding `orders.packaging_id` (UUID NULL, FK to `packaging_boxes.id`, `ondelete='SET NULL'`, indexed) | backend / DB | DONE |
+| PKG-1-2 | `Order.packaging_id` + `Order.packaging` relationship in `models/order.py` (with `foreign_keys=[packaging_id]` to disambiguate from the pre-existing `computed_packaging_box_id` relationship) | backend | DONE |
+| PKG-1-3 | New `PackagingBoxSummary` schema (minimal projection: `id, name, inner_length_mm, inner_width_mm, inner_height_mm, tare_weight_g`); `OrderUpdate` accepts `packaging_id`; `OrderResponse` embeds `packaging` summary alongside `packaging_id` | backend schemas | DONE |
+| PKG-1-4 | Cross-shop validation in `services/order_service.update_order`: reject `packaging_id` belonging to a different shop with 400 | backend | DONE |
+| PKG-1-5 | 4 new pytest cases in `backend/tests/test_orders_router.py`: happy-path set / null clear / cross-shop reject / unknown-box reject (CC added the unknown-box case on top of the 3 spec'd) | backend tests | DONE |
+| PKG-1-6 | Frontend types: extend `Order` / `OrderDetail` with `packaging_id: string \| null` and embedded `packaging: PackagingBoxSummary \| null`; tighten `ordersApi.update` payload typing | frontend types | DONE |
+| PKG-1-7 | `DetailLogistics.tsx`: Packaging dropdown at top of pre-TTN block (reuses existing `usePackaging(shopId)` hook); auto-fills L/W/H from `inner_*_mm` on selection; amber override warning + "Reset to defaults" button below the L/W/H row; post-TTN read-only behaviour; empty-state placeholder with link to Inventory → Packaging | frontend | DONE |
+
+**Post-sprint notes:**
+- **Q1 → embedded minimal projection.** The order GET response
+  carries both `packaging_id` (FK) and a nested `packaging`
+  summary with the six fields the panel actually reads. This
+  fits the existing OrderResponse pattern that already nests
+  `items` and `status_history`. Cheap on the join side
+  (PackagingBox is a small table) and saves the frontend from
+  warming the `usePackaging` cache before render.
+- **Q2 → no `is_active` filter.** Verified in plan that
+  `PackagingBox` has no `is_active` / soft-delete column.
+  Dropdown shows the full shop-scoped list ordered by
+  `sort_order`. A soft-delete column is a separate concern,
+  not PKG-1.
+- **Q3 → migration is safe.** `ADD COLUMN ... NULL` is
+  metadata-only on Postgres; index + FK creation took
+  millisecond-range on the sub-10k-row dev table. No
+  `CONCURRENTLY` flag needed at current scale. Round-trip
+  verified: `alembic upgrade head` + `alembic downgrade -1` +
+  `alembic upgrade head` all clean.
+- **Q4 → Reset button mirrors existing idiom.** Copies the
+  `RefreshCw` icon + ghost teal styling from the
+  Manual → Auto reset at `DetailLogistics.tsx:448-458`, label
+  text "Reset to defaults". No new visual idiom; placement on
+  the same row as the amber override warning.
+- **Q10 → Variant B (keep + warning) — confirmed in smoke.**
+  Manual edit of L/W/H/tare keeps `packaging_id` set; amber
+  warning *"⚠ SELECTED PACKAGING DIMENSIONS OVERRIDDEN"*
+  appears; Reset button restores box defaults. Dropdown
+  selection itself is unchanged. Audit trail captures
+  *intent* (operator chose Box M) separately from *actuals*
+  (different dims sent to NP). This data will inform PKG-2
+  stock decisions ("Box M chosen 40 times but overridden in
+  25 of them — sign we need a larger standard box").
+- **Q11 → pre-TTN only.** `disabled={ttnExists}` on the
+  `<select>` plus the existing pre-TTN block gating from
+  NP-FIX-1 covers the lifecycle. After a TTN exists,
+  selection is read-only. Symmetric with the NP-FIX-1
+  sender-warehouse banner.
+- **Q12 → backfill NULL.** Existing orders get
+  `packaging_id = NULL` by default. No retro-link to
+  inferred boxes; analytics that depend on `packaging_id`
+  will skip pre-PKG-1 orders.
+- **Dual-column architecture (preserved).** The new
+  `orders.packaging_id` (operator intent) coexists with the
+  pre-existing `orders.computed_packaging_box_id`
+  (engine-populated by `services/parcel_calc.py`). The two
+  are kept separate on purpose — they capture different
+  signals (the *chosen* box vs the *fitted* box), and
+  combining them would erase that distinction. CC caught
+  this in plan mode; the spec had not foreseen the existing
+  engine column.
+- **CC discovery: `inner_*_mm`, not `length_mm`.** The
+  task.md draft referred to "external dimensions
+  (length_mm, width_mm, height_mm)" on PackagingBox, but
+  the actual columns are `inner_length_mm` /
+  `inner_width_mm` / `inner_height_mm`. There are no
+  outer-dim columns. CC used `inner_*_mm` as the auto-fill
+  source; that is consistent with how the engine currently
+  reads PackagingBox. **Caveat for future tickets:** for NP
+  TTN volumetric weight, technically outer dims would be
+  more precise (cardboard adds 5-10 mm per wall). If we
+  ever observe NP cost-calc divergence, the right follow-up
+  is a small ticket to add `outer_*_mm` columns and route
+  the auto-fill source through them. Not in PKG-1 scope.
+- **Deviation: no tare-weight input field in the panel.**
+  `PackagingBoxSummary` carries `tare_weight_g`, and the
+  embed serializes it, but the Logistics panel doesn't have
+  a tare input today. CC implemented auto-fill for L/W/H
+  only; the tare value is fetched but unused on the
+  frontend. If we ever surface tare in the UI, the data
+  pipe is ready.
+- **Deviation: badge stays "MANUAL OVERRIDE" after box
+  selection.** Selecting a packaging box sets the panel's
+  internal `isManual=true` flag to prevent the auto-fit
+  engine from over-writing the box dims on the next render.
+  As a side-effect, the existing AUTO-CALCULATED /
+  MANUAL OVERRIDE badge reads "MANUAL OVERRIDE" even when
+  the operator hasn't touched any field. Adding a third
+  badge state ("PACKAGING") would surface the chosen-box
+  semantics more clearly — but it is a new visual idiom and
+  was outside PKG-1 scope. Folded as a candidate cosmetic
+  follow-up (see Explicitly deferred: PKG-UX-1).
+- **Test count:** 100 → **104 passing** (+4 new cases).
+  CC added `unknown-box reject` (404 fallthrough) on top of
+  the 3 cases the spec called for; the extra case is
+  defensive and aligned with the cross-shop reject family.
+- **Manual smoke (verified 2026-05-11):** KoraKlenu order
+  #00001. All 11 criteria green:
+  - Dropdown renders at top of panel with single registered
+    box labeled `100x120x50 (100×120×50 mm)`.
+  - Auto-fill on selection: L=100, W=120, H=50 (matches
+    `inner_*_mm`).
+  - PATCH `/api/orders/3cb81670-…` with `packaging_id`
+    returns 200; audit log records *"Fields updated:
+    packaging_id: None → 96c4fbff-3499-4072-81fd-0b119e0aabbf"*.
+  - Manual change of WIDTH to 300 surfaces the amber
+    *"SELECTED PACKAGING DIMENSIONS OVERRIDDEN"* warning;
+    `packaging_id` stays set (Q10 Variant B confirmed).
+  - "Reset to defaults" restores L/W/H to box values; warning
+    disappears; dropdown selection unchanged.
+  - Re-selecting the same box from the dropdown after
+    override re-applies box dims (re-running
+    `handlePackagingChange`).
+  - Clearing the selection (`— None —`) clears
+    `packaging_id` (PATCH 200) without auto-clearing the
+    field values, as designed.
+  - Lamamarka Shopify order (US shipping, non-UA): entire
+    pre-TTN Logistics block is hidden by the NP-FIX-1
+    `order.shipping_country === 'UA'` guard, so the
+    Packaging dropdown does not render. Expected behaviour;
+    packaging selection is only meaningful for NP-shipped
+    orders.
+  - Empty-state placeholder (UA shop with zero registered
+    boxes) verified via code inspection on the
+    `packagingList.length === 0` branch — placeholder copy
+    *"No packaging configured — add boxes in Inventory →
+    Packaging"* with link to `/inventory/packaging?shop={id}`.
+  - **Non-reproducible "kicked off page" report.** During
+    smoke, the human reviewer mentioned a one-off case
+    where selecting a packaging item from the dropdown
+    after manually editing fields appeared to "kick" them
+    off the page. Five repro attempts (slow and rapid
+    sequences with console + network capture) did not
+    reproduce. Console clean, network all 200. Filed as
+    PKG-1-bug in the watch-list; if it recurs, the human
+    will capture DevTools console output for a targeted
+    debugging pass. Not blocking PKG-1 closure.
+- **Closes:** the missing-explicit-pick gap in the Order
+  Detail Logistics flow. Operators can now record which
+  packaging they chose, the auto-fill works, the override
+  semantics preserve intent. The packaging_id audit data
+  is now available to seed PKG-2 stock-counting decisions.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -977,6 +1141,8 @@ in this document where applicable, to avoid duplication.
 | NP-UX-1 | Hide Logistics (NP) tab in Edit Store Settings modal when `has_np_token = false` | Cosmetic — the tab currently renders for every shop, including those that never integrated NP (Lamamarka Shopify, LeatherCraft UA, Leather by Mykola). Deferral cause: depends on the open architectural question below — does tab visibility tie to *credentials presence* (cheap, but hides the only entry point for first-time NP setup) or to *regional intent* (proper, but the data anchor doesn't exist). |
 | NP-UX-2 | Idempotent TTN delete — clear `Order.ttn_number` even when NP returns "TTN not found" / "already deleted" | Discovered during NP-FIX-3a smoke (2026-05-10). After the operator manually deleted the test TTN in the NP cabinet, OrderHub's Delete TTN button kept failing with 400 because `routers/shipping.py:delete_np_ttn` treats any NP API error as fatal and rolls the transaction back. The operator was left with a stale `ttn_number` on the order and had to clear it via SQL. Fix: catch the specific NP error message(s) for "already deleted" / "not found" and treat them as effective successes — clear the local TTN reference anyway. Eventual consistency, not a sync gap. Low-priority: rare in practice (NP cabinet manual deletes are uncommon). |
 | NP-FIX-3b | Sender phone field — frontend validation + backend normalization | Discovered during NP-FIX-3a smoke (2026-05-10). The Sender Phone input on the Edit Store Settings → Logistics (NP) modal accepts arbitrary text; an operator entered a surname there and it propagated all the way into the NP `InternetDocument.save` payload, where NP rejected it with "SendersPhone invalid format". Two-part fix: (a) frontend regex/mask on the Phone field (UA mobile pattern `380XXXXXXXXX` or `0XXXXXXXXX`), and (b) backend normalization in `routers/shipping.py` mirroring the recipient-phone normalization at lines 175-178 (strip non-digits, prepend `38` if missing). Currently there is also no validation on Sender Name. Low-priority: only one operator (KoraKlenu owner) currently configures NP, and the workaround is "type the right thing". Bundle with PKG-1 frontend work if convenient. |
+| PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
+| PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
 
 ---
 
