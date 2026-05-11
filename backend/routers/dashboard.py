@@ -7,6 +7,7 @@ from database import get_db
 from models.user import User, UserRole
 from models.order import Order, OrderStatus
 from models.shop import Shop
+from models.packaging import PackagingBox
 from schemas.dashboard import DashboardResponse, DashboardStats, RevenueByCurrency, DailyRevenue, ShopOrderCount
 from routers.dependencies import get_current_user, require_role
 
@@ -115,10 +116,18 @@ async def get_dashboard_stats(
         
     shop_result = await db.execute(shop_query)
     orders_by_shop = [ShopOrderCount(shop_name=name, order_count=count) for name, count in shop_result.all()]
-            
+
+    # PKG-2: count of packaging boxes at or below their low-stock threshold.
+    low_stock_count = await db.scalar(
+        select(func.count(PackagingBox.id)).where(
+            PackagingBox.stock_quantity <= PackagingBox.low_stock_threshold
+        )
+    )
+
     return DashboardResponse(
         stats=stats,
         revenue_by_currency=revenue_data,
         daily_revenue_trend=daily_trend,
-        orders_by_shop=orders_by_shop
+        orders_by_shop=orders_by_shop,
+        low_stock_packaging_count=int(low_stock_count or 0),
     )

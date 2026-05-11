@@ -1,10 +1,18 @@
 import { useState } from 'react'
-import { Plus, FileSpreadsheet, Box, Mail, Edit2, Trash2, Scale } from 'lucide-react'
+import { Plus, FileSpreadsheet, Box, Mail, Edit2, Trash2, Scale, PackagePlus } from 'lucide-react'
 import ShellPage from './ShellPage'
 import PackagingForm from '@/components/inventory/PackagingForm'
+import RestockModal from '@/components/inventory/RestockModal'
 import CSVImportModal from '@/components/inventory/CSVImportModal'
-import { usePackaging, useCreatePackaging, useUpdatePackaging, useDeletePackaging } from '@/hooks/usePackaging'
+import {
+  usePackaging,
+  useCreatePackaging,
+  useUpdatePackaging,
+  useDeletePackaging,
+  useRestockPackaging,
+} from '@/hooks/usePackaging'
 import { packagingApi } from '@/api/packaging'
+import type { PackagingBox } from '@/types/inventory'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -23,11 +31,13 @@ export default function PackagingPage() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [editingPackaging, setEditingPackaging] = useState<any>(null)
+  const [restockTarget, setRestockTarget] = useState<PackagingBox | null>(null)
 
   const { data: packaging, isLoading } = usePackaging()
   const createPackaging = useCreatePackaging()
   const updatePackaging = useUpdatePackaging()
   const deletePackaging = useDeletePackaging()
+  const restockPackaging = useRestockPackaging()
 
   const handleSave = async (data: any) => {
     if (editingPackaging) {
@@ -79,6 +89,7 @@ export default function PackagingPage() {
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Name & Type</TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Dimensions (LxWxH)</TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight Limits</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Sort Order</TableHead>
                   <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Actions</TableHead>
                 </TableRow>
@@ -90,13 +101,14 @@ export default function PackagingPage() {
                       <TableCell className="px-8 py-6"><Skeleton className="h-5 w-48 bg-zinc-800" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-32 bg-zinc-800" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-24 bg-zinc-800" /></TableCell>
+                      <TableCell><Skeleton className="h-5 w-16 bg-zinc-800" /></TableCell>
                       <TableCell><Skeleton className="h-5 w-12 bg-zinc-800" /></TableCell>
                       <TableCell className="px-8 py-6"><Skeleton className="h-5 w-16 ml-auto bg-zinc-800" /></TableCell>
                     </TableRow>
                   ))
                 ) : packaging?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-60 text-center">
+                    <TableCell colSpan={6} className="h-60 text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <Box className="size-10 text-zinc-800" />
                         <p className="text-sm text-zinc-500 italic">No packaging types registered yet.</p>
@@ -145,10 +157,37 @@ export default function PackagingPage() {
                         </div>
                       </TableCell>
                       <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span className={cn(
+                            "text-sm font-bold tabular-nums",
+                            item.stock_quantity <= item.low_stock_threshold ? "text-amber-400" : "text-zinc-200"
+                          )}>
+                            {item.stock_quantity}
+                          </span>
+                          {item.stock_quantity <= item.low_stock_threshold && (
+                            <Badge
+                              variant="outline"
+                              className="border-l-2 border-amber-500 border-y-0 border-r-0 rounded-none bg-amber-500/10 text-amber-400 text-[9px] font-bold uppercase tracking-widest px-1.5 h-4"
+                            >
+                              Low
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
                         <span className="text-xs font-mono text-zinc-500">#{item.sort_order}</span>
                       </TableCell>
                       <TableCell className="px-8 py-6 text-right">
                         <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-zinc-400 hover:text-amber-400 hover:bg-amber-400/10 rounded-xl"
+                            onClick={() => setRestockTarget(item)}
+                            title="Restock"
+                          >
+                            <PackagePlus className="h-3.5 w-3.5" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"
@@ -182,6 +221,17 @@ export default function PackagingPage() {
         onSave={handleSave}
         initialData={editingPackaging}
         isLoading={createPackaging.isPending || updatePackaging.isPending}
+      />
+
+      <RestockModal
+        isOpen={restockTarget !== null}
+        onClose={() => setRestockTarget(null)}
+        onRestock={async (data) => {
+          if (!restockTarget) return
+          await restockPackaging.mutateAsync({ id: restockTarget.id, data })
+        }}
+        box={restockTarget}
+        isLoading={restockPackaging.isPending}
       />
 
       <CSVImportModal

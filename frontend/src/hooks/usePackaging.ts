@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { packagingApi } from '@/api/packaging'
 import { useToastStore } from '@/components/ui/Toast'
-import type { PackagingBoxCreate, PackagingBoxUpdate } from '@/types/inventory'
+import type { PackagingBoxCreate, PackagingBoxUpdate, RestockRequest } from '@/types/inventory'
 import { getApiErrorMessage } from '@/types/api'
 
 export function usePackaging() {
@@ -58,6 +58,24 @@ export function useDeletePackaging() {
     },
     onError: (error) => {
       addToast(getApiErrorMessage(error, 'Failed to delete packaging'), 'error')
+    }
+  })
+}
+
+export function useRestockPackaging() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore(s => s.addToast)
+
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: RestockRequest }) =>
+      packagingApi.restockPackaging(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      addToast('Packaging restocked successfully', 'success')
+    },
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to restock packaging'), 'error')
     }
   })
 }

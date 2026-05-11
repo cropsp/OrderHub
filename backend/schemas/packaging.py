@@ -1,8 +1,11 @@
 from datetime import datetime
 from typing import Optional
 import uuid
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from models.packaging import PackagingType
+from models.stock_movement import StockMovementReason
 
 
 class PackagingBoxBase(BaseModel):
@@ -18,7 +21,8 @@ class PackagingBoxBase(BaseModel):
 
 
 class PackagingBoxCreate(PackagingBoxBase):
-    pass
+    initial_quantity: int = Field(0, ge=0)
+    low_stock_threshold: int = Field(5, ge=0)
 
 
 class PackagingBoxUpdate(BaseModel):
@@ -31,12 +35,15 @@ class PackagingBoxUpdate(BaseModel):
     max_weight_g: Optional[int] = Field(None, gt=0)
     tare_weight_g: Optional[int] = Field(None, ge=0)
     sort_order: Optional[int] = None
+    low_stock_threshold: Optional[int] = Field(None, ge=0)
 
 
 class PackagingBoxRead(PackagingBoxBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    stock_quantity: int
+    low_stock_threshold: int
     created_at: datetime
     updated_at: datetime
 
@@ -51,3 +58,21 @@ class PackagingBoxSummary(BaseModel):
     inner_width_mm: int
     inner_height_mm: int
     tare_weight_g: int
+
+
+class RestockRequest(BaseModel):
+    quantity: int = Field(..., ge=1)
+    note: Optional[str] = Field(None, max_length=500)
+
+
+class StockMovementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    box_id: uuid.UUID
+    order_id: Optional[uuid.UUID]
+    delta: int
+    reason: StockMovementReason
+    note: Optional[str]
+    user_id: uuid.UUID
+    created_at: datetime

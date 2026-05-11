@@ -5,10 +5,18 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from models.packaging import PackagingBox
+from models.stock_movement import StockMovementReason
 from models.user import UserRole
 from routers.dependencies import get_current_user, require_role
-from schemas.packaging import PackagingBoxCreate, PackagingBoxRead, PackagingBoxUpdate
+from schemas.packaging import (
+    PackagingBoxCreate,
+    PackagingBoxRead,
+    PackagingBoxUpdate,
+    RestockRequest,
+)
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
+from services import stock_service
 from services.catalog_service import CatalogService
 from services.import_service import ImportService
 
@@ -32,9 +40,34 @@ async def create_packaging(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
-    """Create a new packaging box."""
+    """Create a new packaging box.
+
+    Optional `initial_quantity` records an `initial_stock` ledger row so the
+    cached counter starts at the value the operator entered.
+    """
     service = CatalogService(db)
-    return await service.create_packaging_box(schema)
+    return await service.create_packaging_box(schema, user_id=user.id)
+
+
+@router.post("/packaging-boxes/{box_id}/restock", response_model=PackagingBoxRead)
+async def restock_packaging(
+    box_id: uuid.UUID,
+    body: RestockRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    """Add units to a packaging box's stock — appends one `restock` ledger row."""
+    await stock_service.apply_movement(
+        db,
+        box_id=box_id,
+        delta=body.quantity,
+        reason=StockMovementReason.RESTOCK,
+        user_id=user.id,
+        note=body.note,
+    )
+    await db.commit()
+    box = await db.get(PackagingBox, box_id)
+    return box
 
 
 @router.patch("/packaging-boxes/{id}", response_model=PackagingBoxRead)

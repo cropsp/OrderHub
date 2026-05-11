@@ -8,8 +8,10 @@ from sqlalchemy.orm import selectinload
 
 from models.product import Product, ProductVariant
 from models.packaging import PackagingBox
+from models.stock_movement import StockMovementReason
 from schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate, ProductVariantUpdate
 from schemas.packaging import PackagingBoxCreate, PackagingBoxUpdate
+from services import stock_service
 
 
 class CatalogService:
@@ -111,9 +113,30 @@ class CatalogService:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def create_packaging_box(self, schema: PackagingBoxCreate) -> PackagingBox:
-        box = PackagingBox(**schema.model_dump())
+    async def create_packaging_box(
+        self,
+        schema: PackagingBoxCreate,
+        user_id: Optional[uuid.UUID] = None,
+    ) -> PackagingBox:
+        data = schema.model_dump()
+        initial_quantity = data.pop("initial_quantity", 0)
+        box = PackagingBox(**data)
         self.db.add(box)
+        await self.db.flush()
+
+        if initial_quantity > 0:
+            if user_id is None:
+                raise ValueError(
+                    "user_id is required to record an initial_stock ledger row"
+                )
+            await stock_service.apply_movement(
+                self.db,
+                box_id=box.id,
+                delta=initial_quantity,
+                reason=StockMovementReason.INITIAL_STOCK,
+                user_id=user_id,
+            )
+
         await self.db.commit()
         await self.db.refresh(box)
         return box

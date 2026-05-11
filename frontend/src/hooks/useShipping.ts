@@ -21,10 +21,15 @@ export function useCreateTTN() {
       parcel_override?: boolean;
     } }) =>
       shippingApi.createTTN(orderId, data),
-    onSuccess: (_, variables) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['order', variables.orderId] })
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       addToast('TTN created successfully', 'success')
+      for (const warning of data?.warnings ?? []) {
+        addToast(warning, 'error')
+      }
     },
     onError: (error) => {
       addToast(getApiErrorMessage(error, 'Failed to create TTN'), 'error')
@@ -50,6 +55,8 @@ export function useDeleteTTN() {
     onSuccess: (_, orderId) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['order', orderId] })
+      queryClient.invalidateQueries({ queryKey: ['packaging'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       addToast('TTN deleted successfully', 'success')
     },
     onError: (error) => {

@@ -40,4 +40,5 @@ class DashboardResponse(BaseModel):
     revenue_by_currency: list[RevenueByCurrency]  # Rendered only for owners
     daily_revenue_trend: list[DailyRevenue] = []
     orders_by_shop: list[ShopOrderCount] = []
+    low_stock_packaging_count: int = 0
     # recent_activity: list[RecentActivity] = [] # Optional for later S5-5

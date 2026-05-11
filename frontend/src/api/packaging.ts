@@ -1,5 +1,10 @@
 import client from './client'
-import type { PackagingBox, PackagingBoxCreate, PackagingBoxUpdate } from '@/types/inventory'
+import type {
+  PackagingBox,
+  PackagingBoxCreate,
+  PackagingBoxUpdate,
+  RestockRequest,
+} from '@/types/inventory'
 
 export const packagingApi = {
   listPackaging: async () => {
@@ -14,6 +19,11 @@ export const packagingApi = {
 
   updatePackaging: async (id: string, data: PackagingBoxUpdate) => {
     const response = await client.patch<PackagingBox>(`/packaging-boxes/${id}`, data)
+    return response.data
+  },
+
+  restockPackaging: async (id: string, data: RestockRequest) => {
+    const response = await client.post<PackagingBox>(`/packaging-boxes/${id}/restock`, data)
     return response.data
   },
 

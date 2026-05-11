@@ -27,4 +27,5 @@ export interface DashboardResponse {
   revenue_by_currency: RevenueByCurrency[];
   daily_revenue_trend: DailyRevenue[];
   orders_by_shop: ShopOrderCount[];
+  low_stock_packaging_count: number;
 }

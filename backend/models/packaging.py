@@ -4,7 +4,7 @@ OrderHub CRM — Packaging Models
 
 import enum
 from sqlalchemy import Enum, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -41,6 +41,23 @@ class PackagingBox(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     tare_weight_g: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # PKG-2: cached running sum of all packaging_stock_movements.delta for this box.
+    # Always read by UI in O(1); mutated transactionally with every ledger INSERT.
+    stock_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    low_stock_threshold: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+
+    # lazy='dynamic' deviates from the selectin default. Ledger grows unbounded
+    # (one row per TTN op forever); eagerly loading on GET /packaging-boxes would
+    # degrade the list endpoint. Query explicitly when a history view is added.
+    stock_movements = relationship(
+        "PackagingStockMovement",
+        backref="box",
+        lazy="dynamic",
+        order_by="PackagingStockMovement.created_at.desc()",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         return f"<PackagingBox {self.name} ({self.packaging_type.value})>"

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { format } from 'date-fns';
-import { AlertTriangle, Clock, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Clock, PackagePlus, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { useOrders } from '@/hooks/useOrders';
@@ -123,6 +123,32 @@ export default function DashboardPage() {
           <>
             {/* 1. Stat Cards */}
             <StatCards data={data} />
+
+            {/* PKG-2: low-stock packaging widget — hidden when count is 0. */}
+            {data.low_stock_packaging_count > 0 && (
+              <Link
+                to="/packaging"
+                className="flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-3xl px-6 py-4 hover:bg-amber-500/[0.13] transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="size-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                    <PackagePlus className="h-4 w-4 text-amber-500" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-amber-400">
+                      Low-stock packaging
+                    </p>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      {data.low_stock_packaging_count}{' '}
+                      {data.low_stock_packaging_count === 1 ? 'box is' : 'boxes are'} at or below threshold — time to restock.
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 group-hover:text-amber-300 flex items-center gap-1">
+                  Open inventory <TrendingUp size={12} />
+                </span>
+              </Link>
+            )}
 
             {/* 2. Charts Row */}
             <div className="grid gap-8 lg:grid-cols-6">

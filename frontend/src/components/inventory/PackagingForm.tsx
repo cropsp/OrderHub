@@ -42,6 +42,8 @@ export default function PackagingForm({
   const [tareWeight, setTareWeight] = useState(initialData?.tare_weight_g || 0)
   const [maxThickness, setMaxThickness] = useState<number | null>(initialData?.max_thickness_mm || null)
   const [sortOrder, setSortOrder] = useState(initialData?.sort_order || 0)
+  const [initialQuantity, setInitialQuantity] = useState(0)
+  const [lowStockThreshold, setLowStockThreshold] = useState(initialData?.low_stock_threshold ?? 5)
   const [error, setError] = useState<string | null>(null)
 
   // Reset form state when the dialog opens or the target row changes.
@@ -58,6 +60,8 @@ export default function PackagingForm({
     setTareWeight(initialData?.tare_weight_g || 0)
     setMaxThickness(initialData?.max_thickness_mm || null)
     setSortOrder(initialData?.sort_order || 0)
+    setInitialQuantity(0)
+    setLowStockThreshold(initialData?.low_stock_threshold ?? 5)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -69,7 +73,7 @@ export default function PackagingForm({
       return
     }
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       name,
       packaging_type: type,
       inner_length_mm: length,
@@ -78,7 +82,12 @@ export default function PackagingForm({
       max_weight_g: maxWeight,
       tare_weight_g: tareWeight,
       max_thickness_mm: type === 'ENVELOPE' ? maxThickness : null,
-      sort_order: sortOrder
+      sort_order: sortOrder,
+      low_stock_threshold: lowStockThreshold,
+    }
+    if (!initialData) {
+      // Only sent on Create — Edit cannot adjust stock through this form.
+      payload.initial_quantity = initialQuantity
     }
 
     try {
@@ -203,6 +212,39 @@ export default function PackagingForm({
                   value={sortOrder}
                   onChange={e => setSortOrder(parseInt(e.target.value) || 0)}
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              {!initialData && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                    <Layers className="size-3 text-amber-500" />
+                    <p className="text-[10px] font-bold uppercase tracking-widest">Initial Quantity</p>
+                  </div>
+                  <Input
+                    type="number"
+                    min={0}
+                    className="border-zinc-800 bg-zinc-900/50"
+                    value={initialQuantity}
+                    onChange={e => setInitialQuantity(parseInt(e.target.value) || 0)}
+                  />
+                  <p className="text-[10px] text-zinc-600">Records one ledger row if &gt; 0.</p>
+                </div>
+              )}
+              <div className={!initialData ? "space-y-2" : "space-y-2 col-span-2"}>
+                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                  <Scale className="size-3 text-amber-500" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest">Low-Stock Threshold</p>
+                </div>
+                <Input
+                  type="number"
+                  min={0}
+                  className="border-zinc-800 bg-zinc-900/50"
+                  value={lowStockThreshold}
+                  onChange={e => setLowStockThreshold(parseInt(e.target.value) || 0)}
+                />
+                <p className="text-[10px] text-zinc-600">Row is flagged when stock ≤ this value.</p>
               </div>
             </div>
 

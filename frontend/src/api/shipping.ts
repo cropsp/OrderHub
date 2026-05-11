@@ -1,9 +1,15 @@
 import client from './client'
 
+export interface CreateTTNResponse {
+  status: string
+  ttn: string
+  warnings?: string[]
+}
+
 export const shippingApi = {
-  createTTN: async (orderId: string, data: { 
-    weight?: number; 
-    volume?: number; 
+  createTTN: async (orderId: string, data: {
+    weight?: number;
+    volume?: number;
     length?: number;
     width?: number;
     height?: number;
@@ -12,7 +18,7 @@ export const shippingApi = {
     cod_amount?: number;
     parcel_override?: boolean;
   }) => {
-    const response = await client.post(`/shipping/np-ttn/${orderId}`, data)
+    const response = await client.post<CreateTTNResponse>(`/shipping/np-ttn/${orderId}`, data)
     return response.data
   },
   getParcelEstimate: async (orderId: string) => {

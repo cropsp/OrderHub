@@ -15,8 +15,10 @@ from typing import List
 from database import get_db
 from models.order import Order, OrderStatus
 from models.shop import Shop
+from models.stock_movement import StockMovementReason
 from models.user import User, UserRole
 from routers.dependencies import get_current_user, require_role
+from services import stock_service
 from services.order_service import get_order_detail, change_order_status
 from services.nova_poshta import NovaPoshtaClient
 from services.encryption_service import decrypt_value
@@ -256,13 +258,26 @@ async def create_np_ttn(
         
         # Update order with TTN
         order.ttn_number = ttn_data.get("IntDocNumber")
-        
+
         if order.status == OrderStatus.IN_PRODUCTION:
             await change_order_status(db, order, OrderStatus.SHIPPED, current_user, f"TTN created: {order.ttn_number}")
-        
+
+        # PKG-2: decrement packaging stock in the same transaction as the TTN write.
+        # Guarded — no movement is recorded when the operator skipped packaging.
+        warnings: List[str] = []
+        if order.packaging_id is not None:
+            warnings = await stock_service.apply_movement(
+                db,
+                box_id=order.packaging_id,
+                delta=-1,
+                reason=StockMovementReason.TTN_CREATE,
+                order_id=order.id,
+                user_id=current_user.id,
+            )
+
         await db.commit()
         await db.refresh(order)
-        return {"status": "success", "ttn": order.ttn_number}
+        return {"status": "success", "ttn": order.ttn_number, "warnings": warnings}
         
     except Exception as e:
         await db.rollback()
@@ -299,9 +314,20 @@ async def delete_np_ttn(
         # Clear TTN from order
         old_ttn = order.ttn_number
         order.ttn_number = None
-        
+
         await change_order_status(db, order, OrderStatus.IN_PRODUCTION, current_user, f"TTN deleted: {old_ttn}")
-        
+
+        # PKG-2: refund packaging stock in the same transaction as the TTN clear.
+        if order.packaging_id is not None:
+            await stock_service.apply_movement(
+                db,
+                box_id=order.packaging_id,
+                delta=+1,
+                reason=StockMovementReason.TTN_DELETE,
+                order_id=order.id,
+                user_id=current_user.id,
+            )
+
         await db.commit()
         await db.refresh(order)
         return {"status": "success", "message": f"TTN {old_ttn} deleted"}

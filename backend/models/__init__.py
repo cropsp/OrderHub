@@ -17,6 +17,7 @@ from models.order import (
 )
 from models.product import Product, ProductVariant
 from models.packaging import PackagingBox, PackagingType
+from models.stock_movement import PackagingStockMovement, StockMovementReason
 from models.attachment import Attachment, AttachmentType
 
 __all__ = [
@@ -37,4 +38,6 @@ __all__ = [
     "ProductVariant",
     "PackagingBox",
     "PackagingType",
+    "PackagingStockMovement",
+    "StockMovementReason",
 ]
