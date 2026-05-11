@@ -1261,6 +1261,94 @@ movement.order_id WHERE order.shop_id = ?`.
 
 ---
 
+**Sprint NP-FIX-4 — Rename NP `InternetDocument.delete` parameter from `DocumentRefs` to `DocumentBarcodes`** (Status: `DONE` — commit `fc4b60a`; pytest 103 → 104 passing)
+
+Goal: Fix the TTN delete flow on the Order Detail Logistics panel.
+Pre-fix, every Delete TTN click returned HTTP 400. Root cause —
+contract mismatch in `services/nova_poshta.py:107`: the wrapper
+passed `order.ttn_number` (a 14-digit `IntDocNumber`, e.g.
+`20451436522025`) under the key `DocumentRefs`. But `DocumentRefs`
+expects a **UUID Ref** of the InternetDocument (which OrderHub
+never stores — we only persist `IntDocNumber` from the create
+response). NP correctly rejected with *"There are only invalid
+DocumentBarcodes and/or DocumentRefs"* on every attempt.
+
+Direct curl probe against `api.novaposhta.ua` on 2026-05-11
+confirmed the correct parameter name for our IntDocNumber values
+is **`DocumentBarcodes`** (accepted as a single string or as an
+array). Same shape as **NP-FIX-3a** (`getContactPersons` →
+`getCounterpartyContactPersons`): one-token rename in the NP
+client, expanded docstring with curl evidence, one new regression
+test in `test_nova_poshta.py`. No router / schema / migration
+changes.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| NP-FIX-4-1 | Rename third positional arg in `_post()` call: `"DocumentRefs"` → `"DocumentBarcodes"` at `services/nova_poshta.py:107` (post-fix `:120`) | backend | DONE |
+| NP-FIX-4-2 | Parameter rename `document_refs` → `document_barcode` for clarity; positional-compatible (sole call site at `routers/shipping.py:297` passes `order.ttn_number` positionally — no signature break) | backend | DONE |
+| NP-FIX-4-3 | Expand docstring with the 2026-05-11 curl-evidence note explaining why the rename was correct (NP error `"There are only invalid DocumentBarcodes and/or DocumentRefs"` vs success `{"success": true, "data": [{"Ref": "<uuid>"}]}` for the same IntDocNumber under the right key) | backend docs | DONE |
+| NP-FIX-4-4 | New regression test `test_delete_internet_document_uses_documentbarcodes_param` in `tests/test_nova_poshta.py` — mocks `_post`, asserts exact args tuple `("InternetDocument", "delete", {"DocumentBarcodes": "20451436522025"})` with explicit failure message referencing the wrong-param history. Placed after the NP-FIX-3a regression guard (mirrors its `patch.object` + `await_args_list[0]` style) | backend tests | DONE |
+
+**Post-sprint notes:**
+- **One-token, positional-compatible.** The Python wrapper name
+  `delete_internet_document` stays. Only the internal NP method
+  parameter key changes from `DocumentRefs` to `DocumentBarcodes`.
+  The single call site (`routers/shipping.py:297`,
+  `await np_client.delete_internet_document(order.ttn_number)`)
+  is positional — the parameter rename `document_refs` →
+  `document_barcode` is internally clearer but externally
+  invisible.
+- **Curl-evidence stored in code.** The expanded docstring at
+  `nova_poshta.py:105-122` cites the two curl probe results
+  (Method-recognised-but-value-rejected vs. clean success with Ref
+  echoed back) and the verification date. A future reader can
+  audit the rename rationale without digging through commits or
+  chat history.
+- **Test count:** 103 → **104 passing** (+1 regression-guard
+  test). Service-level placement matches the NP-FIX-3a pattern.
+- **No fallback to `DocumentRefs`.** We don't store a UUID Ref;
+  we never could pass one. The `DocumentBarcodes` path is the
+  universally correct call for every TTN we produce. No
+  try/except branch was added — it would be dead code.
+- **Manual smoke (verified 2026-05-11):** KoraKlenu order #00001.
+  Two phases:
+  - **Phase A (already-deleted state, repro of the original
+    failure path with the new code):** existing TTN `20451436562514`
+    in DB but already manually deleted in the NP cabinet during
+    earlier curl testing. Click Delete TTN. Backend log shows
+    `await self._post("InternetDocument", "delete",
+    {"DocumentBarcodes": document_barcode})` — **confirms the new
+    parameter name reached the NP call**. NP HTTP 200, NP
+    `success: false` with errors as a `dict` of `{"<doc-ref>":
+    "Document already deleted ...", "0": "No document changed
+    DeletionMark"}`. Our `_post()` joins these as keys (UUID + 0)
+    rather than values — see **NP-UX-4** in Explicitly deferred
+    for the dict-handling follow-up. Phase A proves NP-FIX-4
+    sent the right param; the surfaced 400 is a separate (deferred)
+    formatting bug.
+  - **Phase B (clean happy path):** SQL cleanup the DB state, then
+    Generate NP Label → TTN `20451436748978` created (`POST
+    /api/shipping/np-ttn/{id}` → 200), confirmed in NP cabinet.
+    Click Delete TTN → **first ever successful TTN delete on the
+    project** — toast *"TTN deleted successfully"*, `DELETE
+    /api/shipping/np-ttn/{id}` → **200**, `order.ttn_number`
+    cleared, status reverts to IN_PRODUCTION, pre-TTN block
+    returns (Packaging dropdown, Generate button).
+- **Bonus finding from NP success response.** NP echoes the
+  document's UUID Ref in the delete success payload
+  (`{"data": [{"Ref": "4080dd88-…"}]}`). Useful to know — if we
+  ever start persisting that Ref at TTN creation time, we'd
+  have a richer audit trail (link `Order.ttn_number` ↔ Ref).
+  **Not in NP-FIX-4 scope.** Recorded here for future tickets;
+  no immediate action.
+- **Closes:** the TTN-delete-always-fails bug that existed since
+  the original NP TTN flow shipped. The Order Detail Logistics
+  panel now supports the full TTN lifecycle (create + delete)
+  end-to-end against `api.novaposhta.ua` with a PrivatePerson
+  API key.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -1282,7 +1370,7 @@ in this document where applicable, to avoid duplication.
 | NP-FIX-3b | Sender phone field — frontend validation + backend normalization | Discovered during NP-FIX-3a smoke (2026-05-10). The Sender Phone input on the Edit Store Settings → Logistics (NP) modal accepts arbitrary text; an operator entered a surname there and it propagated all the way into the NP `InternetDocument.save` payload, where NP rejected it with "SendersPhone invalid format". Two-part fix: (a) frontend regex/mask on the Phone field (UA mobile pattern `380XXXXXXXXX` or `0XXXXXXXXX`), and (b) backend normalization in `routers/shipping.py` mirroring the recipient-phone normalization at lines 175-178 (strip non-digits, prepend `38` if missing). Currently there is also no validation on Sender Name. Low-priority: only one operator (KoraKlenu owner) currently configures NP, and the workaround is "type the right thing". Bundle with PKG-1 frontend work if convenient. |
 | PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
 | PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
-| NP-FIX-4 | TTN delete fails with 400 — wrong NP method parameter (`DocumentRefs` vs `DocumentBarcodes`) | Discovered during PKG-1b smoke (2026-05-11). `nova_poshta.py:107` passes `order.ttn_number` (a 14-digit `IntDocNumber` like `20451436522025`) as `DocumentRefs`. NP API rejects with `"There are only invalid DocumentBarcodes and/or DocumentRefs"` because `DocumentRefs` expects a UUID Ref, not an IntDocNumber. Curl probe against `api.novaposhta.ua` confirmed: same value passed as `DocumentBarcodes` succeeds (`success: true, data: [{Ref: "4080dd88-…"}]`). **One-token fix** in `nova_poshta.py:107` — same shape as NP-FIX-3a's `getCounterpartyContactPersons` rename. Plus 1 regression test (`test_delete_internet_document_uses_documentbarcodes_param`) locking the parameter name. Side-finding to fold in: NP API errors sometimes come back as `dict` (e.g. `{"<ref>": "msg", "0": "msg"}`) rather than `list`, which makes `nova_poshta.py:_post()`'s `', '.join(errors)` produce keys instead of values. Not fixed in NP-FIX-4 scope but documented as a follow-up. Pre-existed before PKG-1b (since the original NP TTN flow); PKG-1b smoke cleanup just surfaced it. |
+| NP-UX-4 | `NovaPoshtaClient._post()` error-formatting bug — handles `errors` as `list` only, NP sometimes returns `dict` | Discovered during NP-FIX-4 smoke (2026-05-11). NP API can return `errors` as a `dict` keyed by UUID: e.g. `{"4080dd88-…": "Document already deleted 20451436522025", "0": "No document changed DeletionMark"}`. Our `_post()` does `', '.join(errors)` which on a dict joins **keys**, producing `"4080dd88-…, 0"` — the actual useful error messages are lost. Pre-existed before NP-FIX-4; NP-FIX-4 smoke just surfaced it. Fix: detect `dict` shape and join `.values()` instead of keys, or format as `"key: value"` pairs. Low-priority: only affects edge cases (delete of already-deleted TTN, batch operations), normal NP errors come back as list. |
 
 ---
 
