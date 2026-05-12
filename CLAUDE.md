@@ -1,5 +1,7 @@
 # CLAUDE.md — OrderHub CRM
 
+> **New AI / agent sessions:** read `docs/AI_ONBOARDING.md` first — it covers the three-actor workflow (Sergii / Cowork / CC), tooling + path mapping (UNC vs sandbox), `task.md` writing pattern, and recurring gotchas. Then this file for project rules and conventions, then `implementation_plan.md` for current state and backlog.
+
 ## Project Overview
 
 OrderHub is a multi-channel order management CRM for a Ukrainian handcrafted leather goods business. It aggregates orders from Etsy (CSV), Shopify (API sync), and manual entry into a unified pipeline with logistics automation via Nova Poshta.
