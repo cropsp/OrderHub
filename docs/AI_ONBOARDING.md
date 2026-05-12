@@ -21,14 +21,42 @@ operator (Sergii) is the single human user. Stack: Python 3.11 +
 FastAPI backend, React 18 + TypeScript + Vite frontend, PostgreSQL
 in Docker, Alembic migrations, JWT auth.
 
-## 2. First message into a new chat (copy-paste template)
+## 2. First message into a new chat
 
-Use this as the first message Sergii sends after opening a fresh
-session. It loads the AI's mental model from invariant + volatile
-docs in the right order.
+### 2.0 Pre-flight — filesystem access (do this BEFORE typing the template)
+
+The AI in a new chat can't read any of the docs below unless the
+session has filesystem access to this repo. Confirm both prerequisites
+before pasting the template:
+
+1. **Cowork mode** (not a regular Claude.ai chat — Cowork is the
+   variant with file tools: `Read`, `Write`, `Edit`, `Bash`, etc.).
+   Open it from the desktop app or claude.com sidebar.
+2. **Mount this WSL repo as the workspace folder.** In Cowork's
+   folder selector, pick
+   `\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub`.
+3. **Verify.** The `<env>` block at the bottom of the system prompt
+   should show `User selected a folder: yes` and the resolved path
+   should match the repo. If not — re-select the folder.
+
+If you skip these steps, the AI responds to the template with
+"I don't see those files" and the bootstrap fails. **Do the
+pre-flight first.**
+
+### 2.1 First message template (copy-paste)
+
+Once pre-flight is green, paste this. It loads the AI's mental
+model from invariant + volatile docs in the right order.
 
 ```
-Привіт! Я працюю над OrderHub CRM. Прочитай у цьому порядку:
+Привіт! Я працюю над OrderHub CRM.
+
+Перед тим як почати — переконайся, що у <env> видно
+"User selected a folder: yes" і шлях
+\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub.
+Якщо ні — скажи мені, я перепідключу папку.
+
+Якщо доступ є — прочитай у цьому порядку:
   1. docs/AI_ONBOARDING.md   — workflow, tools, paths (this file)
   2. CLAUDE.md               — project rules, stack, conventions
   3. implementation_plan.md  — sections "Active Roadmap" +
@@ -44,6 +72,26 @@ what's next. Don't start any work until I confirm.
 The order matters: invariant rules first (§1-9 of this guide +
 CLAUDE.md), volatile state second (`implementation_plan.md` +
 `task.md`).
+
+### 2.2 Fallback — when Cowork isn't available
+
+If you're on a device or in a session without Cowork (e.g.,
+regular Claude.ai chat on a phone, or another vendor's tool), the
+AI has no filesystem access — you'll need to inject the docs
+manually:
+
+- **Quick path (for short questions):** paste the contents of
+  `CLAUDE.md` + the relevant section of `implementation_plan.md`
+  directly into chat. Sufficient for one-off "what's the rule
+  for X" lookups.
+- **Full bootstrap (for actual work):** copy-paste all five docs
+  in the order listed in §2.1. Slow (5 paste operations) and
+  the AI can't write back to the repo — but it works for
+  read-only planning conversations.
+- **Best alternative:** wait until you're back on a Cowork-capable
+  session. The file-tool round-trip (read code, run tests, write
+  back, verify) is what makes the workflow fast. Without it, you
+  lose most of the value.
 
 ## 3. Three-actor model
 
