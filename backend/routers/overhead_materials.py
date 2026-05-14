@@ -1,11 +1,15 @@
 """
-OrderHub CRM — Overhead Materials Router (MAT-1)
+OrderHub CRM — Overhead Materials Router
 
-CRUD for indirect/consumable materials catalog. Soft-delete via `is_active=False`.
-No currency/stock fields — overhead expenses live on OverheadMaterialReceipt in MAT-2.
+MAT-1: CRUD for indirect/consumable materials catalog.
+MAT-2: Receipt expense events — `OverheadMaterialReceipt` rows with optional
+       shop_id for per-shop attribution (or NULL for global overhead). No
+       ledger, no stock — just records the financial fact for FIN-1
+       integration in MAT-5.
 """
 
 import uuid
+from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,12 +17,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.material import OverheadMaterial
+from models.material import OverheadMaterial, OverheadMaterialReceipt
+from models.shop import Shop
 from models.user import UserRole
 from routers.dependencies import require_role
 from schemas.material import (
     OverheadMaterialCreate,
     OverheadMaterialRead,
+    OverheadMaterialReceiptCreate,
+    OverheadMaterialReceiptRead,
     OverheadMaterialUpdate,
 )
 
@@ -110,3 +117,103 @@ async def soft_delete_overhead_material(
         )
     overhead.is_active = False
     await db.commit()
+
+
+# ---- MAT-2: Overhead receipts (expense events) ----
+
+
+def _serialize_overhead_receipt(
+    receipt: OverheadMaterialReceipt, shop_name: str | None
+) -> OverheadMaterialReceiptRead:
+    return OverheadMaterialReceiptRead(
+        id=receipt.id,
+        overhead_material_id=receipt.overhead_material_id,
+        shop_id=receipt.shop_id,
+        shop_name=shop_name,
+        qty=receipt.qty,
+        total_cost=receipt.total_cost,
+        currency=receipt.currency,
+        supplier=receipt.supplier,
+        invoice_no=receipt.invoice_no,
+        received_at=receipt.received_at,
+        notes=receipt.notes,
+        user_id=receipt.user_id,
+        created_at=receipt.created_at,
+    )
+
+
+@router.post(
+    "/{overhead_id}/receipts",
+    response_model=OverheadMaterialReceiptRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_overhead_receipt(
+    overhead_id: uuid.UUID,
+    body: OverheadMaterialReceiptCreate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    overhead = await db.get(OverheadMaterial, overhead_id)
+    if overhead is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Overhead material not found"
+        )
+
+    shop_name: str | None = None
+    if body.shop_id is not None:
+        shop = await db.get(Shop, body.shop_id)
+        if shop is None or not shop.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Shop {body.shop_id} not found or inactive",
+            )
+        shop_name = shop.name
+
+    receipt = OverheadMaterialReceipt(
+        overhead_material_id=overhead_id,
+        shop_id=body.shop_id,
+        qty=body.qty,
+        total_cost=body.total_cost,
+        currency=body.currency,
+        supplier=body.supplier,
+        invoice_no=body.invoice_no,
+        received_at=body.received_at or datetime.now(timezone.utc),
+        notes=body.notes,
+        user_id=user.id,
+    )
+    db.add(receipt)
+    await db.flush()
+    await db.refresh(receipt)
+    await db.commit()
+    return _serialize_overhead_receipt(receipt, shop_name)
+
+
+@router.get(
+    "/{overhead_id}/receipts",
+    response_model=List[OverheadMaterialReceiptRead],
+)
+async def list_overhead_receipts(
+    overhead_id: uuid.UUID,
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    overhead = await db.get(OverheadMaterial, overhead_id)
+    if overhead is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Overhead material not found"
+        )
+
+    offset = (page - 1) * limit
+    stmt = (
+        select(OverheadMaterialReceipt, Shop.name)
+        .outerjoin(Shop, Shop.id == OverheadMaterialReceipt.shop_id)
+        .where(OverheadMaterialReceipt.overhead_material_id == overhead_id)
+        .order_by(OverheadMaterialReceipt.received_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    return [_serialize_overhead_receipt(r, shop_name) for r, shop_name in rows]

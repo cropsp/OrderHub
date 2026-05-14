@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   overheadMaterialsApi,
   type OverheadMaterialListParams,
+  type OverheadReceiptPaginationParams,
 } from '@/api/overheadMaterials'
 import { useToastStore } from '@/components/ui/Toast'
 import type {
   OverheadMaterialCreate,
+  OverheadMaterialReceiptCreate,
   OverheadMaterialUpdate,
 } from '@/types/inventory'
 import { getApiErrorMessage } from '@/types/api'
@@ -70,6 +72,43 @@ export function useSoftDeleteOverheadMaterial() {
     },
     onError: (error) => {
       addToast(getApiErrorMessage(error, 'Failed to archive overhead material'), 'error')
+    },
+  })
+}
+
+// MAT-2: overhead receipts.
+
+export function useOverheadMaterialReceipts(
+  id: string | undefined,
+  params: OverheadReceiptPaginationParams = {},
+) {
+  return useQuery({
+    queryKey: ['overhead-material-receipts', id, params],
+    queryFn: () => overheadMaterialsApi.listReceipts(id as string, params),
+    enabled: !!id,
+  })
+}
+
+export function useCreateOverheadMaterialReceipt(id: string | undefined) {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore(s => s.addToast)
+
+  return useMutation({
+    mutationFn: (data: OverheadMaterialReceiptCreate) =>
+      overheadMaterialsApi.createReceipt(id as string, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['overhead-materials'] })
+      queryClient.invalidateQueries({ queryKey: ['overhead-materials', id] })
+      queryClient.invalidateQueries({
+        queryKey: ['overhead-material-receipts', id],
+      })
+      addToast('Receipt recorded', 'success')
+    },
+    onError: (error) => {
+      addToast(
+        getApiErrorMessage(error, 'Failed to register overhead receipt'),
+        'error',
+      )
     },
   })
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Plus, Edit2, Trash2, Layers, Search } from 'lucide-react'
 import ShellPage from './ShellPage'
 import OverheadMaterialFormModal from '@/components/inventory/OverheadMaterialFormModal'
@@ -29,6 +30,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export default function OverheadMaterialsPage() {
+  const navigate = useNavigate()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editing, setEditing] = useState<OverheadMaterial | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<OverheadMaterial | null>(null)
@@ -165,7 +167,8 @@ export default function OverheadMaterialsPage() {
                   items?.map((item) => (
                     <TableRow
                       key={item.id}
-                      className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group"
+                      onClick={() => navigate(`/inventory/overhead-materials/${item.id}`)}
+                      className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group cursor-pointer"
                     >
                       <TableCell className="px-8 py-6">
                         <p className="text-sm font-bold text-zinc-100 tracking-tight">
@@ -203,7 +206,8 @@ export default function OverheadMaterialsPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] rounded-xl"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation()
                               setEditing(item)
                               setIsFormOpen(true)
                             }}
@@ -216,7 +220,10 @@ export default function OverheadMaterialsPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-400/10 rounded-xl"
-                              onClick={() => setDeleteTarget(item)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDeleteTarget(item)
+                              }}
                               title="Archive"
                             >
                               <Trash2 className="h-3.5 w-3.5" />

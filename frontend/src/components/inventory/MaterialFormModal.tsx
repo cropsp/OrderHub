@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, Package, Truck, FileText } from 'lucide-react'
+import { AlertCircle, Package, Truck, FileText, Layers, Percent } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -42,6 +42,12 @@ export default function MaterialFormModal({
   const [currency, setCurrency] = useState(initialData?.currency || 'UAH')
   const [supplierName, setSupplierName] = useState(initialData?.supplier_name || '')
   const [notes, setNotes] = useState(initialData?.notes || '')
+  const [lowStockThreshold, setLowStockThreshold] = useState(
+    initialData?.low_stock_threshold ? String(initialData.low_stock_threshold) : '',
+  )
+  const [wastePercent, setWastePercent] = useState(
+    initialData?.waste_percent ? String(initialData.waste_percent) : '',
+  )
   const [error, setError] = useState<string | null>(null)
 
   // Reset state on open/target change — derive during render, matches PackagingForm pattern.
@@ -53,6 +59,12 @@ export default function MaterialFormModal({
     setCurrency(initialData?.currency || 'UAH')
     setSupplierName(initialData?.supplier_name || '')
     setNotes(initialData?.notes || '')
+    setLowStockThreshold(
+      initialData?.low_stock_threshold ? String(initialData.low_stock_threshold) : '',
+    )
+    setWastePercent(
+      initialData?.waste_percent ? String(initialData.waste_percent) : '',
+    )
     setError(null)
   }
 
@@ -67,20 +79,40 @@ export default function MaterialFormModal({
       return
     }
 
-    const payload: MaterialCreate | MaterialUpdate = isEdit
-      ? {
-          name,
-          unit,
-          supplier_name: supplierName.trim() || null,
-          notes: notes.trim() || null,
+    let payload: MaterialCreate | MaterialUpdate
+    if (isEdit) {
+      const update: MaterialUpdate = {
+        name,
+        unit,
+        supplier_name: supplierName.trim() || null,
+        notes: notes.trim() || null,
+      }
+      if (lowStockThreshold.trim() !== '') {
+        const n = parseFloat(lowStockThreshold)
+        if (!Number.isFinite(n) || n < 0) {
+          setError('Low-stock threshold must be ≥ 0')
+          return
         }
-      : {
-          name,
-          unit,
-          currency,
-          supplier_name: supplierName.trim() || null,
-          notes: notes.trim() || null,
+        update.low_stock_threshold = n
+      }
+      if (wastePercent.trim() !== '') {
+        const n = parseFloat(wastePercent)
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          setError('Waste percent must be between 0 and 100')
+          return
         }
+        update.waste_percent = n
+      }
+      payload = update
+    } else {
+      payload = {
+        name,
+        unit,
+        currency,
+        supplier_name: supplierName.trim() || null,
+        notes: notes.trim() || null,
+      }
+    }
 
     try {
       await onSave(payload)
@@ -166,6 +198,57 @@ export default function MaterialFormModal({
                 onChange={(e) => setSupplierName(e.target.value)}
               />
             </div>
+
+            {isEdit && (
+              <div className="space-y-3 p-4 rounded-2xl border border-zinc-800/50 bg-zinc-900/30">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  Stock policy
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Layers className="size-3" />
+                      <p className="text-[10px] font-bold uppercase tracking-widest">
+                        Low-stock threshold
+                      </p>
+                    </div>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="border-zinc-800 bg-zinc-900/50"
+                      placeholder="0"
+                      value={lowStockThreshold}
+                      onChange={(e) => setLowStockThreshold(e.target.value)}
+                    />
+                    <p className="text-[10px] text-zinc-600">
+                      Row is flagged when stock ≤ this value.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1.5 text-zinc-500">
+                      <Percent className="size-3" />
+                      <p className="text-[10px] font-bold uppercase tracking-widest">
+                        Waste percent
+                      </p>
+                    </div>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      className="border-zinc-800 bg-zinc-900/50"
+                      placeholder="0"
+                      value={wastePercent}
+                      onChange={(e) => setWastePercent(e.target.value)}
+                    />
+                    <p className="text-[10px] text-zinc-600">
+                      Used automatically when BOMs apply (MAT-3+).
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-zinc-500 mb-1">

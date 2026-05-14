@@ -1,16 +1,19 @@
 """
-OrderHub CRM — Materials Schemas (MAT-1)
+OrderHub CRM — Materials Schemas
 
-Catalog-only. Stock/receipt fields hidden from Create per task §scope rule #5;
-defaults apply server-side and these fields surface on Read for future use.
+MAT-1: Catalog (Material/OverheadMaterial Create/Update/Read).
+MAT-2: Receipts + ledger + adjustments schemas; MaterialUpdate gains
+       low_stock_threshold and waste_percent.
 """
 
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from models.material import MaterialMovementReason
 
 
 # ---- Material (direct) ----
@@ -29,12 +32,14 @@ class MaterialCreate(MaterialBase):
 
 
 class MaterialUpdate(BaseModel):
-    # currency intentionally absent — read-only post-creation.
-    # Pydantic v2 silently ignores it if a client sends it (matches Shop/Packaging convention).
+    # currency / current_unit_cost / stock_quantity intentionally absent —
+    # MAT-2 rule #10: only via receipts / adjustments.
     name: Optional[str] = Field(None, max_length=200)
     unit: Optional[str] = Field(None, max_length=20)
     supplier_name: Optional[str] = Field(None, max_length=200)
     notes: Optional[str] = None
+    low_stock_threshold: Optional[Decimal] = Field(None, ge=0)
+    waste_percent: Optional[Decimal] = Field(None, ge=0, le=100)
 
 
 class MaterialRead(MaterialBase):
@@ -77,3 +82,110 @@ class OverheadMaterialRead(OverheadMaterialBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+# ---- MAT-2: Material receipts + ledger ----
+
+
+class MaterialReceiptCreate(BaseModel):
+    qty: Decimal = Field(..., gt=0)
+    unit_cost: Decimal = Field(..., ge=0)
+    currency: str = Field(..., min_length=3, max_length=3)
+    shipping_cost: Optional[Decimal] = Field(None, ge=0)
+    supplier: Optional[str] = Field(None, max_length=200)
+    invoice_no: Optional[str] = Field(None, max_length=100)
+    received_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class MaterialReceiptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    material_id: uuid.UUID
+    qty: Decimal
+    unit_cost: Decimal
+    currency: str
+    shipping_cost: Optional[Decimal]
+    is_initial: bool
+    supplier: Optional[str]
+    invoice_no: Optional[str]
+    received_at: datetime
+    notes: Optional[str]
+    user_id: uuid.UUID
+    created_at: datetime
+    effective_unit_cost: Decimal = Decimal("0")
+
+    @model_validator(mode="after")
+    def _compute_effective(self) -> "MaterialReceiptRead":
+        ship = self.shipping_cost if self.shipping_cost is not None else Decimal("0")
+        self.effective_unit_cost = (self.qty * self.unit_cost + ship) / self.qty
+        return self
+
+
+class MaterialReceiptResponse(BaseModel):
+    """Wrapper returned by POST /api/materials/{id}/receipts."""
+
+    material: MaterialRead
+    receipt: MaterialReceiptRead
+
+
+class MaterialMovementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    material_id: uuid.UUID
+    delta: Decimal
+    reason: MaterialMovementReason
+    order_id: Optional[uuid.UUID]
+    order_code: Optional[str] = None  # joined; NULL in MAT-2 (no consumption yet)
+    receipt_id: Optional[uuid.UUID]
+    unit_cost_at_movement: Optional[Decimal]
+    notes: Optional[str]
+    user_id: uuid.UUID
+    created_at: datetime
+
+
+class MaterialStockAdjustment(BaseModel):
+    delta: Decimal = Field(...)
+    reason: Literal["waste", "adjustment"]
+    notes: Optional[str] = None
+
+    @field_validator("delta")
+    @classmethod
+    def _non_zero(cls, v: Decimal) -> Decimal:
+        if v == 0:
+            raise ValueError("delta must be non-zero")
+        return v
+
+
+# ---- MAT-2: Overhead material receipts ----
+
+
+class OverheadMaterialReceiptCreate(BaseModel):
+    qty: Optional[Decimal] = Field(None, ge=0)
+    total_cost: Decimal = Field(..., ge=0)
+    currency: str = Field(..., min_length=3, max_length=3)
+    shop_id: Optional[uuid.UUID] = None
+    supplier: Optional[str] = Field(None, max_length=200)
+    invoice_no: Optional[str] = Field(None, max_length=100)
+    received_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class OverheadMaterialReceiptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    overhead_material_id: uuid.UUID
+    shop_id: Optional[uuid.UUID]
+    shop_name: Optional[str] = None  # joined for UI convenience
+    qty: Optional[Decimal]
+    total_cost: Decimal
+    currency: str
+    supplier: Optional[str]
+    invoice_no: Optional[str]
+    received_at: datetime
+    notes: Optional[str]
+    user_id: uuid.UUID
+    created_at: datetime

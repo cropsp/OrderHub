@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Plus, Edit2, Trash2, Layers, Search } from 'lucide-react'
 import ShellPage from './ShellPage'
 import MaterialFormModal from '@/components/inventory/MaterialFormModal'
@@ -23,8 +24,10 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 export default function MaterialsPage() {
+  const navigate = useNavigate()
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editing, setEditing] = useState<Material | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
@@ -107,6 +110,9 @@ export default function MaterialsPage() {
                     Currency
                   </TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
+                    Stock
+                  </TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
                     Supplier
                   </TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
@@ -131,6 +137,9 @@ export default function MaterialsPage() {
                         <Skeleton className="h-5 w-12 bg-zinc-800" />
                       </TableCell>
                       <TableCell>
+                        <Skeleton className="h-5 w-20 bg-zinc-800" />
+                      </TableCell>
+                      <TableCell>
                         <Skeleton className="h-5 w-32 bg-zinc-800" />
                       </TableCell>
                       <TableCell>
@@ -143,7 +152,7 @@ export default function MaterialsPage() {
                   ))
                 ) : materials?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-60 text-center">
+                    <TableCell colSpan={7} className="h-60 text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <Layers className="size-10 text-zinc-800" />
                         <p className="text-sm text-zinc-500 italic">
@@ -164,10 +173,15 @@ export default function MaterialsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  materials?.map((item) => (
+                  materials?.map((item) => {
+                    const thresholdNum = Number(item.low_stock_threshold)
+                    const stockNum = Number(item.stock_quantity)
+                    const isLowStock = thresholdNum > 0 && stockNum <= thresholdNum
+                    return (
                     <TableRow
                       key={item.id}
-                      className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group"
+                      onClick={() => navigate(`/inventory/materials/${item.id}`)}
+                      className="border-b border-white/[0.02] hover:bg-white/[0.02] transition-colors group cursor-pointer"
                     >
                       <TableCell className="px-8 py-6">
                         <div className="flex flex-col">
@@ -186,6 +200,26 @@ export default function MaterialsPage() {
                       </TableCell>
                       <TableCell>
                         <span className="text-xs font-mono text-zinc-300">{item.currency}</span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'text-xs font-mono tabular-nums',
+                              isLowStock ? 'text-amber-400 font-bold' : 'text-zinc-200',
+                            )}
+                          >
+                            {item.stock_quantity} {item.unit}
+                          </span>
+                          {isLowStock && (
+                            <Badge
+                              variant="outline"
+                              className="border-l-2 border-amber-500 border-y-0 border-r-0 rounded-none bg-amber-500/10 text-amber-400 text-[9px] font-bold uppercase tracking-widest px-1.5 h-4"
+                            >
+                              Low
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <span className="text-xs text-zinc-400">
@@ -215,7 +249,8 @@ export default function MaterialsPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] rounded-xl"
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation()
                               setEditing(item)
                               setIsFormOpen(true)
                             }}
@@ -228,7 +263,10 @@ export default function MaterialsPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-zinc-600 hover:text-amber-400 hover:bg-amber-400/10 rounded-xl"
-                              onClick={() => setDeleteTarget(item)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setDeleteTarget(item)
+                              }}
                               title="Archive"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -237,7 +275,8 @@ export default function MaterialsPage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))
+                    )
+                  })
                 )}
               </TableBody>
             </Table>

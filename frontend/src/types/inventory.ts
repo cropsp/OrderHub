@@ -152,10 +152,102 @@ export interface MaterialCreate {
 }
 
 // currency intentionally absent — locked at creation.
+// MAT-2: low_stock_threshold and waste_percent become editable. stock_quantity
+// and current_unit_cost remain read-only (mutated only via receipts/adjustments).
 export interface MaterialUpdate {
   name?: string;
   unit?: string;
   supplier_name?: string | null;
+  notes?: string | null;
+  low_stock_threshold?: number | string;
+  waste_percent?: number | string;
+}
+
+// MAT-2: receipts + ledger + adjustments.
+
+export type MaterialMovementReason =
+  | 'receipt'
+  | 'consumption'
+  | 'waste'
+  | 'adjustment';
+
+export interface MaterialReceipt {
+  id: string;
+  material_id: string;
+  qty: string;
+  unit_cost: string;
+  currency: string;
+  shipping_cost: string | null;
+  is_initial: boolean;
+  supplier: string | null;
+  invoice_no: string | null;
+  received_at: string;
+  notes: string | null;
+  user_id: string;
+  created_at: string;
+  effective_unit_cost: string;
+}
+
+export interface MaterialReceiptCreate {
+  qty: number | string;
+  unit_cost: number | string;
+  currency: string;
+  shipping_cost?: number | string | null;
+  supplier?: string | null;
+  invoice_no?: string | null;
+  received_at?: string | null;
+  notes?: string | null;
+}
+
+export interface MaterialReceiptResponse {
+  material: Material;
+  receipt: MaterialReceipt;
+}
+
+export interface MaterialMovement {
+  id: string;
+  material_id: string;
+  delta: string;
+  reason: MaterialMovementReason;
+  order_id: string | null;
+  order_code: string | null;
+  receipt_id: string | null;
+  unit_cost_at_movement: string | null;
+  notes: string | null;
+  user_id: string;
+  created_at: string;
+}
+
+export interface MaterialStockAdjustment {
+  delta: number | string;
+  reason: 'waste' | 'adjustment';
+  notes?: string | null;
+}
+
+export interface OverheadMaterialReceipt {
+  id: string;
+  overhead_material_id: string;
+  shop_id: string | null;
+  shop_name: string | null;
+  qty: string | null;
+  total_cost: string;
+  currency: string;
+  supplier: string | null;
+  invoice_no: string | null;
+  received_at: string;
+  notes: string | null;
+  user_id: string;
+  created_at: string;
+}
+
+export interface OverheadMaterialReceiptCreate {
+  qty?: number | string | null;
+  total_cost: number | string;
+  currency: string;
+  shop_id?: string | null;
+  supplier?: string | null;
+  invoice_no?: string | null;
+  received_at?: string | null;
   notes?: string | null;
 }
 

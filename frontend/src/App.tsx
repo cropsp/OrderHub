@@ -20,7 +20,11 @@ const ProductsPage = lazy(() => import('@/pages/ProductsPage'))
 const ProductDetailPage = lazy(() => import('@/pages/ProductDetailPage'))
 const PackagingPage = lazy(() => import('@/pages/PackagingPage'))
 const MaterialsPage = lazy(() => import('@/pages/MaterialsPage'))
+const MaterialDetailPage = lazy(() => import('@/pages/MaterialDetailPage'))
 const OverheadMaterialsPage = lazy(() => import('@/pages/OverheadMaterialsPage'))
+const OverheadMaterialDetailPage = lazy(
+  () => import('@/pages/OverheadMaterialDetailPage'),
+)
 const ShopFinancePage = lazy(() => import('@/pages/ShopFinancePage'))
 
 function RouteLoadingFallback() {
@@ -141,10 +145,26 @@ function App() {
           <Route
             element={
               <Suspense fallback={<RouteLoadingFallback />}>
+                <MaterialDetailPage />
+              </Suspense>
+            }
+            path="/inventory/materials/:id"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
                 <OverheadMaterialsPage />
               </Suspense>
             }
             path="/inventory/overhead-materials"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <OverheadMaterialDetailPage />
+              </Suspense>
+            }
+            path="/inventory/overhead-materials/:id"
           />
         </Route>
 

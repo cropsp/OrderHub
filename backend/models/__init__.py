@@ -19,7 +19,14 @@ from models.product import Product, ProductVariant
 from models.packaging import PackagingBox, PackagingType
 from models.stock_movement import PackagingStockMovement, StockMovementReason
 from models.attachment import Attachment, AttachmentType
-from models.material import Material, OverheadMaterial
+from models.material import (
+    Material,
+    MaterialMovement,
+    MaterialMovementReason,
+    MaterialReceipt,
+    OverheadMaterial,
+    OverheadMaterialReceipt,
+)
 
 __all__ = [
     "Base",
@@ -43,4 +50,8 @@ __all__ = [
     "StockMovementReason",
     "Material",
     "OverheadMaterial",
+    "MaterialReceipt",
+    "OverheadMaterialReceipt",
+    "MaterialMovement",
+    "MaterialMovementReason",
 ]

@@ -2,12 +2,19 @@ import client from './client'
 import type {
   OverheadMaterial,
   OverheadMaterialCreate,
+  OverheadMaterialReceipt,
+  OverheadMaterialReceiptCreate,
   OverheadMaterialUpdate,
 } from '@/types/inventory'
 
 export interface OverheadMaterialListParams {
   search?: string
   includeInactive?: boolean
+}
+
+export interface OverheadReceiptPaginationParams {
+  page?: number
+  limit?: number
 }
 
 export const overheadMaterialsApi = {
@@ -38,5 +45,29 @@ export const overheadMaterialsApi = {
 
   softDelete: async (id: string) => {
     await client.delete(`/overhead-materials/${id}`)
+  },
+
+  createReceipt: async (id: string, data: OverheadMaterialReceiptCreate) => {
+    const response = await client.post<OverheadMaterialReceipt>(
+      `/overhead-materials/${id}/receipts`,
+      data,
+    )
+    return response.data
+  },
+
+  listReceipts: async (
+    id: string,
+    params: OverheadReceiptPaginationParams = {},
+  ) => {
+    const response = await client.get<OverheadMaterialReceipt[]>(
+      `/overhead-materials/${id}/receipts`,
+      {
+        params: {
+          page: params.page,
+          limit: params.limit,
+        },
+      },
+    )
+    return response.data
   },
 }
