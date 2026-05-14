@@ -22,10 +22,16 @@ export interface ShopOrderCount {
   order_count: number;
 }
 
+export interface CurrencyAmount {
+  currency: string;
+  amount: number;
+}
+
 export interface DashboardResponse {
   stats: DashboardStats;
   revenue_by_currency: RevenueByCurrency[];
   daily_revenue_trend: DailyRevenue[];
   orders_by_shop: ShopOrderCount[];
   low_stock_packaging_count: number;
+  unallocated_overhead: CurrencyAmount[];
 }

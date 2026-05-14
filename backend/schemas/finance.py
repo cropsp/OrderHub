@@ -38,8 +38,12 @@ class TimeSeriesPoint(BaseModel):
 
 
 class DiagnosticInfo(BaseModel):
+    # MAT-5 Phase B: "missing" means COALESCE(computed_production_cost,
+    # production_cost) IS NULL OR = 0. An order with a BOM-computed cost
+    # is NOT missing even if its manual production_cost field is empty.
     orders_missing_cost: int
     total_orders_in_period: int
+    orders_with_computed_cost: int
 
 
 class ShopFinanceResponse(BaseModel):
@@ -51,6 +55,7 @@ class ShopFinanceResponse(BaseModel):
     revenue: KpiCard
     cogs: KpiCard
     fees: KpiCard
+    allocated_overhead_expenses: KpiCard
     net_profit: KpiCard
     pipeline_value: KpiCard
     order_count: OrderCountCard

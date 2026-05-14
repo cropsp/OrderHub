@@ -7,8 +7,10 @@ from database import get_db
 from models.user import User, UserRole
 from models.order import Order, OrderStatus
 from models.shop import Shop
+from models.material import OverheadMaterialReceipt
 from models.packaging import PackagingBox
 from schemas.dashboard import DashboardResponse, DashboardStats, RevenueByCurrency, DailyRevenue, ShopOrderCount
+from schemas.finance import CurrencyAmount
 from routers.dependencies import get_current_user, require_role
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -126,10 +128,33 @@ async def get_dashboard_stats(
         )
     )
 
+    # MAT-5: per-currency SUM of overhead receipts not tied to any shop.
+    # Visible only to owners (same audience as revenue figures).
+    unallocated_overhead: list[CurrencyAmount] = []
+    if current_user.role == UserRole.OWNER:
+        overhead_query = (
+            select(
+                OverheadMaterialReceipt.currency,
+                func.coalesce(
+                    func.sum(OverheadMaterialReceipt.total_cost), 0
+                ).label("amount"),
+            )
+            .where(OverheadMaterialReceipt.shop_id.is_(None))
+            .group_by(OverheadMaterialReceipt.currency)
+        )
+        overhead_result = await db.execute(overhead_query)
+        for currency, amount in overhead_result.all():
+            amount_f = float(amount or 0)
+            if amount_f != 0:
+                unallocated_overhead.append(
+                    CurrencyAmount(currency=currency, amount=amount_f)
+                )
+
     return DashboardResponse(
         stats=stats,
         revenue_by_currency=revenue_data,
         daily_revenue_trend=daily_trend,
         orders_by_shop=orders_by_shop,
         low_stock_packaging_count=int(low_stock_count or 0),
+        unallocated_overhead=unallocated_overhead,
     )

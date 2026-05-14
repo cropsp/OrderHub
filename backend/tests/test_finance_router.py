@@ -109,3 +109,66 @@ async def test_finance_endpoint_filters_revenue_to_shipped_completed():
         "No revenue query filters status IN ('shipped', 'completed'). "
         f"Captured SQL: {sqls}"
     )
+
+
+@pytest.mark.asyncio
+async def test_finance_cogs_uses_coalesce_of_computed_and_manual():
+    """MAT-5 Phase B: COGS aggregation must apply COALESCE(computed, manual)
+    row-wise before SUM, so an order with a BOM-computed cost contributes
+    that value, falling back to manual production_cost only when computed
+    is NULL.
+    """
+    db, captured, shop = _make_db_with_shop()
+
+    await get_shop_finance(
+        db=db,
+        shop_id=shop.id,
+        start_date=date(2026, 5, 1),
+        end_date=date(2026, 5, 14),
+    )
+
+    sqls = _compiled_sqls(captured)
+    assert any(
+        "coalesce(orders.computed_production_cost, orders.production_cost" in s
+        for s in sqls
+    ), (
+        "COGS aggregation does not COALESCE computed_production_cost with "
+        f"production_cost (Phase B cutover). Captured SQL: {sqls}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_finance_overhead_aggregate_filters_by_shop_id():
+    """MAT-5: per-shop overhead aggregate must filter by
+    overhead_material_receipts.shop_id = :shop_id and group by currency.
+    """
+    db, captured, shop = _make_db_with_shop()
+
+    await get_shop_finance(
+        db=db,
+        shop_id=shop.id,
+        start_date=date(2026, 5, 1),
+        end_date=date(2026, 5, 14),
+    )
+
+    sqls = _compiled_sqls(captured)
+    overhead_sqls = [
+        s for s in sqls if "overhead_material_receipts" in s
+    ]
+    assert overhead_sqls, (
+        "No overhead aggregate query was issued. "
+        f"Captured SQL: {sqls}"
+    )
+    assert any(
+        "overhead_material_receipts.shop_id =" in s for s in overhead_sqls
+    ), (
+        "Overhead aggregate does not filter by shop_id. "
+        f"Captured SQL: {overhead_sqls}"
+    )
+    assert any(
+        "group by overhead_material_receipts.currency" in s
+        for s in overhead_sqls
+    ), (
+        "Overhead aggregate is not grouped by currency. "
+        f"Captured SQL: {overhead_sqls}"
+    )

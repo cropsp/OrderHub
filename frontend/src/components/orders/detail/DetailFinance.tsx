@@ -96,6 +96,12 @@ export function DetailFinance({ order }: DetailFinanceProps) {
           </div>
         )}
 
+        {computedCost != null && (
+          <p className="text-[10px] italic text-zinc-600">
+            ⓘ FIN-1 uses computed cost when available (BOM-driven).
+          </p>
+        )}
+
         <div className="h-px bg-zinc-800/30 my-4" />
 
         <div className="flex items-center justify-between">

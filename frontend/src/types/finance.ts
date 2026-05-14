@@ -25,6 +25,7 @@ export interface TimeSeriesPoint {
 export interface DiagnosticInfo {
   orders_missing_cost: number;
   total_orders_in_period: number;
+  orders_with_computed_cost: number;
 }
 
 export interface ShopFinanceResponse {
@@ -36,6 +37,7 @@ export interface ShopFinanceResponse {
   revenue: KpiCard;
   cogs: KpiCard;
   fees: KpiCard;
+  allocated_overhead_expenses: KpiCard;
   net_profit: KpiCard;
   pipeline_value: KpiCard;
   order_count: OrderCountCard;

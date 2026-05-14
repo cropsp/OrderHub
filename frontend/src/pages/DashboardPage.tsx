@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { format } from 'date-fns';
-import { AlertTriangle, Clock, PackagePlus, TrendingUp } from 'lucide-react';
+import { AlertTriangle, Clock, PackagePlus, Receipt, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { useOrders } from '@/hooks/useOrders';
@@ -146,6 +146,41 @@ export default function DashboardPage() {
                 </div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-amber-400 group-hover:text-amber-300 flex items-center gap-1">
                   Open inventory <TrendingUp size={12} />
+                </span>
+              </Link>
+            )}
+
+            {/* MAT-5: workshop overhead not tagged to any shop — hidden when 0. */}
+            {data.unallocated_overhead.length > 0 && (
+              <Link
+                to="/inventory/overhead-materials"
+                data-testid="unallocated-overhead-card"
+                className="flex items-center justify-between bg-sky-500/10 border border-sky-500/20 rounded-3xl px-6 py-4 hover:bg-sky-500/[0.13] transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="size-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+                    <Receipt className="h-4 w-4 text-sky-400" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-sky-400">
+                      Workshop overhead (unallocated)
+                    </p>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      {data.unallocated_overhead
+                        .map(
+                          (a) =>
+                            `${a.amount.toLocaleString('en-US', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })} ${a.currency}`,
+                        )
+                        .join(' · ')}{' '}
+                      — workshop-wide spend not tied to any shop.
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-widest text-sky-400 group-hover:text-sky-300 flex items-center gap-1">
+                  Open overhead <TrendingUp size={12} />
                 </span>
               </Link>
             )}

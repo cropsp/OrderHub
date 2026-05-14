@@ -90,7 +90,7 @@ export default function ShopFinancePage() {
 
         {isLoading || !data ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
               <Skeleton key={i} className="h-32 w-full bg-zinc-900/40 rounded-xl" />
             ))}
           </div>
@@ -133,6 +133,11 @@ export default function ShopFinancePage() {
               <FinanceKpiCard
                 title="Avg Order Value"
                 value={data.aov}
+                formatter={formatCount}
+              />
+              <FinanceKpiCard
+                title="Allocated Overhead"
+                value={data.allocated_overhead_expenses}
                 formatter={formatCount}
               />
             </div>

@@ -47,6 +47,7 @@ function buildResponse(overrides: Partial<ShopFinanceResponse> = {}): ShopFinanc
     },
     cogs: { current: [], previous: [], change_percent: null },
     fees: { current: [], previous: [], change_percent: null },
+    allocated_overhead_expenses: { current: [], previous: [], change_percent: null },
     net_profit: { current: [], previous: [], change_percent: null },
     pipeline_value: { current: [], previous: [], change_percent: null },
     order_count: { current: 12, previous: 10, change_percent: 20.0 },
@@ -55,7 +56,11 @@ function buildResponse(overrides: Partial<ShopFinanceResponse> = {}): ShopFinanc
       { date: '2026-05-01', currency: 'UAH', revenue: 1000, net_profit: 400 },
       { date: '2026-05-02', currency: 'UAH', revenue: 1500, net_profit: 600 },
     ],
-    diagnostic: { orders_missing_cost: 0, total_orders_in_period: 12 },
+    diagnostic: {
+      orders_missing_cost: 0,
+      total_orders_in_period: 12,
+      orders_with_computed_cost: 0,
+    },
     ...overrides,
   };
 }
@@ -98,6 +103,43 @@ describe('ShopFinancePage', () => {
       error: null,
     });
     renderPage();
+    expect(screen.queryByText(/Net Profit may be inflated/)).not.toBeInTheDocument();
+  });
+
+  it('renders the Allocated Overhead card when the API returns a non-zero value', () => {
+    mockFinance.mockReturnValue({
+      data: buildResponse({
+        allocated_overhead_expenses: {
+          current: [{ currency: 'UAH', amount: 450 }],
+          previous: [],
+          change_percent: null,
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.getByText('Allocated Overhead')).toBeInTheDocument();
+    expect(screen.getByText(/450\.00 UAH/)).toBeInTheDocument();
+  });
+
+  it('renders the BOM-computed-cost info line when orders_with_computed_cost > 0', () => {
+    mockFinance.mockReturnValue({
+      data: buildResponse({
+        diagnostic: {
+          orders_missing_cost: 0,
+          total_orders_in_period: 12,
+          orders_with_computed_cost: 5,
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(
+      screen.getByText(/5 of 12 orders use BOM-computed cost/),
+    ).toBeInTheDocument();
+    // The amber "missing cost" warning must NOT render when missing_cost is 0.
     expect(screen.queryByText(/Net Profit may be inflated/)).not.toBeInTheDocument();
   });
 

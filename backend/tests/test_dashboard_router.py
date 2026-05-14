@@ -53,3 +53,45 @@ async def test_daily_revenue_trend_groups_by_coalesce_shipped_ordered():
         "Trend query does not group by COALESCE(shipped_at, ordered_at). "
         f"Captured SQL: {sqls}"
     )
+
+
+@pytest.mark.asyncio
+async def test_dashboard_unallocated_overhead_filters_shop_id_null():
+    """MAT-5: unallocated overhead aggregate must filter
+    overhead_material_receipts.shop_id IS NULL so workshop-wide receipts
+    surface on the global dashboard card.
+    """
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.role = UserRole.OWNER
+    user.email = "owner@example.com"
+
+    captured = []
+
+    async def fake_execute(stmt):
+        captured.append(stmt)
+        r = MagicMock()
+        r.all.return_value = []
+        r.scalar_one_or_none.return_value = None
+        return r
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=fake_execute)
+    db.scalar = AsyncMock(return_value=0)
+
+    await get_dashboard_stats(shop_id=None, current_user=user, db=db)
+
+    sqls = [
+        str(s.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})).lower()
+        for s in captured
+    ]
+    overhead_sqls = [s for s in sqls if "overhead_material_receipts" in s]
+    assert overhead_sqls, (
+        f"No overhead aggregate query was issued. Captured SQL: {sqls}"
+    )
+    assert any(
+        "overhead_material_receipts.shop_id is null" in s for s in overhead_sqls
+    ), (
+        "Unallocated overhead query does not filter shop_id IS NULL. "
+        f"Captured SQL: {overhead_sqls}"
+    )

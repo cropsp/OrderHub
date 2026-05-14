@@ -22,6 +22,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.material import OverheadMaterialReceipt
 from models.order import Order, OrderStatus
 from models.shop import Shop
 from schemas.finance import (
@@ -109,11 +110,16 @@ async def _run_kpi_aggregate(
     Net profit is computed in Python (revenue - cogs - fees) per-currency.
     """
     date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    # MAT-5 Phase B: row-wise COALESCE(computed, manual, 0) before SUM —
+    # each order contributes computed if present, else manual, else 0.
+    effective_cost_expr = func.coalesce(
+        Order.computed_production_cost, Order.production_cost, 0
+    )
     stmt = (
         select(
             Order.currency.label("currency"),
             func.sum(Order.total_price).label("revenue"),
-            func.sum(func.coalesce(Order.production_cost, 0)).label("cogs"),
+            func.sum(effective_cost_expr).label("cogs"),
             func.sum(
                 func.coalesce(Order.platform_fee, 0)
                 + func.coalesce(Order.shipping_np_cost, 0)
@@ -121,10 +127,11 @@ async def _run_kpi_aggregate(
             func.count().label("order_count"),
             func.avg(Order.total_price).label("aov"),
             func.count()
-            .filter(
-                (Order.production_cost.is_(None)) | (Order.production_cost == 0)
-            )
+            .filter(effective_cost_expr == 0)
             .label("missing_cost_count"),
+            func.count()
+            .filter(Order.computed_production_cost.is_not(None))
+            .label("with_computed_cost_count"),
         )
         .where(Order.shop_id == shop_id)
         .where(Order.status.in_(REVENUE_STATUSES))
@@ -142,12 +149,38 @@ async def _run_kpi_aggregate(
             "revenue": revenue,
             "cogs": cogs,
             "fees": fees,
-            "net_profit": revenue - cogs - fees,
             "order_count": int(row.order_count or 0),
             "aov": float(row.aov or 0),
             "missing_cost_count": int(row.missing_cost_count or 0),
+            "with_computed_cost_count": int(row.with_computed_cost_count or 0),
         }
     return rows
+
+
+async def _run_overhead_aggregate(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """Per-currency SUM(OverheadMaterialReceipt.total_cost) where shop_id = :shop_id."""
+    stmt = (
+        select(
+            OverheadMaterialReceipt.currency.label("currency"),
+            func.coalesce(func.sum(OverheadMaterialReceipt.total_cost), 0).label(
+                "allocated_overhead"
+            ),
+        )
+        .where(OverheadMaterialReceipt.shop_id == shop_id)
+        .where(cast(OverheadMaterialReceipt.received_at, Date) >= start)
+        .where(cast(OverheadMaterialReceipt.received_at, Date) <= end)
+        .group_by(OverheadMaterialReceipt.currency)
+    )
+    result = await db.execute(stmt)
+    return {
+        row.currency: {"allocated_overhead": float(row.allocated_overhead or 0)}
+        for row in result.all()
+    }
 
 
 async def _run_pipeline_aggregate(
@@ -258,13 +291,48 @@ async def get_shop_finance(
 
     current_rows = await _run_kpi_aggregate(db, shop_id, start_date, end_date)
     previous_rows = await _run_kpi_aggregate(db, shop_id, prev_start, prev_end)
+    overhead_current = await _run_overhead_aggregate(db, shop_id, start_date, end_date)
+    overhead_previous = await _run_overhead_aggregate(db, shop_id, prev_start, prev_end)
     pipeline_current = await _run_pipeline_aggregate(db, shop_id, start_date, end_date)
     pipeline_previous = await _run_pipeline_aggregate(db, shop_id, prev_start, prev_end)
     time_series = await _run_time_series(db, shop_id, start_date, end_date, granularity)
 
+    # MAT-5: merge per-currency overhead into the kpi-row dicts so a currency
+    # that only has overhead (no orders) still appears in net_profit.
+    for source, target in (
+        (overhead_current, current_rows),
+        (overhead_previous, previous_rows),
+    ):
+        for currency, row in source.items():
+            if currency not in target:
+                target[currency] = {
+                    "revenue": 0.0,
+                    "cogs": 0.0,
+                    "fees": 0.0,
+                    "order_count": 0,
+                    "aov": 0.0,
+                    "missing_cost_count": 0,
+                    "with_computed_cost_count": 0,
+                }
+            target[currency]["allocated_overhead"] = row["allocated_overhead"]
+        # Fill default 0 for currencies that have orders but no overhead.
+        for row in target.values():
+            row.setdefault("allocated_overhead", 0.0)
+        # Compute net_profit per-currency after all subtractive terms are known.
+        for row in target.values():
+            row["net_profit"] = (
+                row["revenue"]
+                - row["cogs"]
+                - row["fees"]
+                - row["allocated_overhead"]
+            )
+
     revenue = _build_kpi(current_rows, previous_rows, "revenue")
     cogs = _build_kpi(current_rows, previous_rows, "cogs")
     fees = _build_kpi(current_rows, previous_rows, "fees")
+    allocated_overhead_expenses = _build_kpi(
+        current_rows, previous_rows, "allocated_overhead"
+    )
     net_profit = _build_kpi(current_rows, previous_rows, "net_profit")
     aov = _build_kpi(current_rows, previous_rows, "aov")
     pipeline_value = _build_kpi(pipeline_current, pipeline_previous, "pipeline_value")
@@ -280,6 +348,9 @@ async def get_shop_finance(
     diagnostic = DiagnosticInfo(
         orders_missing_cost=sum(r["missing_cost_count"] for r in current_rows.values()),
         total_orders_in_period=current_count,
+        orders_with_computed_cost=sum(
+            r["with_computed_cost_count"] for r in current_rows.values()
+        ),
     )
 
     return ShopFinanceResponse(
@@ -291,6 +362,7 @@ async def get_shop_finance(
         revenue=revenue,
         cogs=cogs,
         fees=fees,
+        allocated_overhead_expenses=allocated_overhead_expenses,
         net_profit=net_profit,
         pipeline_value=pipeline_value,
         order_count=order_count,
