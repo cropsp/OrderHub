@@ -2121,6 +2121,187 @@ against.
 
 ---
 
+**Sprint MAT-2 — Receipts, stock tracking, ledger** (Status: `DONE` — commit `bc80756`; pytest 124 → 128)
+
+Goal: Second sprint of the Materials Warehouse epic. MAT-1 gave Sergii
+a catalog; MAT-2 turns it into a **live stock system**. Introduces
+three immutable entities — `MaterialReceipt` (Direct purchase batches),
+`OverheadMaterialReceipt` (Indirect expense events, optionally tagged
+to a shop), `MaterialMovement` (append-only ledger) — plus the
+transactional weighted-average-cost recompute that fires on every
+receipt. UI gets a new Material detail page, three new modals
+(Receipt / Adjust / Overhead Receipt), Movements ledger, STOCK column
+with amber LOW badge on the catalog list, and the same surfaces for
+Overhead. Stock-related fields (`stock_quantity`, `current_unit_cost`,
+`low_stock_threshold`, `waste_percent`) which were schema-present
+but UI-hidden in MAT-1 are now meaningfully exposed and editable.
+
+The single most important constraint: `material_stock_service.apply_movement`
+does **not commit internally** — receipt insert, weighted-avg recompute,
+ledger row, and `stock_quantity` update all live in the caller's
+transaction. Mirrors PKG-2's `stock_service.apply_movement` pattern
+as parallel siblings; no shared abstraction extracted (per spec).
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| MAT-2-1 | `backend/models/material.py` extended — new `MaterialReceipt` (qty, unit_cost, currency, shipping_cost, is_initial, supplier, invoice_no, received_at, notes, user_id), `OverheadMaterialReceipt` (overhead_material_id, shop_id nullable, qty optional, total_cost, currency, supplier, invoice_no, received_at, notes, user_id), `MaterialMovement` (material_id, delta, reason ENUM all 4 values, order_id nullable, receipt_id nullable, unit_cost_at_movement nullable + DB CHECK constraint, notes, user_id, created_at) + `MaterialMovementReason` enum mirroring PKG-2's `StockMovementReason` pattern (`values_callable`, `create_constraint=True`). Relationships: `Material.receipts` (selectin, bounded), `Material.movements` (lazy='dynamic', unbounded — mirrors PKG-2 `PackagingBox.stock_movements`), `OverheadMaterial.receipts` (selectin). | backend | DONE |
+| MAT-2-2 | `backend/alembic/versions/e1c4d92a87bf_add_material_receipts_and_movements.py` — single migration creates 3 tables + ENUM type (`material_movement_reason`) + CHECK constraint (`ck_material_movement_consumption_cost`) + 5 indexes (incl. 2 partial-WHERE indexes for `shop_id IS NOT NULL` and `order_id IS NOT NULL`). Round-trip `upgrade → downgrade → upgrade` clean on dev DB. | backend / DB | DONE |
+| MAT-2-3 | `backend/services/material_stock_service.py` (new, standalone) — two helpers: `apply_movement(db, *, material_id, delta, reason, user_id, …)` and `apply_receipt(db, *, material, qty, unit_cost, currency, shipping_cost, …)`. Caller controls transaction; no internal commits. Python-level guard mirrors DB CHECK constraint for helpful 422s on consumption-without-cost. Weighted-average formula applied BEFORE `stock_quantity` update — old stock value goes into the calculation, then `apply_movement` does `+=`. | backend | DONE |
+| MAT-2-4 | `backend/schemas/material.py` extended — 7 new Pydantic types: `MaterialReceiptCreate/Read`, `OverheadMaterialReceiptCreate/Read`, `MaterialMovementRead`, `MaterialStockAdjustment`, `MaterialReceiptResponse` (wrapper `{material, receipt}`). `MaterialReceiptRead.effective_unit_cost` computed via `@model_validator(mode="after")`. `MaterialUpdate` gains `low_stock_threshold` and `waste_percent`. | backend schemas | DONE |
+| MAT-2-5 | `routers/materials.py` + `routers/overhead_materials.py` extended — 4 new material endpoints (POST receipt, GET receipts paginated, GET movements paginated with `?reason` filter, POST adjust) + 2 overhead endpoints (POST receipt, GET receipts paginated). All `require_role(OWNER, MANAGER)`. Shop validation on overhead POST: `shop_id` must resolve to active Shop (422 if missing/archived). | backend | DONE |
+| MAT-2-6 | `backend/tests/test_material_receipts.py` (new) — 4 compile-SQL tests mirroring `test_finance_router.py` pattern: receipt-inserts-movement-with-receipt-id, weighted-avg-mutation, adjust-writes-waste-row, overhead-persists-shop_id. pytest 124 → **128 passing**. | backend tests | DONE |
+| MAT-2-7 | Frontend types in `inventory.ts` extended (7 new types including `MaterialMovementReason` string union). API clients in `api/materials.ts` + `api/overheadMaterials.ts` extended with receipt/movement/adjust methods. Hooks in `useMaterials.ts` + `useOverheadMaterials.ts` extended with `useCreateMaterialReceipt`, `useMaterialReceipts`, `useMaterialMovements`, `useAdjustMaterialStock`, parallel for overhead. | frontend types/api/hooks | DONE |
+| MAT-2-8 | `MaterialDetailPage.tsx` (new) at `/inventory/materials/:id` — header with name + Active/LOW badges + Back link + 3 action buttons (Receipt amber primary, Adjust Stock secondary, Edit). 4-KPI stock summary card (Current Stock / Avg Unit Cost / Low-Stock Threshold / Waste Percent). LOW-stock threshold renders **"— not set —"** when 0 (UX polish, not in spec). Recent receipts table (DESC by received_at). Movements ledger with `?reason` filter dropdown. Linked-receipt column shows shortened UUID (e.g. `Receipt 59edabc9`). Negative delta values in red, positive in default. | frontend | DONE |
+| MAT-2-9 | `OverheadMaterialDetailPage.tsx` (new) at `/inventory/overhead-materials/:id` — header + "Back to Overhead" link + Receipt action button. Receipts table with **Allocated to** column showing the shop name with shop icon. Different page subtitle: *"Overhead expense events — recorded as flat workshop expenses, no stock tracking."* | frontend | DONE |
+| MAT-2-10 | Three new modal components under `components/inventory/`: `MaterialReceiptModal.tsx` (Currency display-only from Material, supplier auto-prefilled from Material), `MaterialAdjustModal.tsx` (current stock display + signed delta input + reason dropdown `Stock count correction (adjustment)` / `Loss / damage (waste)` + notes), `OverheadMaterialReceiptModal.tsx` (Allocate-to-shop dropdown defaulting to "— Unallocated —" with helper text *"Tagged expenses surface on the shop's finance page (MAT-5); unallocated stays on the global overhead card"* — forward-reference to MAT-5). | frontend components | DONE |
+| MAT-2-11 | `MaterialFormModal.tsx` extended — Edit mode adds a "STOCK POLICY" section heading (10px uppercase, zinc-500) with 2-col grid containing Low-stock threshold and Waste percent inputs. Helper texts: *"Row is flagged when stock ≤ this value"* and *"Used automatically when BOMs apply (MAT-3+)"*. Section visible only in Edit mode; Create stays lean per spec. | frontend | DONE |
+| MAT-2-12 | `MaterialsPage.tsx` — new **STOCK** column between Currency and Supplier showing `{stock_quantity} {unit}` with inline amber **LOW** badge when `threshold > 0 AND stock <= threshold`. Threshold=0 deliberately renders **no badge** (treated as "no threshold set"). Row-click navigates to `MaterialDetailPage`. `OverheadMaterialsPage.tsx` — row-click navigates to `OverheadMaterialDetailPage` (no STOCK column — overhead doesn't track stock). | frontend | DONE |
+| MAT-2-13 | `App.tsx` — two new lazy routes (`/inventory/materials/:id`, `/inventory/overhead-materials/:id`) wrapped in `<RequireRole [OWNER, MANAGER]>`. Mirrors MAT-1 routing pattern. | frontend routing | DONE |
+| MAT-2-14 | Frontend tests: `MaterialDetailPage.test.tsx` (3 cases), `MaterialReceiptModal.test.tsx` (2 cases), `MaterialAdjustModal.test.tsx` (1 case), `OverheadMaterialDetailPage.test.tsx` (1 case). 7 new cases total, all passing. | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **Spec-perfect transactional sequence.** CC's plan-mode call-out about
+  "weighted-average uses OLD stock_quantity value, then `apply_movement`
+  does the `+=` afterwards" landed verbatim in implementation. Smoke
+  math verified: receipt #1 with qty=25, unit=580, shipping=200 →
+  effective `(25×580+200)/25 = 588.00`, stock=0 → new_avg=588.00. Receipt
+  #2 with qty=10, unit=620, no shipping → effective=620.00 → new_avg
+  `(25×588 + 10×620)/35 = 20900/35 = 597.142857… → displayed 597.14`.
+  Both receipts in single transactions; no internal commits anywhere.
+- **CHECK constraint pattern is now established in the codebase.**
+  Before MAT-2, no `CheckConstraint` or `op.create_check_constraint`
+  usage existed. CC adopted SQLAlchemy 2.x idiom — declared in
+  `__table_args__` AND replicated in `op.create_table(...)` — both
+  reflecting each other so model and migration stay in sync. Future
+  sprints that need free-form CHECK constraints can mirror this.
+- **CC beyond-spec UX touches (worth documenting):**
+  - **"Register Expense" vs "Register Receipt" terminology** —
+    OverheadMaterialReceiptModal titles itself *"Register Expense"*
+    (not "Receipt") with subtitle *"surfaces as overhead expense"*.
+    Smart semantic distinction: Direct receipts are about stock,
+    overhead receipts are about expense events. Spec didn't ask for
+    this, CC made the call.
+  - **Supplier auto-prefill on Material receipt modal** — the modal
+    reads `Material.supplier_name` and prefills the Supplier field
+    when opening for that material. Saves the operator from retyping
+    the same supplier on every restock.
+  - **Forward-reference helper text in Overhead allocate dropdown** —
+    *"Tagged expenses surface on the shop's finance page (MAT-5);
+    unallocated stays on the global overhead card."* CC explicitly
+    referenced the future sprint name in the UI copy. Sets correct
+    expectations for the operator about what each tagging choice does.
+  - **"— not set —" display for `threshold=0`** — both on the detail
+    page KPI card and in the LOW-badge logic on the list. Cleaner than
+    showing "0.00" which would confuse "no threshold" with "zero
+    threshold (always-low)".
+  - **Dual badge "Active + LOW"** in the detail page header — two
+    badges side-by-side (green Active + amber LOW). Visually striking
+    when stock crosses the threshold.
+- **`MaterialReceiptResponse` wrapper pattern.** POST `/api/materials/{id}/receipts`
+  returns `{material: MaterialRead, receipt: MaterialReceiptRead}` so
+  the frontend has both the updated material state (new weighted-avg,
+  new stock) AND the just-created receipt (with `effective_unit_cost`).
+  Toast wording from Q5 interpolates both: *"Прийнято {qty} {unit}
+  «{material.name}» за {effective_unit_cost} {currency}/{unit}.
+  Поточний середній: {new_avg} {currency}/{unit}."* Smoke confirmed
+  both toasts fire with correct numbers (588.00 / 588.00 on the first,
+  620.00 / 597.14 on the second).
+- **MAT-2 reserves but does not emit `consumption` and `waste` reason
+  values yet.** Well, `waste` is emitted (via Adjust Stock with
+  reason='Loss/Damage'). But `consumption` ENUM value lands now for
+  MAT-4 forward compatibility; no code path produces consumption rows
+  in MAT-2. The CHECK constraint on `unit_cost_at_movement` is
+  forward-compatible — currently every movement (receipt, waste,
+  adjustment) has `unit_cost_at_movement=NULL`, and the constraint
+  permits exactly that.
+- **CC kept material_stock_service standalone from PKG-2's
+  stock_service.** No shared abstraction extracted, as spec required.
+  Two parallel siblings exist now (`apply_movement` lives in both
+  modules with the same signature shape but different model types).
+  If a third use case lands later (e.g. raw inventory tracking on
+  finished products), that's the right moment to evaluate extraction.
+  YAGNI for MAT-2.
+
+**Verified by smoke test (2026-05-14):**
+- Browser MCP `/inventory/materials` — STOCK column visible between
+  Currency and Supplier. Existing materials (Шкіра / Фанера) show
+  `0.00 {unit}` with no LOW badge (threshold=0 → "no threshold set"
+  per UX rule). ✓
+- Row click on Шкіра → navigates to `MaterialDetailPage` at
+  `/inventory/materials/4a073e10-…`. Header with Active badge,
+  4-KPI stock summary (Current 0.00 dm², Avg 0.00 UAH/dm², Threshold
+  "— not set —", Waste 0.00%). Recent receipts empty state, movements
+  ledger empty state with reason filter. ✓
+- Click "+ Receipt" → modal "Register Receipt" with Material.currency
+  display-only ("UAH"), unit included in label ("Quantity (dm2)"),
+  supplier prefilled "Conceria Walpier" from material. Helper text
+  on Shipping field. ✓
+- Receipt #1: qty=25, unit=580, shipping=200, invoice="INV-2026-001".
+  Save → toast *"Прийнято 25 dm2 «Шкіра італійська чорна» за
+  588.00 UAH/dm2. Поточний середній: 588.00 UAH/dm2."* (effective +
+  new_avg both 588 since stock was 0). Stock summary refreshes to
+  25.00 dm² / 588.00 UAH/dm². Receipts table: 1 row. Movements ledger:
+  1 row with RECEIPT badge (amber), delta=+25.00 dm², linked
+  "Receipt 59edabc9", notes — . ✓
+- Receipt #2: qty=10, unit=620, no shipping. Toast *"… за 620.00
+  UAH/dm2. Поточний середній: 597.14 UAH/dm2."* Stock summary:
+  35.00 dm² / 597.14 UAH/dm² (math `(25×588 + 10×620) / 35 = 20900/35
+  = 597.142857… → rounded 597.14`). Receipts table: 2 rows DESC by
+  date. ✓
+- Adjust Stock modal: current=35.00 dm². Adjust by -2, reason=waste,
+  notes="Cut error". Save → toast "Stock adjusted". Stock summary:
+  33.00 dm² (avg unchanged 597.14 — adjustments don't touch cost).
+  Movements ledger: new top row with WASTE badge (red), delta=-2.00
+  dm² in red, notes "Cut error". ✓
+- Edit Material modal — Edit mode shows the new "STOCK POLICY"
+  section heading with 2-col grid (Low-stock threshold + Waste
+  percent). Currency still locked ("CURRENCY (LOCKED)"). Set
+  threshold=35 → save → toast "Material updated". Detail page header
+  now shows TWO badges side-by-side: "Active" (green) + "LOW"
+  (amber). CURRENT STOCK value rendered in amber (33.00 dm²,
+  threshold=35.00, so 33 ≤ 35 triggers LOW). ✓
+- Back to `/inventory/materials` list — Шкіра row's STOCK column
+  shows `33.00 dm2` in amber + inline `LOW` badge. Фанера row's
+  STOCK still `0.00 m2` with no badge (threshold=0). ✓
+- Overhead detail page (Клей PVA) — header + "Back to Overhead" +
+  Receipt button. Subtitle *"Overhead expense events — recorded as
+  flat workshop expenses, no stock tracking."* Receipts table empty.
+  Material card shows name (bottle) + Active badge. ✓
+- "Register Expense" modal (note: not "Receipt") with Allocate-to-shop
+  dropdown defaulting to "— Unallocated —" + 4 shop options. Helper
+  text references MAT-5 explicitly. ✓
+- Allocate to KoraKlenu, total_cost=450, supplier=ATB. Save → toast
+  "Receipt recorded". Receipts table: 1 row with Date / Qty=— /
+  Total cost=450.00 / Currency=UAH / Allocated to=KoraKlenu (with
+  shop icon) / Supplier=ATB / Notes=—. ✓
+- Backend gates: alembic round-trip clean, pytest 124 → 128 passing,
+  tsc + lint clean, 7 new frontend cases pass. Console clean (zero
+  errors on all pages visited). ✓
+
+**Side observations (no follow-ups filed):**
+- **Materials list row click works via text-element click; Overhead
+  list row click required programmatic `tr.click()`.** Both `tr`
+  elements have `cursor: pointer` + onclick handler per DOM probe.
+  Probably an event-propagation subtlety with where the click landed
+  on each row — not a functional bug (Sergii clicking with a real
+  mouse anywhere on the row will fire the handler). Worth noting in
+  case CC's Overhead list ever needs interaction testing.
+- **Empty-state placeholders now in 4 places** (FinanceRevenueChart,
+  Materials list, Overhead list, Movements ledger). YAGNI threshold
+  for extracting `<EmptyStatePlaceholder>` is approaching but not
+  crossed — wait for the 5th occurrence.
+
+- **Closes:** the second 1/5 of the Materials Warehouse epic. Operator
+  can now record purchases, see weighted-average cost evolve as real
+  receipts roll in, adjust stock manually, view full audit ledger, and
+  tag overhead expenses to shops (groundwork for MAT-5 P&L integration).
+  **MAT-3 — BOM Editor** is next: introduces `BomItem`, recipe authoring
+  per Product, computed unit cost preview. Smaller sprint (frontend-
+  heavy, no new stock/cost logic). Expected to be the smallest of MAT-2
+  through MAT-5.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
