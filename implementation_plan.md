@@ -1631,6 +1631,117 @@ case that mounts a real `<ResponsiveContainer>` doesn't throw in jsdom.
 
 ---
 
+**Sprint DASH-REVENUE-DATE — Revenue Trend grouped by fulfillment date** (Status: `DONE` — commit `a552c39`; pytest 118 → 119)
+
+Goal: Revenue Trend on `/dashboard` was grouping daily revenue by
+`Order.ordered_at` (creation date). When a chronically-late order
+finally shipped, its revenue retroactively appeared on a long-past day
+on the chart instead of on the day it was fulfilled — wrong semantics
+for an accrual-style "revenue earned" trend. Gross revenue is realised
+the moment a shipment goes out, not when the customer placed the order.
+
+Fix: one-line SQL change at `backend/routers/dashboard.py:90` —
+`cast(Order.ordered_at, Date)` → `cast(func.coalesce(Order.shipped_at, Order.ordered_at), Date)`.
+The `COALESCE` fallback protects legacy/imported rows where
+`shipped_at` is NULL (the column is `nullable=True`); for new orders
+flowing through `services/order_service.py:127-128` the `shipped_at`
+auto-fill on `→ SHIPPED` transition is guaranteed, so the fallback
+only ever fires for legacy data. The 30-day window stays anchored on
+`ordered_at` (we want orders *created* in the last 30 days; broadening
+that to "shipped_at within last 30 days" is a different product
+question, explicitly out of scope).
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| DASH-REVENUE-DATE-1 | `routers/dashboard.py:90` — `day_col` swapped to `cast(func.coalesce(Order.shipped_at, Order.ordered_at), Date)` with a 2-line rationale comment explaining accrual semantics + the COALESCE safety net. `func` was already imported on line 3; no new import. The 30-day window (line 97), the status filter (line 96, `[COMPLETED, SHIPPED]`), the summary block (lines 65-86), and the shop-breakdown block all stay untouched. | backend | DONE |
+| DASH-REVENUE-DATE-2 | New file `tests/test_dashboard_router.py` — single compile-SQL regression test. Mocks `db.execute` to capture issued `select` statements, compiles each against the PostgreSQL dialect, and asserts the lower-cased SQL contains `coalesce(orders.shipped_at, orders.ordered_at)`. Catches anyone reverting to `ordered_at` alone without standing up new test infrastructure. | backend tests | DONE |
+
+**Post-sprint notes:**
+- **Plan-mode pre-flight delivered three confirmations that task.md
+  needed.** CC's plan verified (a) the target line `dashboard.py:90`
+  reads exactly what the spec said, (b) `func` is already imported on
+  line 3, (c) `func.coalesce` is stock SQLAlchemy 2.x with no version
+  caveat needed (the `sa.case(...)` fallback in task.md OQ#3 is
+  unnecessary). All three OQs from task.md closed with cited evidence.
+- **Test approach downgraded from behavioral to compile-SQL — and
+  this was the right call.** Task.md's original spec asked for two
+  behavioral tests constructing real `Owner + Shop + Order` rows and
+  asserting trend output. CC discovered: no `conftest.py` anywhere
+  under `backend/`, every test file uses `MagicMock` / `AsyncMock` at
+  the boundary, there's no aiosqlite fixture, no engine, no factory
+  helpers. Standing up that infrastructure would be a TEST-1-scale
+  sprint of its own, well outside DASH-REVENUE-DATE's "intentionally
+  small" envelope. Task.md explicitly permitted the downgrade ("If
+  the planner judges the setup too contrived... they may downgrade
+  this to a comment explaining the safety net and skip the test").
+  CC's pivot: a single compile-SQL test that captures the trend
+  query, compiles it against `postgresql.dialect()`, and string-asserts
+  the COALESCE expression. This is a whiteboard test (it does not
+  exercise the SQL on a real engine), but it's regression-safe — any
+  future revert to `cast(Order.ordered_at, Date)` fails the
+  assertion. The COALESCE fallback behaviour is intrinsic to
+  PostgreSQL semantics and doesn't need a runtime test to prove.
+- **CC narrative inaccuracy (corrected here, not in the commit).**
+  CC's plan writeup said *"User chose the compile-SQL assertion
+  approach over standing up an aiosqlite fixture"* — Sergii made no
+  such explicit choice in chat; CC took the call himself under the
+  spec's downgrade clause. Substance is correct, attribution is not.
+  Noted for the record; nothing in the codebase needs changing.
+- **Behavioural test backlog item (not filed as a deferred bug, but
+  flagged here).** When/if dashboard endpoints grow more complex
+  logic (currency conversion, multi-shop aggregation, role-scoped
+  trends), the compile-SQL approach won't cut it. At that point
+  Sergii will want to stand up an aiosqlite fixture pattern similar
+  to what most FastAPI codebases use — `conftest.py` with an
+  engine fixture, factories for `Order`/`Shop`/`User`, and behavioral
+  tests in `tests/test_dashboard_router.py`. Not now; not in any
+  parked-bug table either; just a heads-up. The compile-SQL test
+  added in this sprint is forward-compatible: it can coexist with
+  behavioural tests in the same file.
+
+**Verified by smoke test (2026-05-14):**
+- Pre-flight: Sergii transitioned 2 orders through `→ SHIPPED` via
+  the UI during the prior DASH-REVENUE-EMPTY exploration (the
+  "graph started showing data" observation). ATTENTION NEEDED widget
+  went 70 → 68 confirming the transition. NET PROFIT widget went
+  `0 USD` → `0 UAH / 85.99 USD` confirming USD revenue from a non-UA
+  shop's shipped orders.
+- Browser MCP hard-reload `/dashboard`. Revenue Trend now renders a
+  real area chart (not the empty-state placeholder fixed in
+  DASH-REVENUE-EMPTY). ✓
+- Tooltip hover on right point: **"MAY 14, 2026 — 85.99 USD"**.
+  Today's date. This is the strongest single piece of evidence:
+  85.99 USD of revenue is plotted on `2026-05-14`, the day Sergii
+  flipped the orders to SHIPPED (= `shipped_at`), NOT on the
+  `ordered_at` of those orders (which would have been at least
+  several days earlier — the orders weren't created today).
+  Without the fix, the same revenue would have been smeared across
+  multiple older `ordered_at` dates. ✓
+- Tooltip hover on left point: **"APRIL 25, 2026 — 0 USD"**. Trend
+  payload appears to be a 2-element list: `[{Apr 25, 0}, {May 14,
+  85.99}]`. ✓
+- Backend gates: `python -m pytest tests/ -v` → 119 passing (was
+  118; +1 new from `test_dashboard_router.py`). ✓
+
+**Side observation (not parked, just noted):**
+- The Apr 25 `$0` data point appears to be a SHIPPED order with
+  `total_price = 0` lingering in the dev DB (likely seed data or an
+  imported row missing pricing). This is **not** a DASH-REVENUE-DATE
+  artefact — the same `$0` would have appeared under `ordered_at` in
+  the pre-fix view too. If it bothers operations down the line, a
+  separate `total_price = 0 OR NULL` filter on the trend query is a
+  defensible cleanup; not worth filing as a deferred bug today
+  because in production `total_price = 0` rows are vanishingly rare.
+
+- **Closes:** the "revenue retroactively appears on order-creation
+  dates" semantics bug. The trend now reflects fulfillment date
+  (`shipped_at`) with graceful fallback to `ordered_at` for legacy
+  rows missing the auto-fill. Pair with DASH-REVENUE-EMPTY (commit
+  `e502ad1`), this concludes the two-sprint dashboard revenue
+  cleanup arc opened by the 2026-05-14 review.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
