@@ -1526,6 +1526,111 @@ recovers. Per-shop analytics fall out for free via
 
 ---
 
+**Sprint DASH-REVENUE-EMPTY — Revenue Trend chart breaks on empty data** (Status: `DONE` — commit `e502ad1`)
+
+Goal: On `/dashboard`, the Revenue Trend card rendered a clipped
+fragment of empty-state text ("EVENUE / ATA" bleeding off the left edge)
+instead of a proper "No revenue data" placeholder. Root cause was a
+mis-shaped JSX tree in `RevenueChart.tsx:26-94`: both branches of the
+`data.length > 0 ? <AreaChart> : <div>` ternary were wrapped inside a
+single `<ResponsiveContainer>`. Recharts expects only a chart component
+as its child; when handed a plain `<div>` for the empty case it tried to
+clone the div with width/height props, failed, and logged
+`width(-1) height(-1)` four times in the console. The empty-state div
+ended up rendered without its flex centering, no `.recharts-wrapper`
+was produced inside the container, and the placeholder text clipped at
+the card's left edge.
+
+Fix: lift the empty-state `<div>` outside `<ResponsiveContainer>`; only
+`<AreaChart>` remains inside the truthy branch. Five lines of JSX
+reshuffled in one file. Plus a `ResizeObserver` mock in
+`frontend/src/test/setupTests.ts` so the new component-level vitest
+case that mounts a real `<ResponsiveContainer>` doesn't throw in jsdom.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| DASH-REVENUE-EMPTY-1 | `RevenueChart.tsx` — `<ResponsiveContainer>` now wraps only `<AreaChart>` in the truthy branch; empty-state `<div>` is a sibling at the outer `h-[240px] w-full mt-4` level. No pixel-level changes to either branch. | frontend | DONE |
+| DASH-REVENUE-EMPTY-2 | `frontend/src/test/setupTests.ts` — `ResizeObserver` mock that fires its callback immediately with fake `500×300` dimensions, allowing `<ResponsiveContainer>` to render the chart in jsdom. | frontend tests | DONE |
+| DASH-REVENUE-EMPTY-3 | New component-level vitest `RevenueChart.test.tsx` — two cases: empty `data=[]` → "No revenue data" present, `.recharts-wrapper` absent; with synthetic data → `.recharts-wrapper` present, empty-state text absent. | frontend tests | DONE |
+| DASH-REVENUE-EMPTY-4 | `DashboardPage.test.tsx` — fixed three pre-existing broken assertions blocking the test run (`Dashboard Overview` → `Executive Overview`, `Attention List` → `Priority triage`, `Recent Activity` → `Telemetry feed`). Necessary scope expansion: without this, the test gate enforced in task.md (`npm run test -- DashboardPage` must pass clean) was unreachable. | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **Plan deviation — direct component rendering instead of re-mocking
+  `useDashboard`.** Original task.md spec suggested extending the
+  existing `DashboardPage.test.tsx` smoke with two assertions plus a
+  second case re-mocking `useDashboard` with synthetic data. CC
+  correctly flagged that the existing test already stubs
+  `<RevenueChart>` as a placeholder `<div>` (chart internals never
+  reach jsdom there), and that vitest's `vi.mock` hoisting forbids
+  re-mocking the same module at different scopes in the same file.
+  CC's pivot: a fresh `RevenueChart.test.tsx` that renders the
+  component directly with a `data` prop. Coverage is identical and
+  the test is cleaner. Spec was imprecise; CC's read of the actual
+  test setup was correct.
+- **ResizeObserver mock was an unanticipated requirement.** Not in
+  task.md scope — surfaced during planning because Recharts'
+  `ResponsiveContainer` calls `new ResizeObserver(...)` on mount,
+  which jsdom doesn't ship. Without the mock the new "with-data"
+  test would `TypeError` on mount. CC predicted this in plan mode
+  and added the mock; one of the dividends of running plan mode
+  even on a "trivial" sprint.
+- **Scope-creep DashboardPage assertion fix.** Three assertions in
+  `DashboardPage.test.tsx` referenced stale UI strings from a prior
+  UI modernization round and were broken before this sprint started.
+  CC discovered them when running the full test file as part of
+  verification and fixed them rather than letting the test run
+  fail. This formally violates CLAUDE.md §3's "Surgical changes" rule
+  but was justified — the broken assertions were a precondition for
+  the sprint's own gate. Sergii consents on review.
+- **Backend `daily_revenue_trend` payload is genuinely empty.**
+  Verified during smoke: 74 active orders, of which 70 are in
+  `NEW`/`WAITING_INFO`/`INFO_RECEIVED` (Attention Needed widget) and
+  the remaining 4 are also non-`SHIPPED`/`COMPLETED` (Net Profit
+  reads 0 USD, which uses the same filter). The empty payload is
+  by-design: `dashboard.py:96` filters to `[COMPLETED, SHIPPED]` over
+  the last 30 days. Not a bug. Picked up under DASH-REVENUE-DATE
+  separately (next sprint — switch the trend `GROUP BY` from
+  `ordered_at` to `COALESCE(shipped_at, ordered_at)` so the X-axis
+  reflects fulfillment date, not order date).
+
+**Verified by smoke test (2026-05-14):**
+- Browser MCP hard-reload `/dashboard`. Revenue Trend card now shows
+  a centred DollarSign icon + "NO REVENUE DATA" label. Geometric
+  probe: `label_left_offset = 337.625px`, `label_right_offset =
+  337.640px` — difference < 0.02px, perfect horizontal centering
+  within the 776.65×240 card. ✓
+- DOM probe: `document.querySelectorAll('.recharts-responsive-container').length`
+  returned `1` (only ShopDistribution). The Revenue card's
+  empty-state path no longer mounts a `<ResponsiveContainer>`. ✓
+- Console: comparing fresh warnings (timestamp ≥ `11:21:11`) vs
+  pre-fix snapshot — the four `minHeight(undefined)` warnings that
+  were unique to the Revenue chart **disappeared entirely**. Four
+  residual `minHeight(300)` warnings remain; all come from
+  ShopChart's initial mount race (its `ResponsiveContainer` has
+  `minHeight={300}` declared at `ShopChart.tsx:87`), not from
+  RevenueChart. ShopChart renders correctly despite the noise (donut
+  visible with "74 TOTAL" label). ✓
+- Frontend gates: `tsc --noEmit` clean (only pre-existing baseUrl
+  deprecation, unrelated). `npm run lint` clean. `npm run test --
+  DashboardPage RevenueChart` — 3/3 passing. ✓
+
+**Side observation (parked):**
+- **DASH-SHOP-WARNINGS** — four `width(-1)/height(-1)` warnings from
+  ShopChart on initial mount, cosmetic console noise only. Empty-state
+  structure in `ShopChart.tsx:78-141` is already correct (placeholder
+  outside `<ResponsiveContainer>`), so this is **not** the same bug
+  as DASH-REVENUE-EMPTY. Likely cause: layout race between the
+  `min-h-[300px]` flex container and the `ResponsiveContainer`'s
+  first `ResizeObserver` callback. Chart renders correctly after
+  `ResizeObserver` fires. Filed in Explicitly deferred below.
+
+- **Closes:** the clipped/broken Revenue Trend empty-state, plus the
+  pre-existing brittle `DashboardPage.test.tsx` assertions blocking
+  the test suite. Unblocks DASH-REVENUE-DATE (semantic fix of which
+  date the trend groups by) as the next-up sprint.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -1548,6 +1653,7 @@ in this document where applicable, to avoid duplication.
 | PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
 | PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
 | NP-UX-4 | `NovaPoshtaClient._post()` error-formatting bug — handles `errors` as `list` only, NP sometimes returns `dict` | Discovered during NP-FIX-4 smoke (2026-05-11). NP API can return `errors` as a `dict` keyed by UUID: e.g. `{"4080dd88-…": "Document already deleted 20451436522025", "0": "No document changed DeletionMark"}`. Our `_post()` does `', '.join(errors)` which on a dict joins **keys**, producing `"4080dd88-…, 0"` — the actual useful error messages are lost. Pre-existed before NP-FIX-4; NP-FIX-4 smoke just surfaced it. Fix: detect `dict` shape and join `.values()` instead of keys, or format as `"key: value"` pairs. Low-priority: only affects edge cases (delete of already-deleted TTN, batch operations), normal NP errors come back as list. |
+| DASH-SHOP-WARNINGS | ShopChart logs four `width(-1)/height(-1)` recharts warnings on every dashboard mount | Discovered as residual noise during DASH-REVENUE-EMPTY smoke (2026-05-14). The empty-state JSX structure in `ShopChart.tsx:78-141` is already correct (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. The warnings stamp `minHeight(300)` — matching ShopChart's explicit `minHeight={300}` prop at `ShopChart.tsx:87`. Likely cause: layout race between the `min-h-[300px]` flex container in `CardContent` and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs the warning, then re-measures correctly when the observer fires. Chart renders correctly (donut visible with the correct total). Cosmetic console noise only. Possible fixes if it ever bothers anyone: declare `width={357} height={300}` instead of `100%`, or wrap in a `useLayoutEffect`-gated container. Low-priority. |
 
 ---
 
