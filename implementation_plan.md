@@ -1742,6 +1742,166 @@ question, explicitly out of scope).
 
 ---
 
+**Sprint FIN-1 — Per-shop financial overview page** (Status: `DONE` — commit `b4fca1c`; pytest 119 → 121)
+
+Goal: Phase 1 of the Finance epic. Provide a per-shop financial
+overview page (`/shops/{shop_id}/finance`) so the operator can drill
+into one shop's revenue / COGS / fees / net profit / pipeline value
+for a custom time window — primary use case is **end-of-month partner
+payout calculations**. Built entirely on top of existing `Order.*`
+fields; no new domain entities, no schema changes. Also functions as
+a **diagnostic tool**: the "N of M orders missing cost" amber badge
+surfaces production_cost backfill scope before the Partners /
+Materials phases begin.
+
+Sprint scope was deliberately full-stack in one go (backend endpoint +
+service + schemas + tests, plus frontend route + page + 4 components
++ hook + API client + tests + entry-point button on `/shops` list) —
+ran on Opus + plan-mode per Sergii's choice given the size. The plan
+came back with 7 evidence-cited OQ answers + two solid pushbacks
+(OQ2 drilldown target, OQ7 inactive-shop handling). One-shot
+execution; no plan rewrites mid-sprint.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| FIN-1-1 | `backend/schemas/finance.py` — 6 Pydantic models: `CurrencyAmount`, `KpiCard` (flat `change_percent: float \| None` over primary currency per OQ4), `OrderCountCard`, `TimeSeriesPoint`, `DiagnosticInfo`, `ShopFinanceResponse`. `granularity: Literal["day", "month"]` is server-computed and echoed back so the frontend doesn't re-decide. | backend schemas | DONE |
+| FIN-1-2 | `backend/services/finance_service.py` — async `get_shop_finance(db, shop_id, start, end)`. 6 queries: shop existence (404 on `is_active=False` per OQ7 pushback) + current-period KPI per currency + previous-period KPI per currency + time-series by day-or-month × currency + current/previous pipeline value. Diagnostic counts computed inline via `COUNT(*) FILTER (...)` in the main KPI query — **no extra round-trip**. Primary-currency selection: max `current.amount` across currencies. Granularity threshold: `(end - start).days <= 90 → day`, else `month` (via `date_trunc('month', ...)`). Previous-period bounds: same-length immediately before current. | backend | DONE |
+| FIN-1-3 | `backend/routers/finance.py` (new) + `backend/main.py` registration. Mounted as `APIRouter(prefix="/api/shops/{shop_id}/finance", tags=["finance"])`. Role guard `require_role(OWNER, MANAGER)` per rule #9. Path UUID validation + 404 path. | backend | DONE |
+| FIN-1-4 | `backend/tests/test_finance_router.py` — 2 compile-SQL regression tests mirroring `test_dashboard_router.py` (same MagicMock + AsyncMock pattern): (a) trend query contains `coalesce(orders.shipped_at, orders.ordered_at)`, (b) revenue queries filter `status IN ('shipped', 'completed')`. Optional 3rd test (DESIGNER 403) deliberately skipped per OQ6 — the `require_role` decorator is exercised elsewhere; new test would add fixture plumbing without proportional value. | backend tests | DONE |
+| FIN-1-5 | `frontend/src/types/finance.ts` (new) — TS mirrors of backend schemas. `frontend/src/api/shops.ts` extended with `getShopFinance(shopId, startDate, endDate)`. `frontend/src/hooks/useShopFinance.ts` (new) — React Query hook keyed on `['shop-finance', shopId, start, end]`. | frontend types / api / hook | DONE |
+| FIN-1-6 | Four new components under `frontend/src/components/finance/`: (a) `periodPresets.ts` — preset definitions, `rangeForPreset()`, `loadLastPreset()` with `localStorage` key `orderhub:shopFinance:lastPreset` (mirrors UX-1 pattern); (b) `FinancePeriodSelector.tsx` — 6 preset buttons + Custom mode with datepickers; (c) `FinanceKpiCard.tsx` — multi-currency card with comparison subtitle in primary currency; (d) `DiagnosticBadge.tsx` — amber badge under Net Profit, conditional on `orders_missing_cost > 0`, links to `/shops/{shop_id}/orders` per OQ2 pivot; (e) `FinanceRevenueChart.tsx` — Recharts AreaChart with revenue teal + net_profit blue, mirrors DASH-REVENUE-EMPTY empty-state shape (placeholder OUTSIDE `<ResponsiveContainer>`), multi-currency footnote when more than one currency in series. | frontend components | DONE |
+| FIN-1-7 | `frontend/src/pages/ShopFinancePage.tsx` (new) — composes period selector + KPI grid (7 cards: Revenue / COGS / Fees / Net Profit / Pipeline Value / Order Count / AVG Order Value) + diagnostic badge + chart + drilldown link "Переглянути ордери за період →". `frontend/src/App.tsx` extended with lazy route `<Route path="/shops/:shopId/finance">` wrapped in `<RequireRole allowedRoles={[OWNER, MANAGER]}>`. | frontend page / routing | DONE |
+| FIN-1-8 | `frontend/src/pages/ShopsPage.tsx` extended with a Finance icon button in each shop row's MANAGEMENT column — entry point to `/shops/{shop_id}/finance` (no top-level sidebar entry per spec). | frontend | DONE (cosmetic regression — see post-sprint notes) |
+| FIN-1-9 | `frontend/src/pages/__tests__/ShopFinancePage.test.tsx` (new) — 4 cases: (a) multi-currency Revenue card renders both UAH and USD lines; (b) diagnostic badge renders when `orders_missing_cost > 0`; (c) badge hidden when count is 0; (d) empty-state placeholder renders when `time_series` is empty. All 4 pass. | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **OQ2 — drilldown link pivot to `/shops/{shop_id}/orders`.** CC's
+  plan-mode greps surfaced a critical issue with the original
+  spec's drilldown link (`/orders?shop_id=X&start_date=Y&end_date=Z`):
+  `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`
+  query params, and `OrdersLayout.tsx:29-49` doesn't read URL query
+  params at all (filters are local React state). A naive drilldown
+  link would have been a **silent no-op even for the shop filter**.
+  CC pivoted to target `/shops/{shop_id}/orders` (route at
+  `App.tsx:82`, served by `<ShopOrdersPage />` with `fixedShopId` prop)
+  — guaranteed to land on shop-filtered orders. Date / missing-cost
+  filtering parked as **FIN-1-followup** (see below). This is a
+  case where plan-mode + greps caught a class of bug that smoke
+  would have surfaced confusingly.
+- **OQ7 — pushback on inactive-shop handling.** Original spec said
+  *"show finance anyway for archived shops"* in the spirit of
+  data-is-data. CC pushed back, citing
+  `routers/shops.py:102-106` which returns 404 when
+  `is_active == False` — i.e. the existing shop API would not surface
+  an archived shop, so the finance endpoint should match.
+  Consistency won. Sergii agreed on the spot.
+- **OQ4 — single primary-currency `change_percent: float | None`.**
+  Discussed in chat before plan finalisation. Original task.md
+  suggested `change_percent_by_currency: dict[str, float | None]`,
+  CC and Sergii both flagged this as duplicating primary-currency
+  logic between backend (chart) and frontend (KPI subtitle).
+  Settled on the flat shape. Frontend subtitle includes the
+  currency label (`↑ 12% vs previous period (UAH)`) to avoid
+  ambiguity in multi-currency shops.
+- **Single-query diagnostic optimization (not in spec).** CC
+  combined the "orders missing cost" count into the main KPI
+  aggregate via `COUNT(*) FILTER (WHERE production_cost IS NULL OR
+  production_cost = 0)` — saved one round-trip vs. a separate
+  query. Idiomatic Postgres; matches the codebase's existing reliance
+  on Postgres-specific features (`date_trunc`, ENUM types). One
+  fewer DB hit per page load.
+- **Server-computed granularity (not in spec).** I had originally
+  left this as "frontend decides", but the response shape includes
+  `granularity: Literal["day", "month"]` so the chart axis formatting
+  is consistent across the two layers. Pure correctness improvement.
+- **6 queries per page load total** (1 shop existence + 5 aggregates).
+  Worst-case yearly Lamamarka ~600 orders × 5 = trivial. No caching,
+  no shared-helper refactor with `dashboard.py`. One duplication is
+  fine; if Finance grows a 2nd or 3rd endpoint with overlapping
+  logic, extraction makes sense — not before.
+- **Test pattern proven across three sprints now.** DASH-REVENUE-DATE
+  introduced the compile-SQL test approach (no aiosqlite fixture,
+  no real DB) — FIN-1 replicated it cleanly. The pattern works for
+  SQL-shape regression-guards. As soon as a Finance endpoint grows
+  business logic that can't be captured by SQL substring matching
+  (e.g. currency conversion math, percentile calculations), Sergii
+  will want to stand up an aiosqlite fixture. **Not now.**
+
+**Verified by smoke test (2026-05-14):**
+- KoraKlenu `/shops/{KoraKlenu UUID}/finance` loaded. Default
+  "This Month" preset active (MAY 1, 2026 → MAY 31, 2026). 7 KPI
+  cards rendered with `——` placeholders (no SHIPPED orders in
+  the period — expected, KoraKlenu's 70 active orders are all in
+  `NEW`/`WAITING_INFO`/`INFO_RECEIVED`). Empty-state chart
+  ("NO REVENUE DATA" + $ icon) — exactly the DASH-REVENUE-EMPTY
+  shape we shipped. ✓
+- Lamamarka `/shops/{Lamamarka UUID}/finance` loaded with real data.
+  Revenue = **85.99 USD** (matches the figure observed during
+  DASH-REVENUE-DATE smoke — those 2 SHIPPED orders Sergii flipped
+  earlier today live in Lamamarka). Net Profit = 85.99 USD (= Revenue
+  − COGS(0) − Fees(0)). Pipeline Value = 270.94 USD (the other
+  pending Shopify orders). Order Count = 2. AVG Order Value =
+  43.00 USD (85.99 / 2 ≈ 43.00 — arithmetic consistent). ✓
+- **Diagnostic badge fired** as designed:
+  *"⚠ 2 of 2 orders without cost — Net Profit may be inflated"* under
+  the Net Profit card. Both shipped Shopify orders have
+  `production_cost IS NULL` in the DB (Shopify sync doesn't auto-fill
+  it). This is exactly the operator signal we wanted from rule #6
+  — Sergii now has a backfill prompt staring at him every time he
+  opens Lamamarka finance. ✓
+- Drilldown link "Переглянути ордери за період →" present.
+  Click → navigates to `/shops/{shop_id}/orders` per OQ2 pivot. ✓
+- Time-series chart rendered with USD currency footer and a
+  single data point at May 14 / $85.99. Multi-currency footnote
+  doesn't fire here because Lamamarka is USD-only in this period. ✓
+- Backend gates: `pytest tests/ -v` → 121 passing (was 119,
+  +2 new finance tests as predicted). `tsc --noEmit` clean.
+  `npm run lint` clean for new files. `npm run test --
+  ShopFinancePage` → 4/4 passing. ✓
+
+**Side observations (parked as follow-ups, do NOT block FIN-1 closure):**
+- **FIN-1-followup** *(from CC's plan-mode)*: Extend `/orders`
+  (router + frontend page) to honor `start_date`, `end_date`,
+  `missing_cost` URL query params so finance drilldowns can pass
+  the period context. Touches `OrdersLayout.tsx`, `OrdersPage.tsx`,
+  `routers/orders.py` query signature. Filed in Explicitly deferred.
+- **FIN-1-followup-2** *(smoke discovery)*: Finance icon button
+  on `/shops` list page is **present in DOM but visually invisible**
+  — the link exists with `href="/shops/{id}/finance"` and
+  `title="Per-shop finance"`, but `text` is empty and the icon
+  renders in a colour too close to the dark background. Affordance
+  fails — users will only find the page via direct URL. Quick CSS
+  fix (lighten the icon colour or add visible "Finance" label).
+  Filed in Explicitly deferred.
+- **FIN-1-followup-3** *(smoke discovery)*: `OrderCountCard`
+  shows `↓ 100.0% vs previous period` when both current and
+  previous are 0 (observed on KoraKlenu). Other cards correctly
+  return `— no prior period data` in the same edge case. Backend
+  `change_percent` calculation for `OrderCountCard` doesn't handle
+  `current=0 AND previous=0` the same way as `KpiCard`. Edge case
+  only — when there's any non-zero data on either side, behaviour
+  is correct. Low-priority cosmetic. Filed in Explicitly deferred.
+- **DASH-SHOP-WARNINGS scope extends to FinanceRevenueChart.**
+  The recharts `width(-1)/height(-1)` warnings observed on
+  ShopChart's initial mount also fire on FinanceRevenueChart's
+  initial mount (10+ fresh warnings in the smoke timestamp).
+  Same root cause (layout race with ResizeObserver on `min-h-[300px]
+  flex` parent). Charts render correctly after observer fires; this
+  is cosmetic console noise. Existing DASH-SHOP-WARNINGS parked
+  entry covers it; updated below to reflect the wider scope.
+
+- **Closes:** Phase 1 of the Finance epic. Operator now has a
+  per-shop financial overview with custom time windows, multi-currency
+  breakdown without conversion, comparison-vs-previous-period
+  subtitles, and a diagnostic surface for production_cost backfill
+  scope. The page is functional but the entry-point button on `/shops`
+  needs a cosmetic follow-up. **Phase 2 — Partners & Revenue Sharing
+  — is next**, blocked on Sergii describing the partner deal
+  structure (planned as a separate discovery conversation). Phase 3
+  (Materials BOM) is further out.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -1764,7 +1924,10 @@ in this document where applicable, to avoid duplication.
 | PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
 | PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
 | NP-UX-4 | `NovaPoshtaClient._post()` error-formatting bug — handles `errors` as `list` only, NP sometimes returns `dict` | Discovered during NP-FIX-4 smoke (2026-05-11). NP API can return `errors` as a `dict` keyed by UUID: e.g. `{"4080dd88-…": "Document already deleted 20451436522025", "0": "No document changed DeletionMark"}`. Our `_post()` does `', '.join(errors)` which on a dict joins **keys**, producing `"4080dd88-…, 0"` — the actual useful error messages are lost. Pre-existed before NP-FIX-4; NP-FIX-4 smoke just surfaced it. Fix: detect `dict` shape and join `.values()` instead of keys, or format as `"key: value"` pairs. Low-priority: only affects edge cases (delete of already-deleted TTN, batch operations), normal NP errors come back as list. |
-| DASH-SHOP-WARNINGS | ShopChart logs four `width(-1)/height(-1)` recharts warnings on every dashboard mount | Discovered as residual noise during DASH-REVENUE-EMPTY smoke (2026-05-14). The empty-state JSX structure in `ShopChart.tsx:78-141` is already correct (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. The warnings stamp `minHeight(300)` — matching ShopChart's explicit `minHeight={300}` prop at `ShopChart.tsx:87`. Likely cause: layout race between the `min-h-[300px]` flex container in `CardContent` and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs the warning, then re-measures correctly when the observer fires. Chart renders correctly (donut visible with the correct total). Cosmetic console noise only. Possible fixes if it ever bothers anyone: declare `width={357} height={300}` instead of `100%`, or wrap in a `useLayoutEffect`-gated container. Low-priority. |
+| DASH-SHOP-WARNINGS | ShopChart **and FinanceRevenueChart** log `width(-1)/height(-1)` recharts warnings on initial mount | Originally discovered during DASH-REVENUE-EMPTY smoke (2026-05-14) on ShopChart; scope extended during FIN-1 smoke (2026-05-14) when the same pattern was observed on the new FinanceRevenueChart. Both charts have **correct** empty-state JSX (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. Warnings stamp `minHeight(300)` matching the explicit `minHeight={300}` prop. Likely cause: layout race between the `min-h-[300px] flex` container and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs, then re-measures correctly when the observer fires. Charts render correctly. Cosmetic console noise only. Possible fixes: declare `width={N} height={N}` pixel values instead of `100%`, or wrap in a `useLayoutEffect`-gated container, or add the `aspect` prop. Affects two chart components today; if a third one with the same shape lands, the pattern is worth extracting into a shared `<MeasuredChartContainer>`. Low-priority. |
+| FIN-1-followup | Extend `/orders` to honor URL query params (`start_date`, `end_date`, `missing_cost`) for finance drilldown fidelity | Discovered by CC during FIN-1 plan-mode (2026-05-14). `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`; `OrdersLayout.tsx:29-49` doesn't read URL query params at all (filters are local React state). FIN-1 worked around this by pointing its drilldown link to `/shops/{shop_id}/orders` (which filters by shop via `fixedShopId` prop) — so users land on shop-filtered orders but **lose the period and missing-cost context** from the finance page they came from. Fix: extend the orders router signature to accept the three new params; refactor `OrdersLayout` to read URL params on mount and hydrate the filter state. Touches both backend and frontend. Medium-priority — affects the operator's drilldown UX, not the page's primary use case. Bundle with any future orders-page enhancement work. |
+| FIN-1-followup-2 | Finance icon button on `/shops` list page is invisible (DOM present, visually absent) | Discovered during FIN-1 smoke (2026-05-14). The link exists in `ShopsPage.tsx:545-546` with `href="/shops/{id}/finance"` and `title="Per-shop finance"`, and four such links are confirmed in DOM (one per shop). However the icon renders in a colour too close to the dark background — `zoom` over the MANAGEMENT column area returned a completely black screenshot. Affordance fails — users find the finance page only via direct URL or the entry-point fallback. Quick CSS fix: replace whatever `text-zinc-700`/similar dim shade the icon uses with `text-zinc-300` or `text-teal-400` (consistent with other action icons), or add a visible "Finance →" text label alongside the icon. Low-priority cosmetic but important for discoverability — anyone who didn't read this implementation plan won't know the per-shop finance page exists. |
+| FIN-1-followup-3 | `OrderCountCard.change_percent` returns `-100%` instead of `None` when both current and previous are 0 | Discovered during FIN-1 smoke (2026-05-14) on KoraKlenu (no SHIPPED orders in either current or previous period). Expected behaviour matches the other KPI cards: when previous-period total is 0, show `— no prior period data` placeholder, not a misleading `↓ 100.0% vs previous period` red downarrow. Other cards (Revenue / COGS / Fees / Net Profit) correctly show the placeholder in the same scenario. Likely cause: backend's `change_percent` helper for `OrderCountCard` (int → int) doesn't carry the `previous == 0 → None` guard that the `KpiCard` (list[CurrencyAmount] → list[CurrencyAmount]) helper has. Quick fix in `services/finance_service.py`. Low-priority cosmetic edge case. |
 
 ---
 
