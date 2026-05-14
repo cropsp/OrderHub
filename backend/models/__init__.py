@@ -27,6 +27,7 @@ from models.material import (
     OverheadMaterial,
     OverheadMaterialReceipt,
 )
+from models.bom import BomItem
 
 __all__ = [
     "Base",
@@ -54,4 +55,5 @@ __all__ = [
     "OverheadMaterialReceipt",
     "MaterialMovement",
     "MaterialMovementReason",
+    "BomItem",
 ]

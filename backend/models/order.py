@@ -112,6 +112,9 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     # Financial (owner only)
     production_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # MAT-3 forward-compat: populated by MAT-4's consumption hook on SHIPPED.
+    # No service-layer writes in MAT-3.
+    computed_production_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     shipping_np_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     platform_fee: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 

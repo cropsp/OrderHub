@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import BomEditor from '@/components/inventory/BomEditor'
 import {
   Table,
   TableBody,
@@ -683,6 +684,8 @@ export default function ProductDetailPage() {
                   </Table>
                 </CardContent>
               </Card>
+
+              <BomEditor productId={product.id} />
             </>
           )}
         </div>

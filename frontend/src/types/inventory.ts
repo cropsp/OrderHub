@@ -273,3 +273,36 @@ export interface OverheadMaterialUpdate {
   unit?: string;
   notes?: string | null;
 }
+
+// MAT-3: Bill of Materials. BOM lives at Product level (settled-decision #7),
+// one row per (Product, Material) pair. Decimal values serialize as strings.
+export interface BomItem {
+  id: string;
+  product_id: string;
+  material_id: string;
+  qty_per_unit: string;
+  notes: string | null;
+  material_name: string;
+  material_unit: string;
+  material_currency: string;
+  material_current_unit_cost: string;
+  material_is_active: boolean;
+  line_cost: string;
+}
+
+export interface BomItemCreate {
+  material_id: string;
+  qty_per_unit: number | string;
+  notes?: string | null;
+}
+
+export interface BomCostBreakdown {
+  currency: string;
+  amount: string;
+}
+
+export interface BomReadResponse {
+  items: BomItem[];
+  cost: BomCostBreakdown[];
+  has_inactive_material: boolean;
+}

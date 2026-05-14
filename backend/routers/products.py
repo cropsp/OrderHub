@@ -8,8 +8,10 @@ from database import get_db
 from models.shop import ShopPlatform
 from models.user import UserRole
 from routers.dependencies import get_current_user, get_shop_for_user, require_platform, require_role
+from schemas.bom import BomCostBreakdown, BomReadResponse, BomReplaceRequest
 from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
+from services import bom_service
 from services.catalog_service import CatalogService
 from services.import_service import ImportService
 
@@ -155,3 +157,57 @@ async def confirm_products_import(
     
     ImportService.clear_preview(request.import_token)
     return {"message": f"Successfully imported {imported_count} products"}
+
+
+# --- MAT-3: Bill of Materials ---
+
+
+@router.get("/products/{id}/bom", response_model=BomReadResponse)
+async def get_product_bom(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    """Fetch a product's recipe + per-currency cost preview."""
+    items, has_inactive = await bom_service.get_bom(db, product_id=id)
+    cost = await bom_service.compute_bom_cost(db, product_id=id)
+    return BomReadResponse(
+        items=[bom_service.project_bom_item(item) for item in items],
+        cost=cost,
+        has_inactive_material=has_inactive,
+    )
+
+
+@router.put("/products/{id}/bom", response_model=BomReadResponse)
+async def replace_product_bom(
+    id: uuid.UUID,
+    payload: BomReplaceRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    """Replace a product's full recipe. DELETE-all + bulk INSERT in one
+    transaction. Empty list clears the recipe."""
+    items, has_inactive = await bom_service.replace_bom(
+        db, product_id=id, items=payload.items
+    )
+    await db.commit()
+    cost = await bom_service.compute_bom_cost(db, product_id=id)
+    return BomReadResponse(
+        items=[bom_service.project_bom_item(item) for item in items],
+        cost=cost,
+        has_inactive_material=has_inactive,
+    )
+
+
+@router.get(
+    "/products/{id}/bom/cost",
+    response_model=List[BomCostBreakdown],
+)
+async def get_product_bom_cost(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    """Recompute recipe cost without fetching the full BOM. Cheap endpoint
+    for a manual "Refresh cost" affordance in the editor."""
+    return await bom_service.compute_bom_cost(db, product_id=id)
