@@ -1,0 +1,300 @@
+"""
+OrderHub CRM — Finance Service (FIN-1)
+
+Computes per-shop financial overview: KPI aggregates (revenue, COGS,
+fees, net profit, pipeline value, order count, AOV), a day-or-month
+time series, and the data-quality diagnostic (orders missing cost).
+
+Per the FIN-1 plan:
+  - Status filter for revenue/cost/fee aggregates: [COMPLETED, SHIPPED]
+  - Date expression: COALESCE(shipped_at, ordered_at) — matches the
+    DASH-REVENUE-DATE fix in dashboard.py.
+  - Currency: per-currency breakdown, no conversion.
+  - change_percent is computed over the primary currency (largest
+    current amount); None when previous is 0 or no data.
+  - Granularity: day if period <= 90d, else month.
+"""
+
+import uuid
+from datetime import date, timedelta
+
+from fastapi import HTTPException, status
+from sqlalchemy import Date, cast, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.order import Order, OrderStatus
+from models.shop import Shop
+from schemas.finance import (
+    CurrencyAmount,
+    DiagnosticInfo,
+    KpiCard,
+    OrderCountCard,
+    ShopFinanceResponse,
+    TimeSeriesPoint,
+)
+
+REVENUE_STATUSES = [OrderStatus.SHIPPED, OrderStatus.COMPLETED]
+PIPELINE_EXCLUDED_STATUSES = [
+    OrderStatus.SHIPPED,
+    OrderStatus.COMPLETED,
+    OrderStatus.CANCELLED,
+]
+
+
+def _previous_period(start: date, end: date) -> tuple[date, date]:
+    """Same-length window immediately preceding [start, end] (both inclusive)."""
+    length_days = (end - start).days + 1
+    prev_end = start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=length_days - 1)
+    return prev_start, prev_end
+
+
+def _primary_currency(amounts: list[CurrencyAmount]) -> str | None:
+    if not amounts:
+        return None
+    return max(amounts, key=lambda a: a.amount).currency
+
+
+def _change_percent(
+    current: list[CurrencyAmount], previous: list[CurrencyAmount]
+) -> float | None:
+    """Percent change over the primary (largest-current) currency. None on divide-by-zero."""
+    primary = _primary_currency(current)
+    if primary is None:
+        return None
+    cur_amount = next((a.amount for a in current if a.currency == primary), 0.0)
+    prev_amount = next((a.amount for a in previous if a.currency == primary), 0.0)
+    if prev_amount == 0:
+        return None
+    return round((cur_amount - prev_amount) / prev_amount * 100.0, 1)
+
+
+def _count_change_percent(current: int, previous: int) -> float | None:
+    if previous == 0:
+        return None
+    return round((current - previous) / previous * 100.0, 1)
+
+
+def _build_kpi(
+    current_rows: dict[str, dict],
+    previous_rows: dict[str, dict],
+    field: str,
+) -> KpiCard:
+    current = [
+        CurrencyAmount(currency=cur, amount=float(row[field] or 0))
+        for cur, row in current_rows.items()
+        if (row[field] or 0) != 0
+    ]
+    previous = [
+        CurrencyAmount(currency=cur, amount=float(row[field] or 0))
+        for cur, row in previous_rows.items()
+        if (row[field] or 0) != 0
+    ]
+    return KpiCard(
+        current=current,
+        previous=previous,
+        change_percent=_change_percent(current, previous),
+    )
+
+
+async def _run_kpi_aggregate(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """Single round-trip per-currency aggregate for revenue/cost/fees/count/AOV/missing_cost.
+
+    Returns a dict keyed by currency with raw aggregate values (Decimal/int).
+    Net profit is computed in Python (revenue - cogs - fees) per-currency.
+    """
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    stmt = (
+        select(
+            Order.currency.label("currency"),
+            func.sum(Order.total_price).label("revenue"),
+            func.sum(func.coalesce(Order.production_cost, 0)).label("cogs"),
+            func.sum(
+                func.coalesce(Order.platform_fee, 0)
+                + func.coalesce(Order.shipping_np_cost, 0)
+            ).label("fees"),
+            func.count().label("order_count"),
+            func.avg(Order.total_price).label("aov"),
+            func.count()
+            .filter(
+                (Order.production_cost.is_(None)) | (Order.production_cost == 0)
+            )
+            .label("missing_cost_count"),
+        )
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.in_(REVENUE_STATUSES))
+        .where(cast(date_expr, Date) >= start)
+        .where(cast(date_expr, Date) <= end)
+        .group_by(Order.currency)
+    )
+    result = await db.execute(stmt)
+    rows: dict[str, dict] = {}
+    for row in result.all():
+        revenue = float(row.revenue or 0)
+        cogs = float(row.cogs or 0)
+        fees = float(row.fees or 0)
+        rows[row.currency] = {
+            "revenue": revenue,
+            "cogs": cogs,
+            "fees": fees,
+            "net_profit": revenue - cogs - fees,
+            "order_count": int(row.order_count or 0),
+            "aov": float(row.aov or 0),
+            "missing_cost_count": int(row.missing_cost_count or 0),
+        }
+    return rows
+
+
+async def _run_pipeline_aggregate(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """Pipeline-value aggregate — sum of total_price over non-terminal orders."""
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    stmt = (
+        select(
+            Order.currency.label("currency"),
+            func.sum(Order.total_price).label("pipeline_value"),
+        )
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.not_in(PIPELINE_EXCLUDED_STATUSES))
+        .where(cast(date_expr, Date) >= start)
+        .where(cast(date_expr, Date) <= end)
+        .group_by(Order.currency)
+    )
+    result = await db.execute(stmt)
+    return {
+        row.currency: {"pipeline_value": float(row.pipeline_value or 0)}
+        for row in result.all()
+    }
+
+
+async def _run_time_series(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+    granularity: str,
+) -> list[TimeSeriesPoint]:
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    if granularity == "day":
+        bucket = cast(date_expr, Date)
+    else:
+        bucket = cast(func.date_trunc("month", date_expr), Date)
+
+    stmt = (
+        select(
+            bucket.label("bucket"),
+            Order.currency.label("currency"),
+            func.sum(Order.total_price).label("revenue"),
+            func.sum(
+                Order.total_price
+                - func.coalesce(Order.production_cost, 0)
+                - func.coalesce(Order.platform_fee, 0)
+                - func.coalesce(Order.shipping_np_cost, 0)
+            ).label("net_profit"),
+        )
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.in_(REVENUE_STATUSES))
+        .where(cast(date_expr, Date) >= start)
+        .where(cast(date_expr, Date) <= end)
+        .group_by(bucket, Order.currency)
+        .order_by(bucket)
+    )
+    result = await db.execute(stmt)
+    points: list[TimeSeriesPoint] = []
+    for row in result.all():
+        bucket_val = row.bucket
+        date_str = (
+            bucket_val.isoformat() if hasattr(bucket_val, "isoformat") else str(bucket_val)
+        )
+        points.append(
+            TimeSeriesPoint(
+                date=date_str,
+                currency=row.currency,
+                revenue=float(row.revenue or 0),
+                net_profit=float(row.net_profit or 0),
+            )
+        )
+    return points
+
+
+async def get_shop_finance(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start_date: date,
+    end_date: date,
+) -> ShopFinanceResponse:
+    """Compute the per-shop financial overview for a custom period.
+
+    Raises 404 if the shop doesn't exist or has been soft-deleted.
+    Raises 422 if start_date > end_date.
+    """
+    if start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be on or before end_date",
+        )
+
+    shop_result = await db.execute(
+        select(Shop).where(Shop.id == shop_id, Shop.is_active == True)  # noqa: E712
+    )
+    shop = shop_result.scalar_one_or_none()
+    if shop is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found",
+        )
+
+    granularity = "day" if (end_date - start_date).days <= 90 else "month"
+    prev_start, prev_end = _previous_period(start_date, end_date)
+
+    current_rows = await _run_kpi_aggregate(db, shop_id, start_date, end_date)
+    previous_rows = await _run_kpi_aggregate(db, shop_id, prev_start, prev_end)
+    pipeline_current = await _run_pipeline_aggregate(db, shop_id, start_date, end_date)
+    pipeline_previous = await _run_pipeline_aggregate(db, shop_id, prev_start, prev_end)
+    time_series = await _run_time_series(db, shop_id, start_date, end_date, granularity)
+
+    revenue = _build_kpi(current_rows, previous_rows, "revenue")
+    cogs = _build_kpi(current_rows, previous_rows, "cogs")
+    fees = _build_kpi(current_rows, previous_rows, "fees")
+    net_profit = _build_kpi(current_rows, previous_rows, "net_profit")
+    aov = _build_kpi(current_rows, previous_rows, "aov")
+    pipeline_value = _build_kpi(pipeline_current, pipeline_previous, "pipeline_value")
+
+    current_count = sum(r["order_count"] for r in current_rows.values())
+    previous_count = sum(r["order_count"] for r in previous_rows.values())
+    order_count = OrderCountCard(
+        current=current_count,
+        previous=previous_count,
+        change_percent=_count_change_percent(current_count, previous_count),
+    )
+
+    diagnostic = DiagnosticInfo(
+        orders_missing_cost=sum(r["missing_cost_count"] for r in current_rows.values()),
+        total_orders_in_period=current_count,
+    )
+
+    return ShopFinanceResponse(
+        shop_id=str(shop.id),
+        shop_name=shop.name,
+        period_start_iso=start_date.isoformat(),
+        period_end_iso=end_date.isoformat(),
+        granularity=granularity,
+        revenue=revenue,
+        cogs=cogs,
+        fees=fees,
+        net_profit=net_profit,
+        pipeline_value=pipeline_value,
+        order_count=order_count,
+        aov=aov,
+        time_series=time_series,
+        diagnostic=diagnostic,
+    )

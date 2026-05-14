@@ -1,13 +1,15 @@
 import { useState, type FormEvent } from 'react';
-import { 
-  Plus, 
-  Settings2, 
-  Trash2, 
+import { Link } from 'react-router-dom';
+import {
+  Plus,
+  Settings2,
+  Trash2,
   AlertCircle,
   RefreshCw,
   Store,
   Package2,
-  Truck
+  Truck,
+  LineChart,
 } from 'lucide-react';
 import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop } from '@/hooks/useShops';
 import { shippingApi } from '@/api/shipping';
@@ -539,10 +541,17 @@ export default function ShopsPage() {
                       {isOwner && (
                         <TableCell className="px-8 py-6 text-right">
                           <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Link
+                              to={`/shops/${shop.id}/finance`}
+                              title="Per-shop finance"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                            >
+                              <LineChart className="h-4 w-4" />
+                            </Link>
                             {shop.platform?.toLowerCase() === 'shopify' && (
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 title="Manual Sync"
                                 className={cn(
                                   "h-9 w-9 text-teal-500 hover:text-teal-400 hover:bg-teal-500/10 rounded-xl",
