@@ -2302,6 +2302,189 @@ as parallel siblings; no shared abstraction extracted (per spec).
 
 ---
 
+**Sprint MAT-3 — BOM Editor + recipe cost preview** (Status: `DONE` — commit `ce5b435`; pytest 128 → 132; 14 files / 1245 insertions)
+
+Goal: Third sprint of the Materials Warehouse epic. With reliable
+per-Material weighted-average unit costs from MAT-2, MAT-3 introduces
+**the recipe** — `BomItem`, one row per (Product, Material) pair —
+with full CRUD UI under the existing Product detail page. Operator
+authors recipes for finished goods, sees a per-currency computed
+unit cost preview alongside the manual `Order.production_cost` they
+enter today. **No consumption logic** (that's MAT-4); **no
+`production_cost` rewrite** (Phase B/C cutover); **no FIN-1
+integration** (MAT-5). MAT-3 also ships the forward-compat
+`Order.computed_production_cost` column — schema-only, no writes —
+so MAT-4's migration is leaner.
+
+This is the **smallest of the remaining MAT-* sprints**. Frontend-
+heavy: one new model, one migration with two schema changes (new
+table + new column on `orders`), 3 endpoints, but a meaty editor
+component (`BomEditor`) with material picker, live cost preview,
+grandfather logic for discontinued materials, and recipe-level
+warning banner.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| MAT-3-1 | `backend/models/bom.py` (new) — `BomItem(product_id, material_id, qty_per_unit Numeric(8,2), notes)` with unique constraint `(product_id, material_id)`, CHECK constraint `qty_per_unit > 0`, FK `product → CASCADE` / `material → RESTRICT` (soft-delete via `is_active` is the path; never accidentally cascade-drop BomItems on Material delete). `material` relationship joined-loaded for read efficiency. Registered in `models/__init__.py`. | backend | DONE |
+| MAT-3-2 | `backend/models/order.py` extended — new column `computed_production_cost: Numeric(10,2) | None` at line ~117 (after `platform_fee`). Forward-compat for MAT-4's consumption hook; no MAT-3 code writes to it. | backend | DONE |
+| MAT-3-3 | `backend/alembic/versions/f4d8b3a25c91_add_bom_and_order_computed_cost.py` — single migration: creates `bom_items` table + indexes + unique + CHECK; adds `orders.computed_production_cost` column. Round-trip `upgrade → downgrade → upgrade` clean. | backend / DB | DONE |
+| MAT-3-4 | `backend/schemas/bom.py` (new) — 5 new types: `BomItemCreate`, `BomReplaceRequest` (rejects duplicate `material_id` via `@model_validator(mode="after")`), `BomItemRead` (with computed `line_cost` via `@model_validator`), `BomCostBreakdown` (currency + amount), `BomReadResponse` (items + cost-per-currency + `has_inactive_material: bool`). | backend schemas | DONE |
+| MAT-3-5 | `backend/services/bom_service.py` (new) — three async helpers: `get_bom(db, product_id)` (returns items joined with materials + `has_inactive` flag), `compute_bom_cost(db, product_id)` (SUM grouped by `material.currency`), `replace_bom(db, *, product_id, items, user_id)` (transactional pre-read existing material_ids → validate input materials are active OR grandfathered → DELETE all + bulk INSERT). Caller commits. Plus `project_bom_item` helper to hydrate `BomItemRead.material_*` fields from joined relationship. | backend | DONE |
+| MAT-3-6 | `backend/routers/products.py` extended — 3 new endpoints: `GET /api/products/{id}/bom`, `PUT /api/products/{id}/bom`, `GET /api/products/{id}/bom/cost`. All `require_role(OWNER, MANAGER)` per OQ #7 pushback (see Post-sprint notes). | backend | DONE |
+| MAT-3-7 | `backend/tests/test_bom_router.py` (new) — 4 tests: replace-deletes-existing-and-inserts-new (compile-SQL), Pydantic-validator-rejects-duplicate-material, compute-cost-groups-by-currency (compile-SQL substring assertion on `JOIN materials` + `GROUP BY currency`), inactive-material-flag-in-response. pytest 128 → **132 passing**. | backend tests | DONE |
+| MAT-3-8 | Frontend types in `inventory.ts` extended — 4 new: `BomItem`, `BomItemCreate`, `BomCostBreakdown`, `BomReadResponse`. New API client `api/bom.ts` with `getBom`, `replaceBom`, `getBomCost` methods. New hook `hooks/useBom.ts` with `useBom`, `useBomCost`, `useReplaceBom` (invalidates `['bom', productId]`, `['bom-cost', productId]`, `['products']` on mutation). Toast on save. | frontend types/api/hooks | DONE |
+| MAT-3-9 | `frontend/src/components/inventory/BomEditor.tsx` (new) — Card section component mounted under variants table. Layout: header *"Recipe (BOM)"* with subtitle *"Materials per finished product unit. Used for cost preview now; consumption decrements stock on shipment (coming in MAT-4)."* (CC's forward-reference UX pattern continued from MAT-2). Action row: Refresh cost / Cancel / Save Recipe + "Unsaved recipe changes" amber indicator when dirty. Table columns: Material (native `<select>` excluding inactive materials but preserving existing inactives with "(discontinued)" suffix label + `⚠ DISCONTINUED` amber badge inline) / Qty per unit / Unit / Current cost / Line cost / Notes / Remove icon. Recipe-level amber warning banner above table when `has_inactive_material === true`. Empty state: *"No recipe defined yet. Add materials to compute a production cost preview."* Per-currency cost summary in footer (single-line for homogeneous currency, list for mixed). | frontend | DONE |
+| MAT-3-10 | `ProductDetailPage.tsx` — mount `<BomEditor productId={product.id} />` below the variants table at line ~685 (OQ #1 Scenario A.1). Two independent save lifecycles (variants Save at top of page, Recipe Save inside BomEditor Card) visually separated by Card boundary. No tabs, no new route. | frontend | DONE |
+| MAT-3-11 | `components/inventory/__tests__/BomEditor.test.tsx` (new) — 4 vitest cases: renders existing BomItems, "+ Add Material" adds empty row, Save calls `useReplaceBom`, amber Discontinued badge renders when `material_is_active=false`. | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **OQ #1 — Scenario A.1 confirmed via grep.** CC grepped `App.tsx:115`
+  and found existing `/products/:id` lazy route → `ProductDetailPage`.
+  Variants table at `ProductDetailPage.tsx:525-685`. Mount choice:
+  `<BomEditor />` as a sibling Card section below variants table —
+  matches design doc §4.2 mockup which depicts BOM in a dedicated
+  frame with its own Save action. Two saves on one page is acceptable
+  because the Card boundary visually separates the lifecycles, and
+  the "Unsaved recipe changes" indicator makes recipe state legible.
+  Rejected alternatives: tabs (overkill for one-page scroll) and
+  separate `/products/:id/bom` route (over-engineered for 10-row
+  recipes).
+- **OQ #2 — native `<select>` for v1, parked follow-up for typeahead.**
+  CC grepped `frontend/src/components/` and found no reusable
+  searchable combobox primitive. `ProductVariantSelector.tsx` is a
+  variant-specific filter, not generalisable. Building a typeahead
+  from scratch is out-of-scope for MAT-3. Native `<select>` listing
+  active materials sorted by name is acceptable for catalogs of ~50
+  materials. Will revisit when catalog grows or Sergii reports
+  friction. Filed as **MAT-3-followup-1** (see Explicitly deferred).
+- **OQ #4 — grandfather elegantly implemented.** `replace_bom` reads
+  existing `BomItem.material_id` values for the product **before**
+  the DELETE, builds a set, then validates the input list: if any
+  material in input is `is_active=False` AND not in the
+  pre-existing set → 422 *"Material '{name}' is discontinued;
+  restore it or pick an active replacement."* If discontinued
+  material was already in the recipe, the operator can keep
+  submitting it (grandfather). Frontend matches: discontinued
+  materials excluded from picker dropdown, but existing rows
+  referencing them are preserved with the amber badge.
+- **OQ #7 — DESIGNER role override (consistency win).** Original
+  task.md suggested DESIGNER could GET BOM read-only ("they should
+  see recipes to understand product structure"). CC pushed back
+  after grepping `routers/materials.py`: every Material endpoint is
+  `require_role(OWNER, MANAGER)` — DESIGNER has zero read access
+  to Materials anywhere in the codebase. Exposing BOM (which embeds
+  `material_name`, `material_currency`, `material_current_unit_cost`)
+  to DESIGNER would leak material data they can't see directly.
+  All 3 BOM endpoints restricted to OWNER + MANAGER. Cleanly
+  consistent with the rest of the materials surface.
+- **CC beyond-spec UX touches (continued pattern from MAT-2):**
+  - **Forward-reference helper text in subtitle** — *"Materials per
+    finished product unit. Used for cost preview now; consumption
+    decrements stock on shipment (coming in MAT-4)."* Explicit
+    reference to the future sprint sets correct operator expectations
+    about what BOM does *today* vs. *will do later*. Matches the
+    pattern CC established in MAT-2's Overhead receipt modal
+    ("Tagged expenses surface on the shop's finance page (MAT-5)").
+  - **"(discontinued)" inline label in picker dropdown** — even when
+    collapsed, the operator sees the material's status in the
+    `<select>` value. No need to expand the dropdown to figure out
+    which row has the warning badge.
+  - **Recipe-level banner copy verbatim from task.md spec** — *"This
+    recipe references one or more discontinued materials. Keep them
+    if you still produce this product from old stock, or remove them
+    to refresh the recipe."* Word-for-word.
+  - **Empty-state copy** — *"No recipe defined yet. Add materials to
+    compute a production cost preview."* Friendly, action-oriented
+    (mentions the *why* — cost preview — not just the *what*).
+- **Precision-by-design observation** *(no action needed; documented
+  for future reference)*. Smoke walked through `5 × 597.14 UAH/dm² =
+  2985.70 UAH` in the task.md spec, but the UI showed **2 985,71 UAH**.
+  This isn't a bug — backend stores `Material.current_unit_cost` as
+  `Numeric(12, 4)` per spec, so the stored value is `597.1429` (the
+  true weighted average is `(25×588 + 10×620)/35 = 20900/35 =
+  597.142857...`, rounded to 4 decimal places). Frontend display
+  rounds to 2 decimals (`597.14`), but the **calculation** runs at
+  full precision: `5 × 597.1429 = 2985.7145 → display 2985.71`.
+  More accurate than the spec's hand-rounded math. Sergii's actual
+  Net Profit numbers will be consistent because the same precision
+  is preserved end-to-end (cost stored at 4 decimals, line cost
+  computed and rounded once for display).
+
+**Verified by smoke test (2026-05-14):**
+- Navigate `/products` (Active shop: Lamamarka Shopify, 11 products
+  available). Click "Heavy Mushroom Keychain" → navigates to
+  `/products/62eb8607-…`. Page renders existing variants table + new
+  "Recipe (BOM)" Card section below. ✓
+- Empty BOM state visible: subtitle, action row (all disabled when
+  not dirty), empty state copy + "+ Add Material" CTA below. ✓
+- Click "+ Add Material" → empty row appears. "Unsaved recipe
+  changes" amber indicator fires next to Save Recipe button.
+  Cancel button enabled. Save Recipe enabled. ✓
+- Pick "Шкіра італійська чорна" from dropdown → row populates: Unit
+  `dm2`, Current cost `597,14 UAH` (from MAT-2 weighted average),
+  Line cost `0,00 UAH` (qty still 0). ✓
+- Enter qty=5 → Line cost recomputes: **2 985,71 UAH** (`5 ×
+  597.1429 stored precision = 2985.7145 → rounded 2985.71`; see
+  precision note above). Recipe unit cost summary in footer:
+  `2 985,71 UAH` (single currency). ✓
+- Click Save Recipe → toast `"Recipe saved"`. Indicator clears,
+  Cancel + Save disabled. Persistence verified by navigating away
+  and back. ✓
+- Click "+ Add Material" again, pick "Фанера 4mm" (stock=0, cost=0,
+  no MAT-2 receipts for this material), qty=0.5 → Line cost
+  `0,00 UAH`. Recipe unit cost still `2 985,71 UAH` (Шкіра is the
+  only contributor). Save → 2 BomItems persisted, sorted
+  alphabetically by Material name (Фанера / Шкіра). ✓
+- Navigate to `/inventory/materials`, archive Фанера 4mm via the
+  ConfirmSoftDeleteModal. Toast "Material archived". ✓
+- Navigate back to the product → Recipe (BOM) Card now renders:
+  - **Recipe-level amber banner** at top: *"⚠ This recipe references
+    one or more discontinued materials. Keep them if you still
+    produce this product from old stock, or remove them to refresh
+    the recipe."*
+  - Фанера row: dropdown label reads `"Фанера 4mm (discontinued)"`;
+    inline amber `⚠ DISCONTINUED` badge next to dropdown.
+  - Шкіра row: unchanged (still active).
+  - Recipe unit cost preserved: `2 985,71 UAH`.
+  - Save Recipe disabled (no dirty changes — grandfathered existing
+    inactive material doesn't trigger dirty state).
+  ✓
+- Material picker on "+ Add Material" — verified excludes archived
+  Фанера (and previously-archived Замок-блискавка from MAT-1).
+  Operator cannot add a new inactive material; can only keep the
+  existing grandfather entries. ✓
+- Backend gates: alembic round-trip clean, pytest 128 → 132 passing.
+  Frontend gates: tsc clean, lint clean, 4/4 new BomEditor tests
+  pass. Console clean during smoke. ✓
+
+**Side observations:**
+- **Sort order on BomItems is alphabetical by Material name.**
+  Reasonable default. If Sergii ever wants manual ordering (e.g.
+  "front panel materials first, then hardware"), we'd need a
+  `position: int` column on `BomItem` and a drag-handle in the UI.
+  Not filed as a follow-up — Sergii hasn't asked. Recipes are small
+  enough that visual scan handles ordering naturally.
+- **Empty-state placeholder count keeps climbing** — now 5 places
+  (FinanceRevenueChart, Materials list, Overhead list, Movements
+  ledger, BomEditor). Crossed the YAGNI threshold I noted in MAT-2's
+  closure ("wait for the 5th occurrence"). Worth extracting an
+  `<EmptyStatePlaceholder>` shared component in a future
+  refactoring sprint — file as **REFACTOR-EMPTY-STATE** if it ever
+  feels like real friction. Not blocking anything; passable as-is.
+
+- **Closes:** the third 3/5 of the Materials Warehouse epic. Operator
+  can now author recipes per Product, see computed unit costs
+  alongside the manual `production_cost`, and gracefully handle
+  discontinued materials in legacy recipes. **MAT-4 — Consumption
+  Automation** is next: hooks into `Order` → SHIPPED transition,
+  emits `MaterialMovement.reason='consumption'` rows with
+  `unit_cost_at_movement` snapshot, populates
+  `Order.computed_production_cost`. The largest-risk sprint of the
+  epic (touches order lifecycle). Should be a focused single-session
+  effort given how much groundwork MAT-1/2/3 already laid.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -2326,6 +2509,8 @@ in this document where applicable, to avoid duplication.
 | NP-UX-4 | `NovaPoshtaClient._post()` error-formatting bug — handles `errors` as `list` only, NP sometimes returns `dict` | Discovered during NP-FIX-4 smoke (2026-05-11). NP API can return `errors` as a `dict` keyed by UUID: e.g. `{"4080dd88-…": "Document already deleted 20451436522025", "0": "No document changed DeletionMark"}`. Our `_post()` does `', '.join(errors)` which on a dict joins **keys**, producing `"4080dd88-…, 0"` — the actual useful error messages are lost. Pre-existed before NP-FIX-4; NP-FIX-4 smoke just surfaced it. Fix: detect `dict` shape and join `.values()` instead of keys, or format as `"key: value"` pairs. Low-priority: only affects edge cases (delete of already-deleted TTN, batch operations), normal NP errors come back as list. |
 | DASH-SHOP-WARNINGS | ShopChart **and FinanceRevenueChart** log `width(-1)/height(-1)` recharts warnings on initial mount | Originally discovered during DASH-REVENUE-EMPTY smoke (2026-05-14) on ShopChart; scope extended during FIN-1 smoke (2026-05-14) when the same pattern was observed on the new FinanceRevenueChart. Both charts have **correct** empty-state JSX (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. Warnings stamp `minHeight(300)` matching the explicit `minHeight={300}` prop. Likely cause: layout race between the `min-h-[300px] flex` container and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs, then re-measures correctly when the observer fires. Charts render correctly. Cosmetic console noise only. Possible fixes: declare `width={N} height={N}` pixel values instead of `100%`, or wrap in a `useLayoutEffect`-gated container, or add the `aspect` prop. Affects two chart components today; if a third one with the same shape lands, the pattern is worth extracting into a shared `<MeasuredChartContainer>`. Low-priority. |
 | FIN-1-followup | Extend `/orders` to honor URL query params (`start_date`, `end_date`, `missing_cost`) for finance drilldown fidelity | Discovered by CC during FIN-1 plan-mode (2026-05-14). `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`; `OrdersLayout.tsx:29-49` doesn't read URL query params at all (filters are local React state). FIN-1 worked around this by pointing its drilldown link to `/shops/{shop_id}/orders` (which filters by shop via `fixedShopId` prop) — so users land on shop-filtered orders but **lose the period and missing-cost context** from the finance page they came from. Fix: extend the orders router signature to accept the three new params; refactor `OrdersLayout` to read URL params on mount and hydrate the filter state. Touches both backend and frontend. Medium-priority — affects the operator's drilldown UX, not the page's primary use case. Bundle with any future orders-page enhancement work. |
+| MAT-3-followup-1 | Material picker in `BomEditor` upgraded from native `<select>` to a searchable typeahead/combobox | Discovered during MAT-3 plan-mode (2026-05-14). No reusable typeahead component exists in `frontend/src/components/`. CC chose native `<select>` for v1 — works fine for ~50 active materials, sorted alphabetically. Becomes friction once the catalog grows (~150+ materials, especially when color/grade variants land per design decision #4). Fix: build a typeahead component (or import one from shadcn/ui — the project already uses `@/components/ui/` primitives), apply it to BOM editor + `MaterialReceiptModal`'s currency dropdown + anywhere else a long single-select shows up. Low priority until Sergii reports friction. |
+| REFACTOR-EMPTY-STATE | Extract a shared `<EmptyStatePlaceholder>` component | Pattern repeated in 5 places after MAT-3 ships: `FinanceRevenueChart` ("No revenue data"), Materials list ("No materials registered yet"), Overhead list ("No overhead materials registered yet"), Movements ledger ("No movements yet"), BomEditor ("No recipe defined yet. Add materials to compute a production cost preview"). Each implementation uses a different inline structure but the same visual register ($ icon or analogue, opacity-50, centered text). YAGNI threshold (3 occurrences) was deliberately deferred during MAT-2; now we're at 5. Fix: one shared component accepting `icon`, `text`, optional `cta` (CTA button props), apply to the 5 sites. Pure refactoring — no behaviour change. Not urgent; bundle with the next frontend-only refactoring sprint. |
 
 ---
 
