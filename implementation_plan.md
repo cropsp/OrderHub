@@ -1902,6 +1902,104 @@ execution; no plan rewrites mid-sprint.
 
 ---
 
+**Sprint FIN-1-CLEANUP — Finance icon visibility + OrderCountCard false-positive cleanup** (Status: `DONE` — commit `75351a2`; pytest 121 unchanged)
+
+Goal: Close two cosmetic loose ends from FIN-1 smoke (2026-05-14) in
+one atomic commit so the Finance Phase 1 surface is fully tidy before
+moving to the Materials BOM design phase. Two filed follow-ups:
+**FIN-1-followup-2** (Finance icon invisible on `/shops` list) and
+**FIN-1-followup-3** (`OrderCountCard.change_percent = -100%` when
+`previous = 0`). CC's plan-mode greps surfaced an important
+correction on the second one.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| FIN-1-CLEANUP-1 | `ShopsPage.tsx:547` — finance icon `<Link>` className changed `text-blue-400 hover:text-blue-300 hover:bg-blue-500/10` → `text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05]`. Matches the existing Config button palette in the same MANAGEMENT column (CC's grep table: Config = zinc-400, Sync = teal-500, Delete = zinc-600→red-400). Icon now visible in row context, hover-bright per the established secondary-action pattern. | frontend | DONE |
+| FIN-1-CLEANUP-2 | `OrderCountCard.change_percent` — confirmed by grep that `_count_change_percent` at `services/finance_service.py:72-75` already had the `if previous == 0: return None` guard from the original `b4fca1c` commit. `_change_percent` for `KpiCard` (line 67) also has the parallel guard. **No backend code changed** — the observation that prompted the followup was a false positive. | backend (no change) | RESOLVED |
+
+**Post-sprint notes:**
+- **FIN-1-followup-3 was a false positive.** CC's plan-mode grep
+  showed the `previous == 0 → None` guard was present in **both**
+  KPI helpers from the original FIN-1 commit `b4fca1c`. The
+  `-100%` rendering observed on KoraKlenu during FIN-1 smoke
+  therefore reflects **non-zero `previous_count`** (a COMPLETED
+  order in the April 17-30 window), not a divide-by-zero
+  mishandling. `(current=0, previous=1) → (0-1)/1*100 = -100%`
+  is **mathematically correct** for that data shape — *"no SHIPPED
+  orders this period after 1 last period"* legitimately is a 100%
+  decline. The smoke read jumped to the wrong conclusion without
+  inspecting `previous_count`; CC's grep restored the correct
+  reading. Lesson for future smoke reports: when an "edge case"
+  feels too symmetric to be a bug, check the underlying data
+  before filing the followup. Cheap to verify, expensive to
+  litigate twice.
+- **CC kept the original commit message despite the request to
+  trim it.** Sergii's instruction via the plan-mode interview was
+  to drop the "zero-previous edge case" clause given the backend
+  no-op, and use `fix(finance): make finance icon visible on /shops
+  list` instead. CC executed the frontend change correctly but
+  shipped the original task-spec commit message
+  (`fix(finance): cleanup — icon visibility + zero-previous edge case`).
+  Not catastrophic — the git log entry is a touch misleading
+  ("zero-previous edge case" suggests a real bug was fixed when
+  the actual cleanup was just confirming the existing guard). Noted
+  here so future readers of the log come to this closure entry for
+  the full story. If git history hygiene matters in the future,
+  Sergii can `git commit --amend -m "..."` before pushing, but the
+  commit is already pushed; rewriting now isn't worth the
+  force-push hassle.
+- **Plan mode optional → CC used it anyway.** Spec marked plan mode
+  as optional; CC entered it to grep the two Open Questions
+  upfront. Good call — without the grep on Q1 we'd have shipped a
+  pointless backend edit. This is the third sprint where plan mode
+  has paid for itself (DASH-REVENUE-EMPTY's ResizeObserver mock,
+  FIN-1's drilldown-link pivot, now FIN-1-CLEANUP's no-op
+  detection).
+- **Palette evidence-grep table** *(from CC's plan, captured for
+  future reference when adding new action icons in MANAGEMENT
+  column)*:
+  - Sync button: `text-teal-500 hover:text-teal-400 hover:bg-teal-500/10`
+  - Config button: `text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05]`
+  - Delete button: `text-zinc-600 hover:text-red-400 hover:bg-red-500/10`
+  - **Finance icon (new):** mirrors Config (secondary nav, non-destructive).
+
+**Verified by smoke test (2026-05-14):**
+- Browser MCP on `/shops` — DOM probe confirms `color:
+  oklch(0.705 0.015 286.067)` (= `text-zinc-400`) on all four
+  finance links. Element visibility (`getBoundingClientRect`)
+  returns `36×36` for each, positioned at viewport
+  `x≥1544, y∈{355,444,533,622}`. ✓
+- Hover smoke: `hover_state_color: oklch(0.967 0.001 286.375)`
+  (= `text-zinc-100`). Bright white-on-dark on hover, exactly
+  matching the Config button pattern. ✓
+- Zoom-resolution screenshot (region 1200×260 to 1500×320) shows
+  the LineChart finance icon alongside Config and Delete icons in
+  the same visual register — adequate contrast, consistent
+  spacing. ✓
+- Note on initial full-page screenshot rendering: at the captured
+  width (1568px screenshot of 1920px viewport, scale ≈0.82) the
+  36×36 icons squash to ≈29×29 pixels in the rightmost ~17% of
+  the canvas with low absolute brightness, producing the illusion
+  the column is empty. In a real user's full-width browser
+  (no screenshot downscale) the icons are visible. Confirmed via
+  the zoom-region verification above. ✓
+- Frontend `tsc --noEmit` and `lint` clean; backend pytest 121
+  unchanged. ✓
+
+**Cleanup of parked items:**
+- `FIN-1-followup-2` (Finance icon invisible) — **resolved by this
+  sprint**, removed from Explicitly deferred table below.
+- `FIN-1-followup-3` (OrderCountCard -100% edge case) — **closed as
+  not-a-bug**, removed from Explicitly deferred table below.
+
+- **Closes:** the cosmetic loose ends from FIN-1 Phase 1. Finance
+  page entry point is now discoverable from `/shops` list; the
+  spurious followup-3 is laid to rest. Phase 3 (Materials BOM design
+  doc) is the next agreed step; Phase 2 (Partners) parked at Sergii's
+  request until he's ready to describe the deal structure.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -1926,8 +2024,6 @@ in this document where applicable, to avoid duplication.
 | NP-UX-4 | `NovaPoshtaClient._post()` error-formatting bug — handles `errors` as `list` only, NP sometimes returns `dict` | Discovered during NP-FIX-4 smoke (2026-05-11). NP API can return `errors` as a `dict` keyed by UUID: e.g. `{"4080dd88-…": "Document already deleted 20451436522025", "0": "No document changed DeletionMark"}`. Our `_post()` does `', '.join(errors)` which on a dict joins **keys**, producing `"4080dd88-…, 0"` — the actual useful error messages are lost. Pre-existed before NP-FIX-4; NP-FIX-4 smoke just surfaced it. Fix: detect `dict` shape and join `.values()` instead of keys, or format as `"key: value"` pairs. Low-priority: only affects edge cases (delete of already-deleted TTN, batch operations), normal NP errors come back as list. |
 | DASH-SHOP-WARNINGS | ShopChart **and FinanceRevenueChart** log `width(-1)/height(-1)` recharts warnings on initial mount | Originally discovered during DASH-REVENUE-EMPTY smoke (2026-05-14) on ShopChart; scope extended during FIN-1 smoke (2026-05-14) when the same pattern was observed on the new FinanceRevenueChart. Both charts have **correct** empty-state JSX (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. Warnings stamp `minHeight(300)` matching the explicit `minHeight={300}` prop. Likely cause: layout race between the `min-h-[300px] flex` container and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs, then re-measures correctly when the observer fires. Charts render correctly. Cosmetic console noise only. Possible fixes: declare `width={N} height={N}` pixel values instead of `100%`, or wrap in a `useLayoutEffect`-gated container, or add the `aspect` prop. Affects two chart components today; if a third one with the same shape lands, the pattern is worth extracting into a shared `<MeasuredChartContainer>`. Low-priority. |
 | FIN-1-followup | Extend `/orders` to honor URL query params (`start_date`, `end_date`, `missing_cost`) for finance drilldown fidelity | Discovered by CC during FIN-1 plan-mode (2026-05-14). `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`; `OrdersLayout.tsx:29-49` doesn't read URL query params at all (filters are local React state). FIN-1 worked around this by pointing its drilldown link to `/shops/{shop_id}/orders` (which filters by shop via `fixedShopId` prop) — so users land on shop-filtered orders but **lose the period and missing-cost context** from the finance page they came from. Fix: extend the orders router signature to accept the three new params; refactor `OrdersLayout` to read URL params on mount and hydrate the filter state. Touches both backend and frontend. Medium-priority — affects the operator's drilldown UX, not the page's primary use case. Bundle with any future orders-page enhancement work. |
-| FIN-1-followup-2 | Finance icon button on `/shops` list page is invisible (DOM present, visually absent) | Discovered during FIN-1 smoke (2026-05-14). The link exists in `ShopsPage.tsx:545-546` with `href="/shops/{id}/finance"` and `title="Per-shop finance"`, and four such links are confirmed in DOM (one per shop). However the icon renders in a colour too close to the dark background — `zoom` over the MANAGEMENT column area returned a completely black screenshot. Affordance fails — users find the finance page only via direct URL or the entry-point fallback. Quick CSS fix: replace whatever `text-zinc-700`/similar dim shade the icon uses with `text-zinc-300` or `text-teal-400` (consistent with other action icons), or add a visible "Finance →" text label alongside the icon. Low-priority cosmetic but important for discoverability — anyone who didn't read this implementation plan won't know the per-shop finance page exists. |
-| FIN-1-followup-3 | `OrderCountCard.change_percent` returns `-100%` instead of `None` when both current and previous are 0 | Discovered during FIN-1 smoke (2026-05-14) on KoraKlenu (no SHIPPED orders in either current or previous period). Expected behaviour matches the other KPI cards: when previous-period total is 0, show `— no prior period data` placeholder, not a misleading `↓ 100.0% vs previous period` red downarrow. Other cards (Revenue / COGS / Fees / Net Profit) correctly show the placeholder in the same scenario. Likely cause: backend's `change_percent` helper for `OrderCountCard` (int → int) doesn't carry the `previous == 0 → None` guard that the `KpiCard` (list[CurrencyAmount] → list[CurrencyAmount]) helper has. Quick fix in `services/finance_service.py`. Low-priority cosmetic edge case. |
 
 ---
 
