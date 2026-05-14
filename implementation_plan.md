@@ -2485,6 +2485,161 @@ warning banner.
 
 ---
 
+**Sprint MAT-4 — Consumption Automation on SHIPPED transition** (Status: `DONE` — commit `b0dfe83`; pytest 132 → 138)
+
+Goal: Fourth and **highest-risk sprint** of the Materials Warehouse
+epic. Hooks the BOM/material consumption logic into the existing
+`Order → SHIPPED` transition. On every SHIPPED transition (whether
+from the PATCH `/orders/{id}/status` endpoint OR the TTN-create
+flow in `shipping.py`), the system iterates each OrderItem's BOM,
+decrements materials with `qty_per_unit × order_item.qty × (1 +
+waste_percent/100)`, emits `MaterialMovement(reason='consumption')`
+ledger rows snapshotting `unit_cost_at_movement = current_unit_cost`,
+and populates `Order.computed_production_cost`. Phase A of the
+production_cost migration: manual + computed coexist; FIN-1 still
+sources COGS from manual until Phase B (MAT-5).
+
+Single-transaction invariant: consumption + computed cost + status
++ audit row all commit/rollback together. Idempotency: re-SHIPPED
+is a no-op via ledger lookup. Currency mismatch: skip cost
+computation but **still fire consumption** (inventory stays honest
+even when cost can't be calculated). Permissive race policy on
+negative stock — counter goes negative, warning surfaces, ledger
+stays.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| MAT-4-1 | `backend/services/order_consumption_service.py` (new) — `consume_materials_for_order(db, order, user_id) → ConsumptionResult` dataclass. Idempotency probe → bail; iterate OrderItems → load product BOM → call `material_stock_service.apply_movement(reason='consumption', unit_cost_at_movement=…)` per material → aggregate cost; surface warnings for currency mismatch / partial BOM coverage / negative stock. Does NOT commit. | backend | DONE |
+| MAT-4-2 | `backend/services/order_service.py:97-176` — `change_order_status` signature changed `Order → tuple[Order, list[str]]`. Consumption hook fires inside the function, gated on `new_status == OrderStatus.SHIPPED`, **after `db.flush()` of the audit row but before the caller's commit**. Two call sites updated (`orders.py:204-211` PATCH status; `shipping.py:265-281` TTN flow). Lazy import of consumption service to avoid module-load coupling. | backend | DONE |
+| MAT-4-3 | `backend/routers/shipping.py:265-281, 320-322` — TTN-create merges packaging warnings (from PKG-2) + material consumption warnings into a **single `warnings` list** on the response. TTN-delete just discards the tuple (no SHIPPED transition there). Single toast loop on frontend handles both warning types uniformly. | backend | DONE |
+| MAT-4-4 | `backend/schemas/order.py:113-122` — `OrderResponse` gains `computed_production_cost: float | None = None` and `warnings: list[str] = []`. Default empty so list endpoints aren't affected; only status-mutation responses carry data. `OrderListResponse` deliberately NOT extended (list view stays slim per design — cost is an order-detail concern). | backend schemas | DONE |
+| MAT-4-5 | `backend/tests/test_consumption_service.py` (new) — 6 tests: idempotent skip, cost computation, waste-percent application, currency mismatch (consumption still fires but cost is skipped), partial BOM coverage, negative-stock warning surfaces. **pytest 132 → 138 passing**. Also updated 6 pre-existing `change_order_status` mock patches in `test_shipping_router.py` to return tuples (signature change ripple). | backend tests | DONE |
+| MAT-4-6 | Frontend types: `Order.computed_production_cost: number | null` added in `types/common.ts:99-102`; `OrderDetail.warnings?: string[]` in `types/order.ts:13-19`; `updateStatus` mutation response shape updated in `api/orders.ts:17-22`. | frontend types/api | DONE |
+| MAT-4-7 | `frontend/src/hooks/useOrders.ts:30-49` — `useUpdateOrderStatus.onSuccess` loops over `data.warnings ?? []` and routes by glyph prefix: `⚠` → error toast (amber), `ⓘ` → info toast (neutral). Reuses existing toast primitives — no new toast variant needed. | frontend | DONE |
+| MAT-4-8 | `frontend/src/components/orders/detail/DetailFinance.tsx` — adds two new rows above the existing Net Profit block: **Production cost (manual)** when `production_cost !== null`, **Computed cost (from BOM)** when `computed_production_cost !== null`. Variance badge inline next to computed row when `|diff| > 5%`, amber color when `|diff| > 10%`. Two constants (`VARIANCE_BADGE_THRESHOLD`, `VARIANCE_AMBER_THRESHOLD`) at top of file for easy tuning. | frontend | DONE |
+| MAT-4-9 | `frontend/src/components/orders/detail/__tests__/DetailFinance.test.tsx` (new) — 5 tests for the cost-display matrix (no costs, manual only, computed only, both equal, variance >10% triggers amber badge). All passing. | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **OQ #1 — exact hook point landed cleanly.** CC grepped
+  `order_service.py:97-154` and found the existing audit-row INSERT
+  at :151 + `db.flush()` at :153 + `return order` at :154. Hook
+  inserted **inside `change_order_status`** (not at router layer),
+  so both commit paths (PATCH /orders + TTN flow in shipping.py)
+  automatically pick up consumption with **zero router-side trigger
+  duplication**. This is the most important architectural call of
+  MAT-4 and it lined up exactly with the design doc's intent.
+- **OQ #2 — `warnings` field on `OrderResponse`, not a new wrapper.**
+  CC found that PKG-2's TTN-create response was an ad-hoc dict with
+  `warnings: list[str]` (not a shared schema). Rather than introduce
+  a generic wrapper, CC added two fields directly to `OrderResponse`
+  (defaults empty) and merged packaging + material warnings into
+  the existing TTN response shape. Single frontend toast loop
+  handles both. Minimum-blast-radius solution.
+- **OQ #3 — `DetailFinance.tsx` was the right target.** CC noted
+  that `DetailFinance` currently renders only subtotal / shipping /
+  net profit and **doesn't show `production_cost` today** even
+  though the field exists on the model. MAT-4 adds both the manual
+  and computed rows, so post-MAT-4 the operator sees the cost
+  matrix on the order detail for the first time.
+- **OQ #4 — defensive currency comparison.** Empty / NULL
+  `Order.currency` is treated as a cost-skip trigger with explicit
+  warning *"⚠ Order has no currency set; cost calculation skipped."*
+  Consumption (stock decrements) still fires — separate concerns,
+  inventory stays honest.
+- **CC beyond-spec UX touches (continued from prior MAT-* sprints):**
+  - **Warning toast routing by glyph** — `⚠` prefix → error toast
+    style (amber), `ⓘ` prefix → info toast (neutral). Backend
+    consistently prefixes warnings with the right glyph; frontend
+    reads the first character to route. Pragmatic workaround for
+    not having a dedicated "warning" toast variant in the design
+    system.
+  - **CONSUMPTION badge in teal palette** on the Movements ledger —
+    distinct from RECEIPT (amber), WASTE (red), ADJUSTMENT (neutral).
+    Four distinct reason colors make the ledger scannable at a
+    glance. CC's choice; not in spec.
+  - **TTN-delete returns tuple but discards warnings** — because no
+    SHIPPED transition fires there, the `change_order_status` signature
+    change is honored without surfacing meaningless empty warnings.
+    Minor but correct hygiene.
+  - **Lazy import of consumption service** inside `change_order_status`
+    body — avoids module-load coupling between `order_service` and
+    the consumption logic. Trivial perf cost (per SHIPPED call); cleaner
+    dependency graph.
+
+**Verified by smoke test (2026-05-14):**
+- Pre-state: order #7148183421084 (Lamamarka USD, Heavy Mushroom
+  Keychain, BOM-equipped from MAT-3 with 5 dm² Шкіра + 0.5 m²
+  Фанера). Status was SHIPPED from a previous (pre-MAT-4) flow with
+  empty consumption ledger for the order. Materials pre-state:
+  Шкіра 33 dm², Фанера 0 m². ✓
+- Reverted status SHIPPED → IN PRODUCTION via the status dropdown.
+  Sprint 6's relaxed transition policy permitted the backward move
+  without rejection. ✓
+- Re-transitioned IN PRODUCTION → SHIPPED. **Two warning toasts
+  surfaced**:
+  1. *"⚠ Cannot compute production cost: 2 of 1 line-item materials
+     are priced in a different currency than the order (USD).
+     Multi-currency cost conversion is not supported in v1."*
+  2. *"⚠ Stock for «Фанера 4mm» went negative. Time to restock."*
+  Both as amber error-style toasts per the `⚠` glyph routing. ✓
+- Material consumption verified on detail pages:
+  - **Шкіра italian black**: CURRENT STOCK `33.00 → 28.00 dm²`
+    (= 33 − 5×1×(1+0)). Movements ledger has a new top row:
+    `consumption / -5.00 dm² / — / —` (teal badge). AVG UNIT COST
+    unchanged at 597.14 UAH/dm² (consumption snapshots cost but
+    doesn't modify the weighted-average). ✓
+  - **Фанера 4mm**: CURRENT STOCK `0 → -0.50 m²` (negative; permissive
+    race policy held). Material remains Archived from MAT-3 smoke;
+    consumption fired anyway because the BOM grandfathers existing
+    inactive references. Movements ledger: `consumption / -0.50 m²`
+    (teal badge, red delta). ✓
+- **Idempotency confirmed**: each material has exactly **one
+  consumption row** in the ledger despite multiple status-flip
+  attempts during smoke. The guard at `consume_materials_for_order`
+  entry (SELECT 1 FROM material_movements WHERE order_id=X AND
+  reason='consumption' LIMIT 1) prevents double-write. Also
+  confirmed at unit-test level by `test_consume_skips_when_idempotent`
+  in the pytest suite. ✓
+- **Currency mismatch behaviour confirmed:** consumption fires for
+  BOTH materials (Шкіра + Фанера), but `Order.computed_production_cost`
+  stays NULL (skip-cost-on-mismatch policy). The "skip cost, keep
+  consumption" design holds. ✓
+- Backend gates: pytest 132 → 138 passing (+6 new + 6 mocked
+  patches updated). Frontend: tsc clean, lint clean for new files,
+  5/5 new DetailFinance test cases pass. Console clean during
+  smoke. ✓
+
+**Side observations (parked as MAT-4 follow-ups):**
+- **MAT-4-followup-1** — Currency-mismatch warning grammar awkward.
+  Toast reads *"2 of 1 line-item materials are priced in a different
+  currency…"* which conflates "materials" and "line items" in an
+  unparseable way. CC's f-string produces *"N materials priced in
+  different currency"* + *"L line-items"* but the phrasing concat
+  reads confusingly. Filed in Explicitly deferred — one-line copy
+  fix.
+- **MAT-4-followup-2** — Movements ledger `Linked` column empty for
+  consumption rows. Receipts show "Receipt {hash}" (linked to the
+  source MaterialReceipt); consumption rows have `order_id` populated
+  in the DB but the frontend doesn't render an "Order #{code}" link.
+  Operator can't drill down from a consumption row to see *which*
+  order consumed the material. Filed in Explicitly deferred — small
+  frontend enhancement.
+
+- **Closes:** the fourth 4/5 of the Materials Warehouse epic and
+  the highest-risk hook of the entire Phase 3 surface. Inventory now
+  decrements automatically on SHIPPED; operator sees computed costs
+  on order detail when math is sound; cost skipped (not faked) when
+  currency mismatch makes it impossible. **MAT-5 — P&L Integration**
+  is next and **last**: surfaces overhead expenses on the per-shop
+  finance page (FIN-1), introduces the global unallocated-overhead
+  card on `/dashboard`, executes the Phase B cutover so FIN-1's COGS
+  card prefers `computed_production_cost` over manual `production_cost`
+  when both exist. Smaller scope than MAT-4 — no order-lifecycle
+  hooks, just aggregate-query extensions and one frontend card
+  addition.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -2510,6 +2665,8 @@ in this document where applicable, to avoid duplication.
 | DASH-SHOP-WARNINGS | ShopChart **and FinanceRevenueChart** log `width(-1)/height(-1)` recharts warnings on initial mount | Originally discovered during DASH-REVENUE-EMPTY smoke (2026-05-14) on ShopChart; scope extended during FIN-1 smoke (2026-05-14) when the same pattern was observed on the new FinanceRevenueChart. Both charts have **correct** empty-state JSX (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. Warnings stamp `minHeight(300)` matching the explicit `minHeight={300}` prop. Likely cause: layout race between the `min-h-[300px] flex` container and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs, then re-measures correctly when the observer fires. Charts render correctly. Cosmetic console noise only. Possible fixes: declare `width={N} height={N}` pixel values instead of `100%`, or wrap in a `useLayoutEffect`-gated container, or add the `aspect` prop. Affects two chart components today; if a third one with the same shape lands, the pattern is worth extracting into a shared `<MeasuredChartContainer>`. Low-priority. |
 | FIN-1-followup | Extend `/orders` to honor URL query params (`start_date`, `end_date`, `missing_cost`) for finance drilldown fidelity | Discovered by CC during FIN-1 plan-mode (2026-05-14). `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`; `OrdersLayout.tsx:29-49` doesn't read URL query params at all (filters are local React state). FIN-1 worked around this by pointing its drilldown link to `/shops/{shop_id}/orders` (which filters by shop via `fixedShopId` prop) — so users land on shop-filtered orders but **lose the period and missing-cost context** from the finance page they came from. Fix: extend the orders router signature to accept the three new params; refactor `OrdersLayout` to read URL params on mount and hydrate the filter state. Touches both backend and frontend. Medium-priority — affects the operator's drilldown UX, not the page's primary use case. Bundle with any future orders-page enhancement work. |
 | MAT-3-followup-1 | Material picker in `BomEditor` upgraded from native `<select>` to a searchable typeahead/combobox | Discovered during MAT-3 plan-mode (2026-05-14). No reusable typeahead component exists in `frontend/src/components/`. CC chose native `<select>` for v1 — works fine for ~50 active materials, sorted alphabetically. Becomes friction once the catalog grows (~150+ materials, especially when color/grade variants land per design decision #4). Fix: build a typeahead component (or import one from shadcn/ui — the project already uses `@/components/ui/` primitives), apply it to BOM editor + `MaterialReceiptModal`'s currency dropdown + anywhere else a long single-select shows up. Low priority until Sergii reports friction. |
+| MAT-4-followup-1 | Currency-mismatch warning toast grammar | Discovered during MAT-4 smoke (2026-05-14). Toast text reads *"2 of 1 line-item materials are priced in a different currency than the order (USD)…"* which mashes together "N materials" and "L line items" into an unparseable phrase. CC's f-string in `order_consumption_service.py` produces this from `{len(currency_mismatch_names)} materials` × `{total_items} line items`. Quick fix: rewrite the toast as *"2 materials in this order are priced in UAH but order currency is USD. Multi-currency cost conversion is not supported in v1."* Cosmetic; surface in any MAT-* polish sprint. |
+| MAT-4-followup-2 | Order link in Movements ledger consumption rows | Discovered during MAT-4 smoke. Frontend `Movements ledger` on `MaterialDetailPage` renders the `Linked` column with `"Receipt {hash}"` for receipt rows, but consumption rows show "—" despite the underlying `MaterialMovement.order_id` being populated. Operator can't drill from a consumption row to "which order consumed this material". Fix: render `"Order {short-hash or code}"` with a `<Link to={/orders/{order_id}}>` when `reason === 'consumption' && order_id != null`. Small frontend enhancement; low-priority UX gap. |
 | REFACTOR-EMPTY-STATE | Extract a shared `<EmptyStatePlaceholder>` component | Pattern repeated in 5 places after MAT-3 ships: `FinanceRevenueChart` ("No revenue data"), Materials list ("No materials registered yet"), Overhead list ("No overhead materials registered yet"), Movements ledger ("No movements yet"), BomEditor ("No recipe defined yet. Add materials to compute a production cost preview"). Each implementation uses a different inline structure but the same visual register ($ icon or analogue, opacity-50, centered text). YAGNI threshold (3 occurrences) was deliberately deferred during MAT-2; now we're at 5. Fix: one shared component accepting `icon`, `text`, optional `cta` (CTA button props), apply to the 5 sites. Pure refactoring — no behaviour change. Not urgent; bundle with the next frontend-only refactoring sprint. |
 
 ---
