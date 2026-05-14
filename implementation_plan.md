@@ -2640,6 +2640,191 @@ stays.
 
 ---
 
+**Sprint MAT-5 — P&L Integration + Phase B COGS cutover** (Status: `DONE` — commit `60ecad2`; pytest 138 → 141)
+
+Goal: Fifth and **final sprint of the Materials Warehouse epic**.
+With MAT-1..4 plumbing all data through (catalogs, receipts, ledger,
+BOMs, SHIPPED-time consumption), MAT-5 makes the resulting numbers
+**visible to the operator inside their daily P&L view**:
+
+1. Per-shop **Allocated Overhead** card on `/shops/{id}/finance` —
+   sums `OverheadMaterialReceipt.total_cost WHERE shop_id = :shop_id`
+   for the selected period.
+2. Global **Workshop Overhead (Unallocated)** card on `/dashboard` —
+   sums receipts with `shop_id IS NULL`, distinct from PKG-2's amber
+   low-stock card via sky-blue accent (informational, not warning).
+3. **Phase B COGS cutover** — FIN-1's COGS aggregation switches from
+   `SUM(production_cost)` to row-wise `SUM(COALESCE(computed_production_cost, production_cost, 0))`.
+   Where both exist, computed wins; where only manual exists, manual
+   is the fallback.
+4. **Net Profit redefinition** — fourth subtractive term added:
+   `Net Profit = Revenue − COGS − Fees − Allocated Overhead Expenses`.
+5. **Diagnostic refresh** — old "missing cost" badge semantics now
+   means `COALESCE(computed, manual, 0) = 0` (orders without EITHER).
+   New softer info-line below the warning: `ⓘ N of M orders use
+   BOM-computed cost` — conditional render when
+   `orders_with_computed_cost > 0`.
+
+**No schema changes, no migrations.** All required columns existed
+(OverheadMaterialReceipt.shop_id from MAT-2, Order.computed_production_cost
+from MAT-3 migration). Pure query + frontend work — the smallest of
+MAT-2..5 in code volume.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| MAT-5-1 | `backend/services/finance_service.py` — new `_run_overhead_aggregate` helper for per-shop, per-period, per-currency overhead sum. Reuses existing `_build_kpi(current_rows, previous_rows, field)` and `_previous_period(start, end)` to fit the existing KpiCard shape. | backend | DONE |
+| MAT-5-2 | `backend/services/finance_service.py:116` — Phase B COGS cutover. `func.sum(func.coalesce(Order.computed_production_cost, Order.production_cost, 0))`. Row-wise COALESCE → outer SUM, per design §6.2 (each order contributes computed-if-present-else-manual-else-0). | backend | DONE |
+| MAT-5-3 | `backend/services/finance_service.py` Net Profit math — fourth subtractive term added per currency: `revenue - cogs - fees - allocated_overhead`. | backend | DONE |
+| MAT-5-4 | Diagnostic block refresh — `missing_cost_count` now uses `case((coalesce(computed, manual, 0) == 0, 1), else_=0)`; new `orders_with_computed_cost` aggregate via `case((computed_production_cost.is_not(None), 1), else_=0)`. Both per-period. | backend | DONE |
+| MAT-5-5 | `backend/routers/dashboard.py:get_dashboard_stats` — new aggregate for `OverheadMaterialReceipt.total_cost WHERE shop_id IS NULL`, grouped by currency. No date window (consistent with low-stock-packaging count). Owner-gated. | backend | DONE |
+| MAT-5-6 | Schema extensions: `ShopFinanceResponse.allocated_overhead_expenses: KpiCard`, `DiagnosticInfo.orders_with_computed_cost: int`, `DashboardResponse.unallocated_overhead: list[CurrencyAmount]` (CurrencyAmount imported from `schemas.finance`, no duplication). | backend schemas | DONE |
+| MAT-5-7 | `backend/tests/test_finance_router.py` + `test_dashboard_router.py` — 3 new compile-SQL tests: COGS COALESCE substring assertion, overhead-aggregate `shop_id =` filter, dashboard unallocated-aggregate `shop_id IS NULL` filter. **pytest 138 → 141 passing**. | backend tests | DONE |
+| MAT-5-8 | Frontend types extended (`types/finance.ts`, `types/dashboard.ts`) — `allocated_overhead_expenses` KpiCard, `orders_with_computed_cost: number`, `unallocated_overhead: CurrencyAmount[]`. | frontend types | DONE |
+| MAT-5-9 | `ShopFinancePage.tsx` — 8th KPI card "Allocated Overhead" at tail of row 2 (fills existing empty slot in `lg:grid-cols-4` template, no grid template change, reuses existing `<FinanceKpiCard>`). | frontend | DONE |
+| MAT-5-10 | `DiagnosticBadge.tsx` — refactored to render the existing amber warning row + new ⓘ info-style "N of M orders use BOM-computed cost" line independently, both conditional on their respective counts. | frontend | DONE |
+| MAT-5-11 | `DashboardPage.tsx` — new sky-accent "Workshop overhead (unallocated)" card stacked below low-stock packaging card. Different colour register (information vs alert). Auto-hides when total across currencies is 0. Mirrors PKG-2's low-stock card pattern. | frontend | DONE |
+| MAT-5-12 | `DetailFinance.tsx` — small italic caption *"ⓘ FIN-1 uses computed cost when available (BOM-driven)."* under the computed-cost row. Pure documentation; conditional render only when `computed_production_cost !== null`. | frontend | DONE |
+| MAT-5-13 | Frontend tests: 5 new vitest cases across `ShopFinancePage.test.tsx`, `DashboardPage.test.tsx`. 9 frontend tests passing across the touched files. | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **OQ #1 — 8th card slot found via grep.** CC discovered the FIN-1
+  KPI grid is already `lg:grid-cols-4` with 7 cards (4 + 3 + empty),
+  so "Allocated Overhead" fits as the 8th card at the tail of row 2
+  with **zero grid template changes**. Reused `<FinanceKpiCard>`
+  primitive — no new component.
+- **OQ #2 — sky-blue accent differentiates overhead from low-stock.**
+  CC's call to render the new dashboard card with sky-blue/zinc
+  register instead of amber prevents the two cards from blurring
+  together. Amber = warning (low stock), sky = informational
+  (overhead spend). Clear urgency hierarchy.
+- **OQ #3 — per-period comparison via existing helpers.** CC reused
+  `_build_kpi(current_rows, previous_rows, field)` (finance_service.py
+  :78-97) + `_previous_period(start, end)` (:44-49) verbatim. The
+  new overhead KpiCard slots into the existing pattern without
+  custom code. Dashboard's `unallocated_overhead` is flat (no
+  period comparison), matching `revenue_by_currency` shape.
+- **OQ #5 — DetailFinance caption fits without crowding.** CC
+  measured the existing layout (6-8 rows, `gap-3`, `text-[11px]`
+  labels) and confirmed room for one more line. Pure documentation
+  row, no behavior change.
+- **COGS COALESCE semantics correctly described as row-wise.** CC's
+  plan explicitly noted *"the outer `func.sum` aggregates AFTER the
+  row-wise COALESCE"* — preventing the easy mistake of writing
+  `coalesce(sum(computed), sum(manual))` which would aggregate first
+  and then pick non-null (wrong semantics; per design §6.2 each row
+  should independently choose its preferred source).
+- **Diagnostic semantic change is breaking but intended.** Before
+  MAT-5, "missing cost" counted orders without manual `production_cost`.
+  After MAT-5 Phase B: counts orders without EITHER computed OR
+  manual. Orders that had computed-only no longer trigger the
+  warning. This is the entire point of Phase B; future readers
+  should not interpret the dropped number as a bug. Filed here for
+  clarity.
+
+**Verified by smoke test (2026-05-14):**
+- Pre-flight: added a second `OverheadMaterialReceipt` to Клей PVA —
+  300 UAH unallocated (alongside the existing 450 UAH KoraKlenu-tagged
+  receipt from MAT-2 smoke). ✓
+- `/shops/<KoraKlenu>/finance` → **Allocated Overhead card = 450.00 UAH**
+  in row 2's 8th slot. ✓
+- **Net Profit on KoraKlenu = -450.00 UAH** (= 0 revenue - 0 cogs - 0
+  fees - 450 overhead). Confirms the 4th subtractive term wired
+  through correctly. ✓
+- `/shops/<Lamamarka>/finance` → Allocated Overhead shows "—" (no
+  Lamamarka-tagged overhead receipts exist). **Per-shop filter
+  works**; KoraKlenu's 450 UAH doesn't leak. ✓
+- `/dashboard` → new **"Workshop overhead (unallocated)"** card
+  renders with sky-blue accent: *"300.00 UAH — workshop-wide spend
+  not tied to any shop"* + "OPEN OVERHEAD →" link. Positioned
+  stacked below the existing amber low-stock packaging card. ✓
+- Diagnostic on Lamamarka /finance shows "1 of 1 orders without
+  cost" — the remaining SHIPPED Lamamarka order has both manual
+  and computed `production_cost` NULL, so per Phase B's redefined
+  `COALESCE(computed, manual, 0) = 0` check it counts as missing.
+  ✓ (Info-line "ⓘ orders with computed cost" deliberately hidden
+  here — `orders_with_computed_cost = 0` for this period; conditional
+  render works.)
+- Console clean — no errors on any visited page. ✓
+- Backend gates: pytest 138 → 141 passing. Frontend gates: tsc clean,
+  lint clean for new files, 9/9 frontend tests across touched files
+  passing. ✓
+
+**Side observation (not a MAT-5 issue, documented for traceability):**
+- During MAT-4 smoke, Heavy Mushroom Keychain order ended up stuck
+  in `IN_PRODUCTION` state after idempotency-test browser-MCP
+  struggles (status flip didn't complete on the final attempt).
+  Its consumption rows persist in the ledger (per design: "no
+  automatic reversal on un-SHIPPED"). Order is currently excluded
+  from Lamamarka revenue/COGS aggregations because filters require
+  `status IN (SHIPPED, COMPLETED)`. This is an artifact of MAT-4
+  smoke, NOT a MAT-5 bug. If Sergii wants to restore the order to
+  SHIPPED at his convenience, the existing ledger rows are
+  grandfathered and idempotency guard prevents double-consumption.
+
+- **Closes:** the fifth and **final 5/5 of the Materials Warehouse
+  epic**. P&L surfaces are integrated; operator sees overhead
+  expenses per shop and at the workshop level; COGS prefers
+  BOM-computed values over manual when both exist. Phase B is live.
+
+---
+
+## Phase 3 (Materials Warehouse) — EPIC CLOSED 🎉
+
+**Five sprints, ~30 work sessions, ~3 weeks calendar time.** Delivered
+end-to-end:
+
+| Sprint | Commit | What landed |
+|---|---|---|
+| MAT-1 | `abf9f47` | Material + OverheadMaterial catalogs (CRUD UI, soft-delete, Inventory sidebar group) |
+| MAT-2 | `bc80756` | Receipts, weighted-average cost, MaterialMovement ledger, low-stock badges, adjustment + overhead-receipt UI |
+| MAT-3 | `ce5b435` | BomItem entity, BOM editor on Product detail, computed unit-cost preview, soft-delete grandfather |
+| MAT-4 | `b0dfe83` | Consumption automation on SHIPPED transition, idempotency guard, currency mismatch policy, variance badge on DetailFinance |
+| MAT-5 | `60ecad2` | Allocated Overhead card on /shops/finance, Workshop Overhead card on /dashboard, Phase B COGS cutover, diagnostic refresh |
+
+**Operator capabilities post-Phase 3:**
+- Catalog Direct materials with per-color/grade unit costs and
+  Overhead consumables tagged to shops.
+- Register purchases with shipping cost amortisation, get
+  weighted-average current_unit_cost auto-recomputed.
+- Author BOMs (recipes) per Product with live cost preview vs.
+  manual production_cost variance.
+- Stock automatically decrements on Order → SHIPPED with snapshot
+  cost-of-consumption per material per order.
+- See computed production cost on order detail with variance vs.
+  manual.
+- See overhead expenses per shop (allocated) and globally
+  (unallocated) on the finance dashboards.
+- COGS in FIN-1 prefers computed costs over manual when both exist
+  (Phase B).
+- Currency mismatch (Lamamarka USD orders × UAH materials) is
+  handled gracefully: stock still decrements, cost skipped with
+  warning. Multi-currency conversion remains an open architectural
+  problem (Known Limitation #1).
+
+**What's NOT in Phase 3 (per design doc §9 / §10 explicit non-goals):**
+- Phase 2 Partners — parked indefinitely at Sergii's request until
+  he's ready to describe partner deal structures.
+- Phase C cutover (deprecate `Order.production_cost` field rename) —
+  future MAT-6 when BOM coverage approaches 90%.
+- FX conversion between Material and Order currencies — separate
+  epic, blocks Lamamarka/Etsy from getting accurate computed COGS.
+- BOM versioning, per-Variant overrides, OCR receipt import —
+  filed as future features in the design doc.
+
+**Filed follow-ups carried into the parked-items pool** (none block
+Phase 3 closure):
+- MAT-3-followup-1 — typeahead material picker upgrade
+- MAT-4-followup-1 — currency-mismatch warning grammar
+- MAT-4-followup-2 — order link in consumption ledger rows
+- REFACTOR-EMPTY-STATE — extract shared `<EmptyStatePlaceholder>`
+  (now 5 occurrences)
+
+**Next agreed step (when Sergii's ready):** Phase 2 Partners
+discovery conversation, blocked on Sergii describing the deal
+structures he juggles today.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
