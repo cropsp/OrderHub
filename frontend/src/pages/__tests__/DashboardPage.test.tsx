@@ -77,8 +77,8 @@ describe('DashboardPage smoke test', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Dashboard Overview')).toBeInTheDocument();
-    expect(screen.getByText('Attention List')).toBeInTheDocument();
-    expect(screen.getByText('Recent Activity')).toBeInTheDocument();
+    expect(screen.getByText('Executive Overview')).toBeInTheDocument();
+    expect(screen.getByText('Priority triage')).toBeInTheDocument();
+    expect(screen.getByText('Telemetry feed')).toBeInTheDocument();
   });
 });
