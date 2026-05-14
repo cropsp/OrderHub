@@ -2000,6 +2000,127 @@ correction on the second one.
 
 ---
 
+**Sprint MAT-1 — Materials & Overhead catalogs foundation** (Status: `DONE` — commit `abf9f47`; pytest 121 → 124)
+
+Goal: First sprint of the Materials Warehouse epic (Phase 3 of Finance,
+designed in `docs/design/materials-warehouse.md` v1.1 commit `c28b419`).
+Establish the two new catalog entities — `Material` for direct,
+`OverheadMaterial` for indirect — with full CRUD UI, soft-delete via
+`is_active=False` pattern, and an "Inventory" sidebar group. **No stock
+tracking, no receipts, no BOM, no consumption** — that's MAT-2 onwards.
+This sprint gives Sergii a place to register his ~50 starter materials
+so MAT-2 (receipts + stock + weighted-average) has something to write
+against.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| MAT-1-1 | `backend/models/material.py` (new) — two SQLAlchemy models: `Material` (with `name`, `unit`, `currency`, plus forward-compatibility columns `current_unit_cost`/`stock_quantity`/`low_stock_threshold`/`waste_percent` defaulting to 0 — schema present, NOT exposed in UI), `OverheadMaterial` (just `name`, `unit`, `notes`). Both with `is_active` (default True) for soft-delete. Both registered in `models/__init__.py`. | backend | DONE |
+| MAT-1-2 | `backend/alembic/versions/<new>_add_material_and_overhead_catalogs.py` — single migration creating both tables + indexes. Round-trip `upgrade → downgrade → upgrade` clean on dev DB. | backend / DB | DONE |
+| MAT-1-3 | `backend/schemas/material.py` (new) — Pydantic Create/Update/Read schemas for both entities. `MaterialUpdate` deliberately omits `currency` field — Pydantic silently ignores it per existing codebase convention (`PackagingBoxUpdate`, `ShopUpdate`), preventing inadvertent edits without one-off custom validator. | backend schemas | DONE |
+| MAT-1-4 | `backend/routers/materials.py` + `backend/routers/overhead_materials.py` (new) — full CRUD: GET list with `search`/`include_inactive` params, GET detail, POST create, PATCH update, DELETE (soft-delete returns 204). Role-gated `require_role(OWNER, MANAGER)`. Registered in `main.py`. | backend | DONE |
+| MAT-1-5 | `backend/tests/test_materials_router.py` + `test_overhead_materials_router.py` (new) — compile-SQL pattern mirroring `test_finance_router.py`: assert INSERT contains `currency` value, assert default SELECT filters `is_active = TRUE`. 3 new tests pass; pytest 121 → 124. | backend tests | DONE |
+| MAT-1-6 | Frontend types in `types/inventory.ts` (extended existing file), API clients in `api/materials.ts` + `api/overheadMaterials.ts` (new), React Query hooks in `hooks/useMaterials.ts` + `hooks/useOverheadMaterials.ts` (new). | frontend types/api/hooks | DONE |
+| MAT-1-7 | New pages `pages/MaterialsPage.tsx` + `pages/OverheadMaterialsPage.tsx` — list + search + "Show archived" toggle + create/edit/archive actions. Both wrapped in `<RequireRole [OWNER, MANAGER]>` via `App.tsx` lazy routes at `/inventory/materials` and `/inventory/overhead-materials`. | frontend pages/routing | DONE |
+| MAT-1-8 | Three new form modal components under `components/inventory/`: `MaterialFormModal.tsx` (Create + Edit modes; **Currency dropdown is disabled in Edit mode with explicit "(LOCKED)" label** — beyond-spec UX polish), `OverheadMaterialFormModal.tsx`, and `ConfirmSoftDeleteModal.tsx` (single reusable confirm dialog with archive-semantics copy that matches the task.md spec word-for-word). | frontend components | DONE |
+| MAT-1-9 | `components/layout/Sidebar.tsx` — restructured: existing "Packaging" link moved into a new "INVENTORY" group label with three sub-links (Packaging / Materials / Overhead). Flat indented pattern (codebase has no collapsible-group primitive); no new sidebar widget primitives introduced. | frontend | DONE |
+| MAT-1-10 | `pages/__tests__/MaterialsPage.test.tsx` + `OverheadMaterialsPage.test.tsx` (new) — 4 new vitest cases passing (list render, "Show archived" toggle propagates filter, "+ New" button opens modal). | frontend tests | DONE |
+
+**Post-sprint notes:**
+- **Plan-mode pivot — silent-ignore on `MaterialUpdate.currency`.** Task.md
+  spec was internally inconsistent (suggested both "return 422" and "silent
+  ignore per Pydantic default"). CC's plan-mode interview surfaced this
+  early and asked which to ship. Sergii chose silent-ignore: matches
+  existing `PackagingBoxUpdate` / `ShopUpdate` convention exactly, no
+  one-off validator pattern introduced. UI never allows currency edit
+  (dropdown locked in Edit mode — see UX polish below), so 422 was only
+  defensive against direct-API callers that don't exist in our deployment.
+- **Plan-mode pivot — single reusable `ConfirmSoftDeleteModal` component.**
+  Task.md originally scoped per-entity confirm dialogs. CC's plan
+  proposed a single shared component for both Material and OverheadMaterial
+  archive flows — entity-agnostic, accepts entity-type/name strings as
+  props. Cleaner DRY; Sergii confirmed.
+- **Beyond-spec UX polish — Currency "(LOCKED)" label.** Task.md required
+  the currency dropdown to be `disabled` in Edit mode. CC went further and
+  changed the field label from "CURRENCY" to "CURRENCY (LOCKED)" in Edit
+  mode. Eliminates user confusion about why the field is greyed out. Two
+  characters of CSS class change for a meaningfully better UX. Quality
+  signal from CC.
+- **Stock columns present in schema, NOT exposed in UI.** Per task.md
+  behaviour rule #5, `Material.stock_quantity`, `current_unit_cost`,
+  `low_stock_threshold`, `waste_percent` exist on the model from MAT-1 (so
+  MAT-2 migration is a no-op on Material itself) but the Create/Edit
+  modals deliberately don't show them. Operator sees a clean "Name / Unit
+  / Currency / Supplier / Notes" form, learns the catalog mental model,
+  then in MAT-2 the receipt UI introduces stock concepts. Avoids
+  "what's stock 0 supposed to mean before any receipt?" confusion.
+- **Active/Archived badge palette established.** Green `Active` /
+  amber `Archived` — consistent with PKG-2's LOW badge and FIN-1's
+  diagnostic badge. Two distinct visual registers; archived items
+  visible when toggle is on but never blend in with active ones.
+- **`include_inactive` query param shipped (not YAGNI).** Sergii doesn't
+  use it day-to-day but it's the prerequisite for any future "restore
+  archived material" UX. Cheap (one boolean, one if-clause); no restore
+  button in v1 — operator can flip via SQL if ever needed.
+
+**Verified by smoke test (2026-05-14):**
+- Browser MCP navigation `/inventory/materials` → page loads with header
+  *"Materials"* + subtitle *"Direct materials catalog. Bills of Materials
+  and per-Order COGS land in later sprints."* Empty state visible with
+  "Register your first material" CTA. ✓
+- Sidebar shows new "INVENTORY" group with three sub-links (Packaging
+  / Materials / Overhead) — Packaging route unchanged at `/packaging`
+  for backward compatibility. ✓
+- Create 3 materials via UI: "Шкіра італійська чорна" (dm² / UAH),
+  "Фанера 4mm" (m² / UAH — confirmed Unit dropdown switches dm² → m²
+  via form_input), "Замок-блискавка 18см" (pcs / UAH). Toast
+  *"Material created"* after each. List shows all three. ✓
+- Edit "Шкіра італійська чорна" — modal opens as "Edit Material" (vs
+  "Register New Material" in Create mode). DOM probe confirms
+  `disabled: true` on currency `<select>` + `<button>` and the label
+  reads "CURRENCY (LOCKED)". Set supplier to "Conceria Walpier", save.
+  Toast *"Material updated"*. Supplier column reflects. ✓
+- Archive "Замок-блискавка 18см" — `ConfirmSoftDeleteModal` shows the
+  exact spec copy: *"Material «Замок-блискавка 18см» will be marked
+  archived. Existing recipes that reference it stay intact but will
+  show a warning badge."* Toast *"Material archived"*. Default list now
+  shows 2 items. ✓
+- Toggle "Show archived" — Замок-блискавка reappears with amber
+  `Archived` badge (vs green `Active` on the other two). ✓
+- Navigate to `/inventory/overhead-materials` — different subtitle
+  *"Indirect consumables — threads, glue, sandpaper. Tracked as flat
+  workshop expenses."* Create modal has no Currency / no Supplier
+  fields, free-text Unit input with placeholder hints
+  *"e.g. spool, liter, pack, kg"*. ✓
+- Create "Нитка бавовняна чорна" (spool) and "Клей PVA" (bottle, notes
+  "for general assembly"). Both Active. Archive Нитка — same
+  confirm-dialog pattern fires, toast *"Overhead material archived"*. ✓
+- Backend gates: 124 pytest passing (was 121, +3 new), migration
+  round-trip clean. Frontend gates: tsc clean, lint clean on new
+  files, 4/4 new tests pass (one pre-existing CustomersPage failure
+  on main, unrelated to MAT-1). Console clean — no errors during
+  smoke. ✓
+
+**Side observations (parked, no follow-ups filed):**
+- Action icons (Edit / Archive pencil + trash) in MANAGEMENT column
+  use established `text-zinc-400 hover:text-zinc-100` palette — same
+  pattern that FIN-1-CLEANUP fixed for the Finance icon on `/shops`.
+  No invisible-icon regression here; pattern is consistent.
+- Empty-state placeholder uses the same `<DollarSign>` icon as
+  FIN-1's `FinanceRevenueChart`. Visual consistency intentional.
+  (Note for future Cowork: there's an opportunity to extract a shared
+  `<EmptyStatePlaceholder>` component when a 3rd surface adopts the
+  same pattern. YAGNI for now.)
+
+- **Closes:** the first 1/5 of the Materials Warehouse epic. Operator can
+  now register materials and overhead consumables; nothing tracks stock
+  or cost yet. **MAT-2 — Receipts (stock tracking comes alive)** is next:
+  introduces `MaterialReceipt`, `OverheadMaterialReceipt`,
+  `MaterialMovement` ledger, weighted-average recompute, and the receipt
+  UI on Material detail. Expected to be the second-largest sprint after
+  MAT-4 (consumption automation).
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
