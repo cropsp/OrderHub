@@ -87,7 +87,9 @@ async def get_dashboard_stats(
 
         # Daily Trend (Last 30 days)
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        day_col = cast(Order.ordered_at, Date)
+        # Revenue is realised on fulfillment (shipment), not on order creation.
+        # COALESCE protects legacy/imported rows where shipped_at is NULL.
+        day_col = cast(func.coalesce(Order.shipped_at, Order.ordered_at), Date)
         trend_query = (
             select(
                 day_col.label("day"),
