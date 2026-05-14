@@ -544,7 +544,7 @@ export default function ShopsPage() {
                             <Link
                               to={`/shops/${shop.id}/finance`}
                               title="Per-shop finance"
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05]"
                             >
                               <LineChart className="h-4 w-4" />
                             </Link>
