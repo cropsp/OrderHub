@@ -1,4 +1,4 @@
-import { Archive, FileSpreadsheet, LayoutDashboard, Package, Settings, Shield, Store, Users } from 'lucide-react'
+import { Archive, FileSpreadsheet, Layers, LayoutDashboard, Package, Settings, Shield, Store, Users, Wrench } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { NavLink } from 'react-router-dom'
 
@@ -25,6 +25,10 @@ type NavItem = {
   to: string
   icon: ComponentType<{ className?: string }>
   roles: UserRoleType[]
+  // Sidebar has no collapsible-group primitive; we render a label before the
+  // first item that carries `groupLabel`, and indent every item with `inGroup`.
+  groupLabel?: string
+  inGroup?: boolean
 }
 
 const navItems: NavItem[] = [
@@ -97,6 +101,24 @@ const navItems: NavItem[] = [
     to: '/packaging',
     icon: Archive,
     roles: [UserRole.OWNER, UserRole.MANAGER],
+    groupLabel: 'Inventory',
+    inGroup: true,
+  },
+  {
+    key: 'materials',
+    label: 'Materials',
+    to: '/inventory/materials',
+    icon: Layers,
+    roles: [UserRole.OWNER, UserRole.MANAGER],
+    inGroup: true,
+  },
+  {
+    key: 'overhead-materials',
+    label: 'Overhead',
+    to: '/inventory/overhead-materials',
+    icon: Wrench,
+    roles: [UserRole.OWNER, UserRole.MANAGER],
+    inGroup: true,
   },
 ]
 
@@ -119,7 +141,8 @@ function SidebarLink({ item }: { item: NavItem }) {
     <NavLink
       className={({ isActive }) =>
         cn(
-          'group flex items-center gap-2.5 px-3 py-2 text-sm transition-colors duration-150',
+          'group flex items-center gap-2.5 py-2 text-sm transition-colors duration-150',
+          item.inGroup ? 'pl-6 pr-3' : 'px-3',
           isActive
             ? 'bg-zinc-800 border-l-2 border-teal-400 text-zinc-100'
             : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100'
@@ -172,7 +195,14 @@ export default function Sidebar({ user, shops = [], compact = false }: SidebarPr
       <div className="flex-1 space-y-6 overflow-y-auto py-2">
         <div className="flex flex-col">
           {allowedItems.map((item) => (
-            <SidebarLink item={item} key={item.key} />
+            <div key={item.key}>
+              {item.groupLabel ? (
+                <p className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
+                  {item.groupLabel}
+                </p>
+              ) : null}
+              <SidebarLink item={item} />
+            </div>
           ))}
         </div>
 

@@ -123,3 +123,61 @@ export interface ProductUpdate {
   is_active?: boolean;
   variants?: ProductVariantPatch[];
 }
+
+// MAT-1: direct materials catalog. Stock/cost fields are read-only display
+// in this sprint and become editable in MAT-2 once receipts exist.
+export interface Material {
+  id: string;
+  name: string;
+  unit: string;
+  currency: string;
+  // Decimal columns are serialized as strings by FastAPI to preserve precision.
+  current_unit_cost: string;
+  stock_quantity: string;
+  low_stock_threshold: string;
+  waste_percent: string;
+  supplier_name: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaterialCreate {
+  name: string;
+  unit: string;
+  currency: string;
+  supplier_name?: string | null;
+  notes?: string | null;
+}
+
+// currency intentionally absent — locked at creation.
+export interface MaterialUpdate {
+  name?: string;
+  unit?: string;
+  supplier_name?: string | null;
+  notes?: string | null;
+}
+
+// MAT-1: indirect/consumables catalog.
+export interface OverheadMaterial {
+  id: string;
+  name: string;
+  unit: string;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OverheadMaterialCreate {
+  name: string;
+  unit: string;
+  notes?: string | null;
+}
+
+export interface OverheadMaterialUpdate {
+  name?: string;
+  unit?: string;
+  notes?: string | null;
+}

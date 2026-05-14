@@ -19,6 +19,8 @@ const CreateOrderPage = lazy(() => import('@/pages/CreateOrderPage'))
 const ProductsPage = lazy(() => import('@/pages/ProductsPage'))
 const ProductDetailPage = lazy(() => import('@/pages/ProductDetailPage'))
 const PackagingPage = lazy(() => import('@/pages/PackagingPage'))
+const MaterialsPage = lazy(() => import('@/pages/MaterialsPage'))
+const OverheadMaterialsPage = lazy(() => import('@/pages/OverheadMaterialsPage'))
 const ShopFinancePage = lazy(() => import('@/pages/ShopFinancePage'))
 
 function RouteLoadingFallback() {
@@ -127,6 +129,22 @@ function App() {
               </Suspense>
             }
             path="/packaging"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <MaterialsPage />
+              </Suspense>
+            }
+            path="/inventory/materials"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <OverheadMaterialsPage />
+              </Suspense>
+            }
+            path="/inventory/overhead-materials"
           />
         </Route>
 
