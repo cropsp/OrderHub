@@ -310,7 +310,7 @@ async def test_create_ttn_happy_path_with_cached_sender_refs():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock()) as mock_status, \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status, \
          patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
         result = await create_np_ttn(
             order_id=order.id,
@@ -390,7 +390,7 @@ async def test_delete_ttn_happy_path():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock()) as mock_status, \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status, \
          patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
         result = await delete_np_ttn(
             order_id=order.id,
@@ -440,7 +440,7 @@ async def test_create_ttn_decrements_stock_when_packaging_selected():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock()), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
          patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
         result = await create_np_ttn(
             order_id=order.id,
@@ -482,7 +482,7 @@ async def test_create_ttn_returns_warnings_from_stock_service():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock()), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
          patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[warning_msg])):
         result = await create_np_ttn(
             order_id=order.id,
@@ -513,7 +513,7 @@ async def test_delete_ttn_refunds_stock_when_packaging_selected():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock()), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
          patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
         await delete_np_ttn(
             order_id=order.id,
@@ -549,7 +549,7 @@ async def test_create_ttn_rolls_back_stock_on_np_failure():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock()), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
          patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
         with pytest.raises(HTTPException):
             await create_np_ttn(

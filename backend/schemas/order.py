@@ -115,6 +115,12 @@ class OrderResponse(OrderListResponse):
     items: list[OrderItemResponse] = []
     status_history: list[StatusHistoryResponse] = []
     packaging: PackagingBoxSummary | None = None
+    # MAT-4: BOM-driven cost snapshot, populated by the consumption hook on
+    # SHIPPED. Coexists with manual `production_cost` (Phase A — design §6.2).
+    computed_production_cost: float | None = None
+    # MAT-4: operational warnings from the SHIPPED transition (currency
+    # mismatch, partial BOM coverage, negative stock). Empty for plain reads.
+    warnings: list[str] = []
 
 
 class OrderItemCreate(BaseModel):

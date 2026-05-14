@@ -1,7 +1,7 @@
 import client from './client'
 
 import type { OrderItem } from '@/types/common'
-import type { OrderListFilters, OrderListItem, OrderListResponse } from '@/types/order'
+import type { OrderDetail, OrderListFilters, OrderListItem, OrderListResponse } from '@/types/order'
 
 export const ordersApi = {
   list: async (filters: OrderListFilters = {}): Promise<OrderListResponse> => {
@@ -14,8 +14,10 @@ export const ordersApi = {
     return data
   },
 
-  updateStatus: async (orderId: string, status: string): Promise<OrderListItem> => {
-    const { data } = await client.post<OrderListItem>(`/orders/${orderId}/status`, { new_status: status })
+  updateStatus: async (orderId: string, status: string): Promise<OrderDetail> => {
+    // MAT-4: response carries `warnings: string[]` populated by the SHIPPED
+    // consumption hook (currency mismatch, partial BOM, negative stock).
+    const { data } = await client.post<OrderDetail>(`/orders/${orderId}/status`, { new_status: status })
     return data
   },
 

@@ -259,14 +259,21 @@ async def create_np_ttn(
         # Update order with TTN
         order.ttn_number = ttn_data.get("IntDocNumber")
 
+        material_warnings: List[str] = []
         if order.status == OrderStatus.IN_PRODUCTION:
-            await change_order_status(db, order, OrderStatus.SHIPPED, current_user, f"TTN created: {order.ttn_number}")
+            # MAT-4: change_order_status fires the consumption hook on SHIPPED;
+            # warnings propagate up so they ride the same toast surface as the
+            # packaging warnings below.
+            _, material_warnings = await change_order_status(
+                db, order, OrderStatus.SHIPPED, current_user,
+                f"TTN created: {order.ttn_number}",
+            )
 
         # PKG-2: decrement packaging stock in the same transaction as the TTN write.
         # Guarded — no movement is recorded when the operator skipped packaging.
-        warnings: List[str] = []
+        packaging_warnings: List[str] = []
         if order.packaging_id is not None:
-            warnings = await stock_service.apply_movement(
+            packaging_warnings = await stock_service.apply_movement(
                 db,
                 box_id=order.packaging_id,
                 delta=-1,
@@ -274,6 +281,8 @@ async def create_np_ttn(
                 order_id=order.id,
                 user_id=current_user.id,
             )
+
+        warnings = packaging_warnings + material_warnings
 
         await db.commit()
         await db.refresh(order)
@@ -315,6 +324,9 @@ async def delete_np_ttn(
         old_ttn = order.ttn_number
         order.ttn_number = None
 
+        # TTN-delete reverts SHIPPED → IN_PRODUCTION. Consumption is not undone
+        # (no automatic reversal per design §4.3 / MAT-4 rule #10); warnings
+        # from the transition are unused here.
         await change_order_status(db, order, OrderStatus.IN_PRODUCTION, current_user, f"TTN deleted: {old_ttn}")
 
         # PKG-2: refund packaging stock in the same transaction as the TTN clear.

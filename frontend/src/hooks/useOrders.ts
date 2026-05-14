@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ordersApi } from '@/api/orders'
+import { useToastStore } from '@/components/ui/Toast'
 import type { OrderListFilters, OrderDetail } from '@/types/order'
 
 type UseOrdersOptions = {
@@ -29,14 +30,20 @@ export function useOrder(orderId: string | null, options: UseOrdersOptions = {})
 
 export function useUpdateOrderStatus() {
   const queryClient = useQueryClient()
+  const addToast = useToastStore(s => s.addToast)
 
   return useMutation({
-    mutationFn: ({ orderId, status }: { orderId: string; status: string }) => 
+    mutationFn: ({ orderId, status }: { orderId: string; status: string }) =>
       ordersApi.updateStatus(orderId, status),
-    onSuccess: (_, { orderId }) => {
+    onSuccess: (data, { orderId }) => {
       // Invalidate both the list and the specific order to trigger refetch
       void queryClient.invalidateQueries({ queryKey: ['orders'] })
       void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+      // MAT-4: surface SHIPPED-transition warnings as toasts.
+      // ⚠ prefix → error (amber); ⓘ → info; anything else → info.
+      for (const warning of data?.warnings ?? []) {
+        addToast(warning, warning.startsWith('⚠') ? 'error' : 'info')
+      }
     },
   })
 }

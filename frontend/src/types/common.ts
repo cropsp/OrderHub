@@ -97,6 +97,9 @@ export interface Order {
   total_price: number
   currency: string
   production_cost: number | null
+  // MAT-4: BOM-driven cost snapshot, populated when the order transitions to
+  // SHIPPED. Coexists with manual `production_cost` (Phase A — design §6.2).
+  computed_production_cost: number | null
   shipping_np_cost: number | null
   platform_fee: number | null
   shipping_name: string | null

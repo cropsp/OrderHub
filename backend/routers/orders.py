@@ -201,10 +201,14 @@ async def transition_order_status(
         raise HTTPException(status_code=403, detail="Not assigned to this order")
         
     logger.info(f"Transitioning order {order_id} status to {body.new_status} by {current_user.email}")
-    await change_order_status(db, order, body.new_status, current_user, body.comment)
+    _, warnings = await change_order_status(db, order, body.new_status, current_user, body.comment)
     await db.commit()
     logger.info(f"Order {order_id} status transition committed")
-    return await get_order(order_id, current_user, db)
+    response = await get_order(order_id, current_user, db)
+    # MAT-4: surface consumption warnings (currency mismatch, partial BOM
+    # coverage, negative stock) on the SHIPPED-transition response only.
+    response.warnings = warnings
+    return response
 
 
 # --- Order Items CRUD ---

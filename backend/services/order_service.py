@@ -100,12 +100,17 @@ async def change_order_status(
     new_status: OrderStatus,
     user: User,
     comment: str | None = None
-) -> Order:
-    """Change order status with validation and history logging."""
-    
+) -> tuple[Order, list[str]]:
+    """Change order status with validation and history logging.
+
+    Returns the order and any operational warnings produced by post-transition
+    hooks (MAT-4 consumption on SHIPPED). Warnings are an empty list for
+    transitions that produce none. Caller is responsible for committing.
+    """
+
     if new_status == order.status:
-        return order
-        
+        return order, []
+
     # Check allowed transitions (Only enforce for Designers; Owner/Manager can override for manual correction)
     allowed_targets = ALLOWED_TRANSITIONS.get(order.status, set())
     if new_status not in allowed_targets and user.role not in (UserRole.OWNER, UserRole.MANAGER):
@@ -113,14 +118,14 @@ async def change_order_status(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot transition from {order.status.value} to {new_status.value}"
         )
-        
+
     # Check roles
     if order.status == OrderStatus.CANCELLED and user.role != UserRole.OWNER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only owner can reopen cancelled orders"
         )
-        
+
     # Auto-set timestamps
     now = datetime.now(timezone.utc)
     if new_status == OrderStatus.SHIPPED:
@@ -129,7 +134,7 @@ async def change_order_status(
     elif new_status == OrderStatus.COMPLETED:
         if order.completed_at is None:
             order.completed_at = now
-            
+
     # Auto-assign designer if moving to design phases
     if new_status in (OrderStatus.DESIGN_PENDING, OrderStatus.DESIGN_READY):
         if order.assigned_designer_id is None and user.role == UserRole.DESIGNER:
@@ -138,7 +143,7 @@ async def change_order_status(
 
     old_status = order.status
     order.status = new_status
-    
+
     # Create history entry
     history = OrderStatusHistory(
         id=uuid.uuid4(),
@@ -149,9 +154,23 @@ async def change_order_status(
         comment=comment
     )
     db.add(history)
-    
+
     await db.flush()
-    return order
+
+    warnings: list[str] = []
+    if new_status == OrderStatus.SHIPPED:
+        # MAT-4: consume materials per BOM, snapshot computed_production_cost.
+        # Runs inside this transaction; caller owns the commit. Idempotent on
+        # repeat SHIPPED transitions (ledger lookup); leaves existing computed
+        # cost untouched on the no-op path.
+        from services.order_consumption_service import consume_materials_for_order
+
+        result = await consume_materials_for_order(db, order, user.id)
+        if not result.idempotent_skip:
+            order.computed_production_cost = result.computed_production_cost
+            warnings = result.warnings
+
+    return order, warnings
 
 
 async def _apply_variant_snapshot(db: AsyncSession, item: OrderItem, variant_id: uuid.UUID, shop_id: uuid.UUID):

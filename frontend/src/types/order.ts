@@ -13,6 +13,10 @@ export interface StatusHistoryExtended extends OrderStatusHistoryEntry {
 export interface OrderDetail extends OrderListItem {
   items: OrderItem[];
   status_history: StatusHistoryExtended[];
+  // MAT-4: warnings produced by the SHIPPED-transition mutation response
+  // (currency mismatch, partial BOM coverage, negative stock). Empty/absent
+  // on plain GETs.
+  warnings?: string[];
 }
 
 export type OrderListResponse = PaginatedResponse<OrderListItem>
