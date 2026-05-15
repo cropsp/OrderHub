@@ -7,13 +7,19 @@ ORM instance carries the user-supplied `currency` value through to persistence.
 """
 
 import uuid
+from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from models.material import Material
-from routers.materials import create_material, list_materials
+from models.material import Material, MaterialMovement, MaterialMovementReason
+from routers.materials import (
+    create_material,
+    list_material_movements,
+    list_materials,
+)
 from schemas.material import MaterialCreate
 
 
@@ -92,3 +98,75 @@ async def test_list_materials_filters_inactive_by_default():
     assert " where " not in opt_in_sql, (
         f"include_inactive=True with no search should have no WHERE clause. SQL: {opt_in_sql}"
     )
+
+
+@pytest.mark.asyncio
+async def test_list_movements_joins_orders_and_projects_order_code():
+    """MAT-4-followup-2 — GET /api/materials/{id}/movements LEFT-JOINs orders so
+    consumption rows can surface a human-readable order code (`#<external_id>`).
+    Movements with no order_id still appear (outer join), with order_code=None."""
+    material_id = uuid.uuid4()
+    order_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    consumption_movement = MaterialMovement(
+        material_id=material_id,
+        delta=Decimal("-5.50"),
+        reason=MaterialMovementReason.CONSUMPTION,
+        order_id=order_id,
+        unit_cost_at_movement=Decimal("588.0000"),
+        user_id=uuid.uuid4(),
+    )
+    consumption_movement.id = uuid.uuid4()
+    consumption_movement.created_at = now
+    consumption_movement.receipt_id = None
+    consumption_movement.notes = None
+
+    receipt_movement = MaterialMovement(
+        material_id=material_id,
+        delta=Decimal("25"),
+        reason=MaterialMovementReason.RECEIPT,
+        order_id=None,
+        unit_cost_at_movement=None,
+        user_id=uuid.uuid4(),
+    )
+    receipt_movement.id = uuid.uuid4()
+    receipt_movement.created_at = now
+    receipt_movement.receipt_id = uuid.uuid4()
+    receipt_movement.notes = None
+
+    captured_stmts: list = []
+
+    async def fake_execute(stmt):
+        captured_stmts.append(stmt)
+        r = MagicMock()
+        r.all.return_value = [
+            (consumption_movement, "7148183421084"),
+            (receipt_movement, None),
+        ]
+        return r
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=fake_execute)
+    db.get = AsyncMock(return_value=Material(name="x", unit="dm2", currency="UAH"))
+
+    result = await list_material_movements(
+        material_id=material_id,
+        page=1,
+        limit=20,
+        reason=None,
+        db=db,
+        user=MagicMock(),
+    )
+
+    sql = _compiled(captured_stmts[-1])
+    assert "join orders" in sql, (
+        f"Movements query must LEFT JOIN orders to surface order_code. SQL: {sql}"
+    )
+    assert "orders.external_id" in sql
+
+    assert len(result) == 2
+    assert result[0].order_code == "#7148183421084"
+    assert result[0].order_id == order_id
+    assert result[1].order_code is None
+    assert result[1].order_id is None

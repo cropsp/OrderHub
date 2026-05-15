@@ -56,6 +56,30 @@ async def test_post_raises_nova_poshta_api_error_on_success_false():
 
 
 @pytest.mark.asyncio
+async def test_post_formats_dict_shape_errors_as_values_not_keys():
+    """NP-UX-4 — NP sometimes returns `errors` as a dict keyed by ref UUID with
+    human-readable messages as values. The formatter must surface the values,
+    not the keys (which previously lost the actual error text)."""
+    payload = {
+        "success": False,
+        "errors": {
+            "4080dd88-aaaa-bbbb-cccc-dddddddddddd": "Document already deleted 20451436522025",
+        },
+    }
+    post = AsyncMock(return_value=_response(payload))
+    cm, _ = _async_client_cm(post)
+
+    with patch("services.nova_poshta.httpx.AsyncClient", return_value=cm):
+        client = NovaPoshtaClient("api-key")
+        with pytest.raises(NovaPoshtaAPIError) as exc:
+            await client._post("InternetDocument", "delete", {})
+
+    message = str(exc.value)
+    assert "Document already deleted" in message
+    assert "4080dd88" not in message
+
+
+@pytest.mark.asyncio
 async def test_post_does_not_retry_on_nova_poshta_api_error():
     """Business-level failures must NOT trigger tenacity retries."""
     post = AsyncMock(return_value=_response({"success": False, "errors": ["bad request"]}))

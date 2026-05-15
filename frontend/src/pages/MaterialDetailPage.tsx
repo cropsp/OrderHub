@@ -423,8 +423,15 @@ export default function MaterialDetailPage() {
                         <TableCell className="text-xs text-zinc-500 font-mono">
                           {m.receipt_id
                             ? `Receipt ${m.receipt_id.slice(0, 8)}`
-                            : m.order_code
-                              ? m.order_code
+                            : m.order_id && m.order_code
+                              ? (
+                                <Link
+                                  to={`/orders/${m.order_id}`}
+                                  className="hover:text-zinc-300"
+                                >
+                                  {m.order_code}
+                                </Link>
+                              )
                               : '—'}
                         </TableCell>
                         <TableCell className="px-8 py-4 text-xs text-zinc-500 truncate max-w-xs">

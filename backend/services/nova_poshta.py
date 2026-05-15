@@ -40,7 +40,13 @@ class NovaPoshtaClient:
             data = response.json()
             if not data.get("success"):
                 errors = data.get("errors", [])
-                error_msg = f"[NP API] Error: {', '.join(errors)}"
+                if isinstance(errors, dict):
+                    message = ", ".join(str(v) for v in errors.values())
+                elif isinstance(errors, list):
+                    message = ", ".join(str(e) for e in errors)
+                else:
+                    message = str(errors)
+                error_msg = f"[NP API] Error: {message}"
                 logger.error(error_msg)
                 raise NovaPoshtaAPIError(error_msg)
             return data.get("data", [])

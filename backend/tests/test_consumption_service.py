@@ -232,7 +232,11 @@ async def test_consume_skips_cost_on_currency_mismatch():
     result = await consume_materials_for_order(db, order, uuid.uuid4())
 
     assert result.computed_production_cost is None
-    assert any("Cannot compute production cost" in w for w in result.warnings)
+    assert any(
+        "materials in this order are priced in a different currency" in w
+        and "(USD)" in w
+        for w in result.warnings
+    )
     # CONSUMPTION STILL FIRED — stock honest.
     assert material.stock_quantity == Decimal("45.00")
 

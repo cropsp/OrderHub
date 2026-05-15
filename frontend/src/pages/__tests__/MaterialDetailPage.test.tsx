@@ -43,11 +43,12 @@ const baseMaterial = {
 }
 
 const materialMock = { data: baseMaterial, isLoading: false }
+const movementsMock: { data: unknown[] } = { data: [] }
 
 vi.mock('@/hooks/useMaterials', () => ({
   useMaterial: () => materialMock,
   useMaterialReceipts: () => ({ data: [] }),
-  useMaterialMovements: () => ({ data: [] }),
+  useMaterialMovements: () => movementsMock,
   useCreateMaterialReceipt: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAdjustMaterialStock: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useUpdateMaterial: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -66,6 +67,7 @@ function renderPage() {
 describe('MaterialDetailPage', () => {
   beforeEach(() => {
     materialMock.data = baseMaterial
+    movementsMock.data = []
   })
 
   it('renders the stock summary with current quantity and unit', () => {
@@ -96,5 +98,26 @@ describe('MaterialDetailPage', () => {
     }
     renderPage()
     expect(screen.getByText('Low')).toBeInTheDocument()
+  })
+
+  it('renders consumption movements with a link to the linked order', () => {
+    movementsMock.data = [
+      {
+        id: 'mov-1',
+        material_id: 'mat-1',
+        delta: '-5.50',
+        reason: 'consumption',
+        order_id: 'abc-123',
+        order_code: '#7148183421084',
+        receipt_id: null,
+        unit_cost_at_movement: '588.0000',
+        notes: null,
+        user_id: 'user-1',
+        created_at: new Date().toISOString(),
+      },
+    ]
+    renderPage()
+    const link = screen.getByRole('link', { name: '#7148183421084' })
+    expect(link).toHaveAttribute('href', '/orders/abc-123')
   })
 })

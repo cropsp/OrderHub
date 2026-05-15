@@ -152,10 +152,9 @@ async def consume_materials_for_order(
     if currency_mismatch_names:
         warnings.append(
             f"⚠ Cannot compute production cost: "
-            f"{len(currency_mismatch_names)} of {total_items} line-item "
-            f"materials are priced in a different currency than the order "
-            f"({order_currency}). Multi-currency cost conversion is not "
-            f"supported in v1."
+            f"{len(currency_mismatch_names)} materials in this order are priced "
+            f"in a different currency than the order ({order_currency}). "
+            f"Multi-currency cost conversion is not supported in v1."
         )
         computed_cost: Decimal | None = None
     elif bom_equipped == 0:

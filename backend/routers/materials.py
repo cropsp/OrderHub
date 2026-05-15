@@ -23,6 +23,7 @@ from models.material import (
     MaterialMovementReason,
     MaterialReceipt,
 )
+from models.order import Order
 from models.user import UserRole
 from routers.dependencies import require_role
 from schemas.material import (
@@ -212,7 +213,8 @@ async def list_material_movements(
 
     offset = (page - 1) * limit
     stmt = (
-        select(MaterialMovement)
+        select(MaterialMovement, Order.external_id)
+        .outerjoin(Order, MaterialMovement.order_id == Order.id)
         .where(MaterialMovement.material_id == material_id)
         .order_by(MaterialMovement.created_at.desc())
         .offset(offset)
@@ -221,7 +223,11 @@ async def list_material_movements(
     if reason is not None:
         stmt = stmt.where(MaterialMovement.reason == reason)
     result = await db.execute(stmt)
-    return result.scalars().all()
+    movements = []
+    for movement, external_id in result.all():
+        movement.order_code = f"#{external_id}" if external_id else None
+        movements.append(movement)
+    return movements
 
 
 @router.post(
