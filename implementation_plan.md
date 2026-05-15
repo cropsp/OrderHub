@@ -2861,6 +2861,121 @@ no schema changes, no state-machine changes, no scope expansion.
 
 ---
 
+**Sprint NP-ROBUSTNESS-1 — Idempotent TTN delete + sender phone validation/normalization** (Status: `DONE` — commit `9a6899a`; pytest 143 → 153)
+
+Goal: Bundle of 2 medium-effort parked items that improve
+operational reliability of the Nova Poshta integration. Both items
+affect KoraKlenu's shipping workflow (the only NP-using shop today).
+Closing both in one bundle because they share the same surface area
+(`routers/shipping.py` + Edit Store Settings → Logistics modal) and
+operationally they're paired — bad sender phone breaks TTN create,
+stale `ttn_number` from manually-deleted TTN breaks subsequent
+create attempts. Both fixes preserve eventual consistency over
+fail-loud-on-edge-case.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| NP-ROBUSTNESS-1-1 | `services/phone_normalization.py` (new) — `normalize_ua_sender_phone(raw)` helper. 3 valid input branches (`380XXXXXXXXX` / `0XXXXXXXXX` / `XXXXXXXXX`), all normalize to canonical `380XXXXXXXXX`; raises `HTTPException(422)` on unparseable input with operator-friendly error message. Distinct from lenient inline normalization for **recipient** phones at `routers/shipping.py:177-183` (intentionally separate per OQ #2 — different contracts, sender is strict, recipient is lenient). | backend | DONE |
+| NP-ROBUSTNESS-1-2 | `routers/shops.py:64, 142-143` — applies `normalize_ua_sender_phone()` on both shop create AND PATCH update paths. 422 surfaces as inline error in modal. | backend | DONE |
+| NP-ROBUSTNESS-1-3 | `routers/shipping.py:delete_np_ttn` — idempotency fix. Branches on NP error message substrings (case-insensitive): "already deleted" / "no document" / "not found". On match: clears `Order.ttn_number`, fires PKG-2 packaging-stock refund (per behaviour rule #4 — soft-success treats local state as if NP delete had succeeded), writes a distinguishable audit comment, returns `{"status": "soft_success", "message": "...", "warnings": [...]}` so frontend can route to info-style toast vs error toast. Real-success path unchanged. | backend | DONE |
+| NP-ROBUSTNESS-1-4 | `tests/test_phone_normalization.py` (new) — 7 unit tests covering all 3 valid branches + 4 garbage / edge cases (Cyrillic input, empty string, None, whitespace-only). | backend tests | DONE |
+| NP-ROBUSTNESS-1-5 | `tests/test_shipping_router.py` extended — 3 new soft-success tests + 1 regression guard for unmatched NP errors (asserts they STILL raise 400, not silently soft-success). | backend tests | DONE |
+| NP-ROBUSTNESS-1-6 | Frontend `pages/ShopsPage.tsx` — UA-mobile regex validator on Sender Phone input. Inline red error message *"Sender phone must be a Ukrainian mobile number (e.g. 380XXXXXXXXX or 0XXXXXXXXX)."* surfaces on Save click (validation triggers at submit time, not on blur — see Side Observations). | frontend | DONE |
+| NP-ROBUSTNESS-1-7 | Frontend `hooks/useShipping.ts` — TTN-delete mutation branches on `data.status === 'soft_success'` to emit a neutral info-style toast with the backend's friendly message; success/error paths unchanged. `api/shipping.ts` typed `deleteTTN` return as `{ status: 'success' \| 'soft_success'; message: string }` for type-safe routing. | frontend | DONE |
+
+**Post-sprint notes:**
+- **Process deviation: CC bypassed plan mode** despite task.md rule
+  marking "Plan mode REQUIRED". Sergii ran CC in auto mode; CC
+  proceeded directly to implementation. Outcome was spec-compliant
+  on all 9 behaviour rules, but the 6 OQs weren't formally answered
+  in writing. **Worth noting** for future sprints with REQUIRED
+  plan-mode flags — auto mode bypasses the gate. Mitigation: smoke
+  testing caught what plan-mode review would have caught (the
+  partial Save-button-disabled behavior — see Side Observations).
+- **Live NP cabinet test (mandatory per behaviour rule #9)
+  PASSED.** Sergii performed the hands-on test that no automated
+  test could simulate: created TTN through OrderHub → manually
+  deleted via NP cabinet UI → clicked Delete TTN in OrderHub →
+  cleared cleanly without 400 (was the original NP-UX-2 repro
+  pain). This is the strongest possible verification of the
+  soft-success matching logic against real NP API behavior.
+- **Backend normalization works exactly per spec rule #5.** Smoke
+  verified all three input formats: `380XXXXXXXXX` (12-digit
+  canonical), `0XXXXXXXXX` (10-digit with leading zero, replaced
+  with 380), `+380 99 123-45-67` (formatted with separators,
+  stripped to canonical). Garbage Cyrillic input correctly raises
+  422 with operator-friendly error.
+- **`normalize_ua_sender_phone` deliberately NOT shared with
+  recipient-phone normalization** at `routers/shipping.py:177-183`.
+  Per OQ #2 decision: sender contract is strict (we own the data,
+  validation is our defense against future shop creators), recipient
+  contract is lenient (data comes from external orders, we shouldn't
+  reject them on phone formatting issues — pass through to NP and
+  let NP reject if needed). Same operation, different consequences
+  for failure.
+- **Soft-success path fires PKG-2 packaging-stock refund** per
+  behaviour rule #4. Operator records of stock are based on "what
+  TTN delete operations they did in OrderHub", not "what NP server
+  confirmed". Semantically: from operator perspective, the TTN no
+  longer exists for this order, packaging units returned to inventory.
+- **Regression guard for unmatched NP errors** added by CC beyond
+  the spec's planned +6 tests (total +10 instead). Test asserts that
+  random NP errors (e.g. *"Insufficient funds for delivery"*) STILL
+  raise 400 fatally — so the soft-success branch can't accidentally
+  swallow real failures. Sensible defensive coverage.
+
+**Verified by smoke test (2026-05-15):**
+- Pre-flight: KoraKlenu Edit Store Settings → Logistics (NP) modal
+  opened. Sender Phone field carries `0633445320` (operator's actual
+  number, set during NP-FIX-3a smoke). ✓
+- **Garbage input flow:** typed Cyrillic "Сергій" → clicked Save →
+  inline red error: *"⚠ Sender phone must be a Ukrainian mobile
+  number (e.g. 380XXXXXXXXX or 0XXXXXXXXX)."* Modal stays open. ✓
+- **Formatted input flow:** typed `+380 99 123-45-67` → Save →
+  modal closed. Hard refresh + reopen → stored value
+  `380991234567` (separators stripped). ✓
+- **Leading-zero flow:** typed `0633445320` → Save → hard refresh +
+  reopen → stored value `380633445320` (rule #5 case b applied
+  correctly — `0` prefix replaced with `380`). ✓
+- **Live NP cabinet idempotent delete (the critical test, per
+  Sergii):** created a TTN through OrderHub → manually deleted via
+  NP cabinet UI → returned to OrderHub → clicked Delete TTN button
+  → cleared cleanly without 400 error, `Order.ttn_number` reset to
+  NULL. **Original NP-UX-2 repro pain confirmed fixed.** ✓
+- Backend gates: pytest 143 → 153 passing (+10 vs planned +6;
+  overshoot from CC's regression guard + extended phone-helper
+  edge coverage). Frontend: tsc clean, lint clean, all touched-file
+  tests passing. ✓
+- Console clean throughout. ✓
+
+**Side observations (parked as NP-ROBUSTNESS-1 follow-ups):**
+- **NP-ROBUSTNESS-1-followup-1** — React Query cache invalidation
+  gap on shop PATCH. After saving sender phone, frontend shows the
+  raw input value (echo) until next page reload, instead of
+  refetching the normalized backend value. Operator who saves
+  `0633445320` sees `0633445320` in the modal until reload, but
+  DB has `380633445320`. Cosmetic — no data loss, no behavior
+  break — but confusing UX. Filed in Explicitly deferred.
+- **NP-ROBUSTNESS-1-followup-2** — "Save button disabled when
+  invalid" claim is partial. CC's report claimed the Save button
+  is disabled when phone is invalid; reality is the button stays
+  active and validation fires only on click (inline error appears
+  after submit attempt). Functionally equivalent (backend 422
+  catches anything that slips through), but less polished UX
+  than promised. Filed in Explicitly deferred.
+
+- **Closes:** the highest-priority NP reliability fixes from the
+  parked list. Operator can no longer get stuck on TTN-delete after
+  out-of-band NP cabinet manipulation; bad sender phone data is
+  prevented at source AND normalized defensively if it slips
+  through. **Two parked items removed (NP-UX-2 + NP-FIX-3b),
+  two new minor follow-ups added.** Phase 2 Partners discovery
+  remains the major next epic; PKG-UX-1 (third packaging badge
+  state) is the next operationally-noticeable cleanup if Sergii
+  wants to continue polish.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -2878,14 +2993,14 @@ in this document where applicable, to avoid duplication.
 | PC-F-1 | Product photos (see Section A) | Requires new file-upload infrastructure |
 | Unlinked backfill (carried over from BUG-2/BUG-3 smoke tests) | UI gesture or migration to link historical Unlinked items in existing orders | Pre-existing constraint; no operational need yet |
 | NP-UX-1 | Hide Logistics (NP) tab in Edit Store Settings modal when `has_np_token = false` | Cosmetic — the tab currently renders for every shop, including those that never integrated NP (Lamamarka Shopify, LeatherCraft UA, Leather by Mykola). Deferral cause: depends on the open architectural question below — does tab visibility tie to *credentials presence* (cheap, but hides the only entry point for first-time NP setup) or to *regional intent* (proper, but the data anchor doesn't exist). |
-| NP-UX-2 | Idempotent TTN delete — clear `Order.ttn_number` even when NP returns "TTN not found" / "already deleted" | Discovered during NP-FIX-3a smoke (2026-05-10). After the operator manually deleted the test TTN in the NP cabinet, OrderHub's Delete TTN button kept failing with 400 because `routers/shipping.py:delete_np_ttn` treats any NP API error as fatal and rolls the transaction back. The operator was left with a stale `ttn_number` on the order and had to clear it via SQL. Fix: catch the specific NP error message(s) for "already deleted" / "not found" and treat them as effective successes — clear the local TTN reference anyway. Eventual consistency, not a sync gap. Low-priority: rare in practice (NP cabinet manual deletes are uncommon). |
-| NP-FIX-3b | Sender phone field — frontend validation + backend normalization | Discovered during NP-FIX-3a smoke (2026-05-10). The Sender Phone input on the Edit Store Settings → Logistics (NP) modal accepts arbitrary text; an operator entered a surname there and it propagated all the way into the NP `InternetDocument.save` payload, where NP rejected it with "SendersPhone invalid format". Two-part fix: (a) frontend regex/mask on the Phone field (UA mobile pattern `380XXXXXXXXX` or `0XXXXXXXXX`), and (b) backend normalization in `routers/shipping.py` mirroring the recipient-phone normalization at lines 175-178 (strip non-digits, prepend `38` if missing). Currently there is also no validation on Sender Name. Low-priority: only one operator (KoraKlenu owner) currently configures NP, and the workaround is "type the right thing". Bundle with PKG-1 frontend work if convenient. |
 | PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
 | PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
 | DASH-SHOP-WARNINGS | ShopChart **and FinanceRevenueChart** log `width(-1)/height(-1)` recharts warnings on initial mount | Originally discovered during DASH-REVENUE-EMPTY smoke (2026-05-14) on ShopChart; scope extended during FIN-1 smoke (2026-05-14) when the same pattern was observed on the new FinanceRevenueChart. Both charts have **correct** empty-state JSX (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. Warnings stamp `minHeight(300)` matching the explicit `minHeight={300}` prop. Likely cause: layout race between the `min-h-[300px] flex` container and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs, then re-measures correctly when the observer fires. Charts render correctly. Cosmetic console noise only. Possible fixes: declare `width={N} height={N}` pixel values instead of `100%`, or wrap in a `useLayoutEffect`-gated container, or add the `aspect` prop. Affects two chart components today; if a third one with the same shape lands, the pattern is worth extracting into a shared `<MeasuredChartContainer>`. Low-priority. |
 | FIN-1-followup | Extend `/orders` to honor URL query params (`start_date`, `end_date`, `missing_cost`) for finance drilldown fidelity | Discovered by CC during FIN-1 plan-mode (2026-05-14). `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`; `OrdersLayout.tsx:29-49` doesn't read URL query params at all (filters are local React state). FIN-1 worked around this by pointing its drilldown link to `/shops/{shop_id}/orders` (which filters by shop via `fixedShopId` prop) — so users land on shop-filtered orders but **lose the period and missing-cost context** from the finance page they came from. Fix: extend the orders router signature to accept the three new params; refactor `OrdersLayout` to read URL params on mount and hydrate the filter state. Touches both backend and frontend. Medium-priority — affects the operator's drilldown UX, not the page's primary use case. Bundle with any future orders-page enhancement work. |
 | MAT-3-followup-1 | Material picker in `BomEditor` upgraded from native `<select>` to a searchable typeahead/combobox | Discovered during MAT-3 plan-mode (2026-05-14). No reusable typeahead component exists in `frontend/src/components/`. CC chose native `<select>` for v1 — works fine for ~50 active materials, sorted alphabetically. Becomes friction once the catalog grows (~150+ materials, especially when color/grade variants land per design decision #4). Fix: build a typeahead component (or import one from shadcn/ui — the project already uses `@/components/ui/` primitives), apply it to BOM editor + `MaterialReceiptModal`'s currency dropdown + anywhere else a long single-select shows up. Low priority until Sergii reports friction. |
 | REFACTOR-EMPTY-STATE | Extract a shared `<EmptyStatePlaceholder>` component | Pattern repeated in 5 places after MAT-3 ships: `FinanceRevenueChart` ("No revenue data"), Materials list ("No materials registered yet"), Overhead list ("No overhead materials registered yet"), Movements ledger ("No movements yet"), BomEditor ("No recipe defined yet. Add materials to compute a production cost preview"). Each implementation uses a different inline structure but the same visual register ($ icon or analogue, opacity-50, centered text). YAGNI threshold (3 occurrences) was deliberately deferred during MAT-2; now we're at 5. Fix: one shared component accepting `icon`, `text`, optional `cta` (CTA button props), apply to the 5 sites. Pure refactoring — no behaviour change. Not urgent; bundle with the next frontend-only refactoring sprint. |
+| NP-ROBUSTNESS-1-followup-1 | React Query cache invalidation gap on shop PATCH (sender phone shows stale input echo) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). After saving a phone like `0633445320`, the modal continues showing `0633445320` until next page reload, instead of refetching the normalized backend value (`380633445320`). DB stores the correct normalized value; only the frontend cache is stale. Fix: ensure the shop-update mutation in `hooks/useShops.ts` (or wherever the PATCH mutation lives) calls `queryClient.invalidateQueries(['shops'])` (and per-shop key if exists) on success — currently the mutation likely returns the optimistically-sent payload to the cache rather than refetching. Cosmetic UX gap; no data loss; low-priority. |
+| NP-ROBUSTNESS-1-followup-2 | "Save button disabled when invalid" not implemented as advertised (validation fires on click only) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). CC's report claimed Save button is disabled when sender phone is invalid; reality is the button stays clickable and inline error appears AFTER click. Backend 422 still catches the bad input and surfaces the same error message inline, so the failure is loud and recoverable — but UX is less polished than promised (operator can click Save with garbage input, sees error after the fact, instead of seeing the error proactively as they type/blur). Fix: add a controlled-form validity state in `pages/ShopsPage.tsx` (or wherever the Logistics modal lives) that enables Save only when phone matches the UA-mobile regex. Cosmetic; low-priority. |
 
 ---
 
