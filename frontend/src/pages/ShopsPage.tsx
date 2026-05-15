@@ -122,6 +122,14 @@ export default function ShopsPage() {
   
   const isOwner = user?.role === 'owner';
 
+  // NP-FIX-3b: Sender phone must be a UA mobile number — backend normalizes
+  // to 380XXXXXXXXX on save and 422s on invalid. The frontend regex mirrors
+  // the same accepted shapes (380XXXXXXXXX, 0XXXXXXXXX, XXXXXXXXX, with
+  // optional + and separators) so the operator gets immediate feedback.
+  const senderPhoneDigits = (editingShop.np_sender_phone ?? '').replace(/[^\d+]/g, '');
+  const senderPhoneValid =
+    senderPhoneDigits === '' || /^(\+?380|0)?\d{9}$/.test(senderPhoneDigits);
+
   const handleOpenCreate = () => {
     setEditingShop(INITIAL_SHOP_STATE);
     setDialogError(null);
@@ -362,11 +370,19 @@ export default function ShopsPage() {
                     <div className="space-y-2">
                        <p className="text-xs font-medium text-zinc-400">Sender Phone (Optional override)</p>
                        <Input
-                         className="border-zinc-800 bg-zinc-900/50"
-                         placeholder="Leave empty to use NP default"
+                         className={cn(
+                           "border-zinc-800 bg-zinc-900/50",
+                           !senderPhoneValid && "border-red-500/50"
+                         )}
+                         placeholder="380XXXXXXXXX or 0XXXXXXXXX"
                          value={editingShop.np_sender_phone}
                          onChange={(e) => setEditingShop(p => ({ ...p, np_sender_phone: e.target.value }))}
                        />
+                       {!senderPhoneValid && (
+                         <p className="text-xs text-red-400">
+                           Phone must be a Ukrainian mobile number (e.g. 380991234567 or 0991234567).
+                         </p>
+                       )}
                     </div>
                   </div>
 
@@ -446,7 +462,7 @@ export default function ShopsPage() {
               <Button
                 type="submit"
                 className="bg-teal-600 text-white hover:bg-teal-500 shadow-[0_0_20px_-5px_rgba(20,184,166,0.5)]"
-                disabled={createShop.isPending || updateShop.isPending}
+                disabled={createShop.isPending || updateShop.isPending || !senderPhoneValid}
               >
                 {(createShop.isPending || updateShop.isPending) ? 'Saving...' : 'Save Configuration'}
               </Button>

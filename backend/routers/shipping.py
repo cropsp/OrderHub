@@ -20,13 +20,20 @@ from models.user import User, UserRole
 from routers.dependencies import get_current_user, require_role
 from services import stock_service
 from services.order_service import get_order_detail, change_order_status
-from services.nova_poshta import NovaPoshtaClient
+from services.nova_poshta import NovaPoshtaClient, NovaPoshtaAPIError
 from services.encryption_service import decrypt_value
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/shipping", tags=["shipping"])
+
+# NP-UX-2: NP returns these substrings (case-insensitive) when the TTN is already
+# gone on their side — manual cabinet delete or earlier deletion. We treat them
+# as effective success: clear local ttn_number anyway. Match is substring-based
+# because NP varies the surrounding text ("Document already deleted 20451436…",
+# "No document changed DeletionMark", "Document not found").
+SOFT_SUCCESS_DELETE_PATTERNS = ("already deleted", "no document", "not found")
 
 
 class CreateTTNRequest(BaseModel):
@@ -317,19 +324,39 @@ async def delete_np_ttn(
     
     try:
         logger.info(f"[SHIPPING] Deleting TTN {order.ttn_number} for order {order_id}")
-        
-        await np_client.delete_internet_document(order.ttn_number)
-        
+
+        soft_success = False
+        try:
+            await np_client.delete_internet_document(order.ttn_number)
+        except NovaPoshtaAPIError as e:
+            msg = str(e).lower()
+            if any(pat in msg for pat in SOFT_SUCCESS_DELETE_PATTERNS):
+                logger.info(
+                    f"[SHIPPING] TTN {order.ttn_number} already gone on NP side ({e}); "
+                    f"clearing local reference."
+                )
+                soft_success = True
+            else:
+                raise
+
         # Clear TTN from order
         old_ttn = order.ttn_number
         order.ttn_number = None
 
         # TTN-delete reverts SHIPPED → IN_PRODUCTION. Consumption is not undone
         # (no automatic reversal per design §4.3 / MAT-4 rule #10); warnings
-        # from the transition are unused here.
-        await change_order_status(db, order, OrderStatus.IN_PRODUCTION, current_user, f"TTN deleted: {old_ttn}")
+        # from the transition are unused here. Comment text distinguishes
+        # NP-confirmed delete from soft-success (already-gone) for audit.
+        comment = (
+            f"TTN already deleted on NP side, local ref cleared: {old_ttn}"
+            if soft_success
+            else f"TTN deleted: {old_ttn}"
+        )
+        await change_order_status(db, order, OrderStatus.IN_PRODUCTION, current_user, comment)
 
         # PKG-2: refund packaging stock in the same transaction as the TTN clear.
+        # Fires on both real and soft success — semantically "no TTN exists for
+        # this order anymore", per task.md rule #4.
         if order.packaging_id is not None:
             await stock_service.apply_movement(
                 db,
@@ -342,8 +369,16 @@ async def delete_np_ttn(
 
         await db.commit()
         await db.refresh(order)
+
+        if soft_success:
+            return {
+                "status": "soft_success",
+                "message": "TTN was already deleted on NP side; local reference cleared.",
+            }
         return {"status": "success", "message": f"TTN {old_ttn} deleted"}
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"[SHIPPING] FAILED TO DELETE TTN: {e}", exc_info=True)

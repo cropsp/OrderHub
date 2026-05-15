@@ -562,3 +562,132 @@ async def test_create_ttn_rolls_back_stock_on_np_failure():
     mock_stock.assert_not_called()
     db.rollback.assert_awaited()
     db.commit.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NP-UX-2: idempotent delete (soft-success on "already deleted" / "not found")
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_delete_ttn_soft_success_when_np_says_already_deleted():
+    """NP-UX-2: NP returns the exact 'Document already deleted ...' message that
+    NP-FIX-4 Phase A documented. Handler must clear local ttn, refund packaging
+    stock, and return status='soft_success' instead of HTTP 400.
+    """
+    from services.nova_poshta import NovaPoshtaAPIError
+    from models.stock_movement import StockMovementReason
+
+    box_id = uuid.uuid4()
+    order = _make_order(ttn="20451436562514", packaging_id=box_id)
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.rollback = AsyncMock()
+
+    fake_client = MagicMock()
+    fake_client.delete_internet_document = AsyncMock(
+        side_effect=NovaPoshtaAPIError(
+            "[NP API] Error: Document already deleted 20451436562514, No document changed DeletionMark"
+        )
+    )
+
+    with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
+         patch("routers.shipping.decrypt_value", return_value="plain-key"), \
+         patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status, \
+         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+        result = await delete_np_ttn(
+            order_id=order.id,
+            current_user=_make_user(),
+            db=db,
+        )
+
+    assert result["status"] == "soft_success"
+    assert "already deleted" in result["message"].lower()
+    assert order.ttn_number is None
+    db.commit.assert_awaited_once()
+    db.rollback.assert_not_called()
+
+    # Audit comment must distinguish soft-success from real success.
+    status_args = mock_status.await_args.args
+    assert status_args[2] == OrderStatus.IN_PRODUCTION
+    assert "already deleted on NP side" in status_args[4]
+
+    # PKG-2 increment fires on soft-success too (rule #4).
+    mock_stock.assert_awaited_once()
+    kwargs = mock_stock.await_args.kwargs
+    assert kwargs["box_id"] == box_id
+    assert kwargs["delta"] == +1
+    assert kwargs["reason"] == StockMovementReason.TTN_DELETE
+
+
+@pytest.mark.asyncio
+async def test_delete_ttn_soft_success_when_np_says_no_document_found():
+    """NP-UX-2: 'No document found' substring also maps to soft-success."""
+    from services.nova_poshta import NovaPoshtaAPIError
+
+    order = _make_order(ttn="20450999999999")
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.rollback = AsyncMock()
+
+    fake_client = MagicMock()
+    fake_client.delete_internet_document = AsyncMock(
+        side_effect=NovaPoshtaAPIError("[NP API] Error: No document found")
+    )
+
+    with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
+         patch("routers.shipping.decrypt_value", return_value="plain-key"), \
+         patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))):
+        result = await delete_np_ttn(
+            order_id=order.id,
+            current_user=_make_user(),
+            db=db,
+        )
+
+    assert result["status"] == "soft_success"
+    assert order.ttn_number is None
+
+
+@pytest.mark.asyncio
+async def test_delete_ttn_unmatched_np_error_still_400():
+    """NP-UX-2 regression guard: NP errors that don't match the soft-success
+    patterns (e.g. auth failure, permission denied) must still raise HTTP 400
+    with rollback — only the specific 'already gone' messages get the soft path.
+    """
+    from services.nova_poshta import NovaPoshtaAPIError
+
+    order = _make_order(ttn="20450999999999", packaging_id=uuid.uuid4())
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.rollback = AsyncMock()
+
+    fake_client = MagicMock()
+    fake_client.delete_internet_document = AsyncMock(
+        side_effect=NovaPoshtaAPIError("[NP API] Error: API key is invalid")
+    )
+
+    with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
+         patch("routers.shipping.decrypt_value", return_value="plain-key"), \
+         patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
+         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+        with pytest.raises(HTTPException) as exc:
+            await delete_np_ttn(
+                order_id=order.id,
+                current_user=_make_user(),
+                db=db,
+            )
+
+    assert exc.value.status_code == 400
+    db.rollback.assert_awaited()
+    db.commit.assert_not_called()
+    mock_stock.assert_not_called()
+    # Local state preserved on hard failure.
+    assert order.ttn_number == "20450999999999"

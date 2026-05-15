@@ -25,7 +25,7 @@ export const shippingApi = {
     const response = await client.get(`/orders/${orderId}/parcel-estimate`)
     return response.data
   },
-  deleteTTN: async (orderId: string) => {
+  deleteTTN: async (orderId: string): Promise<{ status: 'success' | 'soft_success'; message: string }> => {
     const response = await client.delete(`/shipping/np-ttn/${orderId}`)
     return response.data
   },

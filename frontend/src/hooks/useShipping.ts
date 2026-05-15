@@ -52,12 +52,22 @@ export function useDeleteTTN() {
   
   return useMutation({
     mutationFn: (orderId: string) => shippingApi.deleteTTN(orderId),
-    onSuccess: (_, orderId) => {
+    onSuccess: (data, orderId) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['order', orderId] })
       queryClient.invalidateQueries({ queryKey: ['packaging'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      addToast('TTN deleted successfully', 'success')
+      // NP-UX-2: backend returns status='soft_success' when NP reported the
+      // TTN was already gone (manual cabinet delete). Surface as info, not
+      // success, so the operator knows the local-only cleanup path ran.
+      if (data?.status === 'soft_success') {
+        addToast(
+          data.message ?? 'TTN was already deleted on NP side; local reference cleared.',
+          'info',
+        )
+      } else {
+        addToast('TTN deleted successfully', 'success')
+      }
     },
     onError: (error) => {
       addToast(getApiErrorMessage(error, 'Failed to delete TTN'), 'error')

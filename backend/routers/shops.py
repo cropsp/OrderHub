@@ -17,6 +17,7 @@ from schemas.shop import ShopCreate, ShopUpdate, ShopResponse, ShopDetailRespons
 from routers.dependencies import get_current_user, require_role
 from services.shopify_sync import sync_shop_orders
 from services.encryption_service import encrypt_value, decrypt_value
+from services.phone_normalization import normalize_ua_sender_phone
 
 
 logger = get_logger("routers.shops")
@@ -60,7 +61,7 @@ async def create_shop(
         platform=body.platform,
         shopify_store_url=str(body.shopify_store_url) if body.shopify_store_url else None,
         np_sender_name=body.np_sender_name,
-        np_sender_phone=body.np_sender_phone,
+        np_sender_phone=normalize_ua_sender_phone(body.np_sender_phone),
         np_sender_city_ref=body.np_sender_city_ref,
         np_sender_warehouse_ref=body.np_sender_warehouse_ref,
         np_default_description=body.np_default_description,
@@ -136,7 +137,11 @@ async def update_shop(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
         
     update_data = body.model_dump(exclude_unset=True, exclude={"shopify_access_token", "shopify_webhook_secret", "np_api_key"})
-    
+
+    # NP-FIX-3b: normalize sender phone on write (422 on unparseable input).
+    if "np_sender_phone" in update_data:
+        update_data["np_sender_phone"] = normalize_ua_sender_phone(update_data["np_sender_phone"])
+
     for key, value in update_data.items():
         if key == "shopify_store_url" and value is not None:
              setattr(shop, key, str(value))
