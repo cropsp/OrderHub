@@ -1,95 +1,148 @@
 # Profit Definition — Reference Note
 
-**Status:** Living document — 2026-05-15.
+**Status:** Living document — v1.1 — 2026-05-15.
 **Purpose:** Single source of truth for what "profit" means across the OrderHub system. Specifically referenced by **partner payout calculations** (see `partner-payouts.md`) and the FIN-1 finance dashboard.
 
 **Why this note exists:** "Profit" is the single most-disputed term in small business partnerships (per industry research — see PART-1 design doc §1). Every partner agreement Sergii has uses "profit" without explicit definition. To avoid future "wait, what counts as profit?" conversations with partners, we lock the current definition here and explicitly list questions that may need revisiting.
 
+**Changelog:**
+- **v1.1 (2026-05-15):** Q1-Q5 resolved per Sergii's discovery answers. Added §6 documenting the **partner formula deviation** — partners use `net_profit_product_only` (excludes shipping economics), not FIN-1's `Net Profit` (which includes shipping). FIN-1 itself unchanged.
+- **v1.0 (2026-05-15):** Initial draft, 5 open questions surfaced.
+
 ---
 
-## 1. Current definition (as of 2026-05-15, post-MAT-5 Phase B)
+## 1. Current FIN-1 Net Profit definition (as of 2026-05-15, post-MAT-5 Phase B)
 
-**Net Profit per shop, per period, per currency:**
+**Net Profit per shop, per period, per currency** — as displayed on `/shops/{id}/finance`:
 
 ```
 Net Profit = Revenue − COGS − Fees − Allocated Overhead Expenses
 ```
 
-Where each component is computed by `backend/services/finance_service.py` for the `/api/shops/{id}/finance` endpoint:
+Where each component is computed by `backend/services/finance_service.py`:
 
 | Component | SQL source | Notes |
 |---|---|---|
-| **Revenue** | `SUM(orders.total_price)` | Includes shipping; NOT items-only. Filters: `status IN ('shipped', 'completed')`, `COALESCE(shipped_at, ordered_at) BETWEEN :start AND :end`, grouped by `currency`. |
-| **COGS** | `SUM(COALESCE(orders.computed_production_cost, orders.production_cost, 0))` | Phase B: prefers BOM-computed cost when available (set by MAT-4 consumption hook); falls back to manual `production_cost` for orders without a BOM-equipped product. NULL/missing → 0 contribution. |
-| **Fees** | `SUM(COALESCE(orders.platform_fee, 0) + COALESCE(orders.shipping_np_cost, 0))` | Platform fees (Shopify / Etsy commission) plus Nova Poshta shipping cost. Note: Shopify shipping cost (paid by customer) is NOT in `shipping_np_cost`; it's bundled into `total_price` and not separately tracked. |
-| **Allocated Overhead Expenses** | `SUM(overhead_material_receipts.total_cost) WHERE shop_id = :shop_id` | Per-shop tagged overhead from MAT-5. Excludes unallocated overhead (workshop-wide expenses on `/dashboard`). |
+| **Revenue** | `SUM(orders.total_price)` | **Includes shipping**; `total_price` is the order's gross total. Filters: `status IN ('shipped', 'completed')`, `COALESCE(shipped_at, ordered_at) BETWEEN :start AND :end`, grouped by `currency`. |
+| **COGS** | `SUM(COALESCE(orders.computed_production_cost, orders.production_cost, 0))` | Phase B: prefers BOM-computed cost (set by MAT-4 consumption hook); falls back to manual `production_cost`. NULL/missing → 0 contribution. |
+| **Fees** | `SUM(COALESCE(orders.platform_fee, 0) + COALESCE(orders.shipping_np_cost, 0))` | Platform fees (Shopify/Etsy commission) + Nova Poshta shipping cost. **Shipping is netted via Fees.** |
+| **Allocated Overhead** | `SUM(overhead_material_receipts.total_cost) WHERE shop_id = :shop_id` | Per-shop tagged overhead from MAT-5. Excludes unallocated overhead. |
 
-All four aggregates are per-currency. Net Profit retains per-currency breakdown — no cross-currency aggregation is performed (see Known Limitation #1 below).
+All four aggregates are per-currency. Net Profit retains per-currency breakdown — no cross-currency aggregation.
 
-## 2. What is NOT in this definition (currently)
+## 2. What FIN-1 Net Profit does NOT include
 
-- **Operator's own labor cost** — Sergii's time isn't valued against profit. If Sergii decides his hourly rate matters, that's a future feature (would require a new "labor cost" entity or per-order hours tracking).
-- **Workshop overhead (unallocated)** — `OverheadMaterialReceipt` rows with `shop_id IS NULL` (workshop-wide expenses Sergii hasn't tagged to specific shops) are visible on `/dashboard` but **NOT subtracted from any single shop's Net Profit**. Sergii does any allocation manually when calculating partner payouts (per MAT-5 settled decision #2 of design `materials-warehouse.md`).
-- **Tax** — Sergii works on simplified taxation system. Tax provisions are NOT subtracted from Net Profit.
-- **Reserves / depreciation** — no equipment depreciation, no cash reserve accounting in OrderHub.
-- **FX gains/losses** — orders in USD stay in USD. No realized/unrealized currency revaluation.
+- **Operator's own labor cost** — Sergii's time isn't valued.
+- **Workshop overhead (unallocated)** — `OverheadMaterialReceipt.shop_id IS NULL` rows live on `/dashboard`; **NOT subtracted from any shop's Net Profit**. Sergii does any allocation manually.
+- **Tax** — simplified taxation system; no tax provisions.
+- **Reserves / depreciation** — no equipment depreciation, no cash reserve accounting.
+- **FX gains/losses** — orders in USD stay in USD; no realized/unrealized FX revaluation.
 
-## 3. Open questions to revisit
+## 3. Resolved questions (from 2026-05-15 discovery)
 
-These are intentional gaps. Each may need a decision when triggered by operational reality (e.g. partner asks for a different definition; new revenue stream emerges; tax system changes).
+### Q1 (RESOLVED) — COGS source transparency for partners
 
-### Q1 — COGS source preference and partner agreement transparency
+**Original concern:** Should partners be told when COGS source switched from manual to BOM-computed?
 
-**Issue:** After MAT-4, COGS prefers `computed_production_cost` (BOM-driven) over `production_cost` (manual). For an order with both, `computed_production_cost` wins. For a partner who agreed to "% of profit" before BOM was set up, the COGS number they see today may differ from what they would have seen 3 months ago.
+**Sergii's answer (2026-05-15):** *"Працюємо на довірі, питань не буде."* No proactive disclosure. If a partner asks why their share changed in a given month, operator explains then.
 
-**Question:** Should partners be informed when COGS source changes for a shop? Or is the post-Phase-B Net Profit just "the new normal" they accept?
+**Decision:** No technical change required. Documented as "operator handles via direct conversation if asked".
 
-**When to revisit:** Next time a partner questions a settlement amount.
+### Q2 (RESOLVED) — Allocated overhead in partner profit base
 
-### Q2 — Allocated overhead should be included for ALL partners?
+**Original concern:** Should partners share overhead expenses, or only "pre-overhead" profit?
 
-**Issue:** Per current MAT-5 implementation, Allocated Overhead is part of Net Profit (subtracted). For a partner with "% of profit" agreement signed BEFORE overhead tracking existed, this means their share is now smaller than it would have been. Counter-argument: overhead is a real cost; sharing profit should always factor it in.
+**Sergii's answer (2026-05-15):** *"Витрати на ці розхідники мінімальні, теж не проблема, поки хай так буде як є, profit після всіх витрат."* Allocated overhead stays subtracted (current behavior). Risk of dispute is low because the overhead amounts are small.
 
-**Question:** Should partners be able to opt out of overhead inclusion in their profit share? E.g. "% of pre-overhead profit"?
+**Decision:** No technical change. Allocated overhead remains in Net Profit calculation. Revisit if overhead amounts grow significantly OR a partner formally challenges the inclusion.
 
-**When to revisit:** If partner formally pushes back on the lower amounts after MAT-5 / PART-1 ships.
+### Q3 (RESOLVED) — FX tracking for cross-currency settlements
 
-### Q3 — Multi-currency partner share
+**Original concern:** Should OrderHub track FX rate at payment time, or rely on operator's manual conversion?
 
-**Issue:** Lamamarka Shopify is USD; partners may be paid in UAH. Today Sergii converts manually at payment time using current FX rate. There's no record in OrderHub of what conversion rate was used, and the settlement record stores USD amount only.
+**Sergii's answer (2026-05-15):** *"Рахую на момент виплати. Це звісно не коректно глобально, але на моїх обертах це допустимо, далі за потреби пофіксимо."* Manual conversion at payment time, no FX rate stored. Acceptable at current volume; revisit if FX volatility makes manual error-prone.
 
-**Question:** Should OrderHub track the FX rate used for each settlement? Auto-pull from NBU? Operator enters? Or stays manual outside the system?
+**Decision:** PART-1 settlements stay in shop currency (no FX). Operator manually computes UAH equivalent at payment time. If revisited, see PART-2 / PART-3 future work.
 
-**When to revisit:** If FX volatility makes manual conversion error-prone, or if partner asks for UAH-equivalent records.
+### Q4 (RESOLVED) — Negative Net Profit handling
 
-### Q4 — Negative Net Profit handling
+**Original concern:** If shop has loss in a period, does partner share the loss (negative settlement) or get 0?
 
-**Issue:** A shop can have Net Profit < 0 in a period (overhead exceeds revenue, or COGS exceeds revenue if BOM-computed costs are high). For "% of profit" partner, a 50% share of -1000 UAH is -500 UAH. Does the partner share the loss? Or are they sheltered?
+**Sergii's answer (2026-05-15):** *"В основному я беру на себе ризики і перекриваю касові розриви за потреби. Але намагаюсь тримати баланс і не доводжу до такого."* **Sergii absorbs losses himself; partners get 0 (or no settlement created) in negative-profit months.** Operator manages this via discipline (avoiding loss months) rather than passing it to partners.
 
-**Current behavior (PART-1):** Settlement record shows the negative computed amount as-is. Operator interprets — typically chooses to log a 0 settlement instead, or doesn't save the calculation that period.
+**Decision:** PART-1 calculator displays the negative computed amount as informational ("base is negative; partner share would be -X UAH"), but operator typically doesn't save the settlement OR saves with `computed_amount = 0` and a note. UI surfaces an info banner when base is negative warning operator before save. See `partner-payouts.md` §6.4.
 
-**Question:** Should OrderHub auto-clamp negative shares to 0? Or surface a warning at calculator time?
+### Q5 (DEFERRED) — BOM-vs-manual COGS transparency in partner settlements
 
-**When to revisit:** First time Sergii actually shows a partner a negative settlement screen.
+**Original concern:** Should partner settlements show "X of Y orders used BOM cost" so partner can ask follow-up?
 
-### Q5 — Manual production_cost fallback as data quality signal
+**Sergii's answer (2026-05-15):** *"Поки partner won't care. Але потім до цього повернемось. Бо важливе питання."* Defer to a later iteration. Will revisit when first partner asks about COGS methodology, OR when BOM coverage approaches Phase C cutover (~90% of catalog).
 
-**Issue:** FIN-1's diagnostic badge already counts orders missing both manual and computed cost. But for orders where manual `production_cost` is the source (no BOM), partners trust an operator's manual number — which may be inaccurate.
+**Decision:** Not in PART-1 scope. May land as a small UX enhancement in PART-2 or later.
 
-**Question:** Should partner settlements show how many orders in the period used computed-vs-manual COGS, so partner can ask follow-up if needed?
+## 4. Resolved internal definitions
 
-**When to revisit:** When BOM coverage approaches 90%+ (Phase C cutover prerequisite per `materials-warehouse.md` §6.2).
+These are no longer "open questions" — they're settled facts the system implements.
 
-## 4. How to update this document
+- "Profit" in FIN-1 context = the four-component formula in §1.
+- "Profit" in **partner-share** context = `net_profit_product_only` formula (see §6 below + `partner-payouts.md` §4).
+- COGS preference: COALESCE(computed_from_BOM, manual, 0) per row, then SUM (Phase B semantics).
+- Shipping is currently part of FIN-1's Fees (subtracted), but **excluded from partner profit calculations** (see §6).
 
-When any of the open questions above gets resolved (typically through a partner conversation or a new feature design), update the definition in §1 and move the resolved question to a "Resolved decisions" section at the bottom. Keep the audit trail.
+## 5. What's still open (not currently triggered)
 
-The single most important rule: **never silently change the Net Profit formula without updating this doc**. Partner trust depends on the definition staying stable or changing visibly.
+- **FX conversion in settlement records** — see Q3 above; deferred.
+- **Tax provisions** — out of scope until Sergii migrates off simplified taxation system.
+- **Operator labor cost** — out of scope; Sergii's time isn't valued today.
+- **Workshop overhead pro-rata allocation to shops** — currently manual; could be auto-allocated by revenue/order-count weighting if the unallocated card grows persistently.
 
-## 5. References
+## 6. Partner formula deviation — why partners use a different "profit"
+
+**Important distinction surfaced during PART-1 discovery:**
+
+For partner share calculations, Sergii's mental model treats **shipping as a transit pass-through**, not as part of product economics:
+
+> *"Доставка завжди йде транзитом — ні я, ні партнери з неї не маємо нічого. А якщо брати НП то взагалі клієнт платить при отриманні."*
+
+(Shipping always passes through — neither I nor partners profit from it. For Nova Poshta, the customer pays directly on pickup.)
+
+**Implication:** if FIN-1's Net Profit (which includes shipping income/costs) were used as the partner-share base, partners would inadvertently share in any positive shipping margin OR get penalized by negative shipping margin — **even though they contributed nothing to shipping logistics**.
+
+**Resolution:** PART-1 uses a partner-specific formula `net_profit_product_only` that explicitly excludes shipping economics:
+
+```
+net_profit_product_only =
+    items_revenue                                            -- SUM(OrderItem.qty × unit_price)
+  − COGS                                                     -- COALESCE(computed, manual, 0)
+  − non_shipping_fees                                        -- platform_fee only (NOT shipping_np_cost)
+  − allocated_overhead                                       -- per-shop tagged overhead
+```
+
+**Two key differences from FIN-1's Net Profit:**
+
+1. Revenue uses `SUM(OrderItem.qty × unit_price)` (items only, no shipping component) instead of `SUM(total_price)`.
+2. Fees include `platform_fee` only, NOT `shipping_np_cost`.
+
+**FIN-1's Net Profit definition stays unchanged** — it still includes shipping economics for the operator's overall view (e.g. "did I profit on shipping margin?"). PART-1 ships a new informational `Shipping Net` KPI card on `/shops/{id}/finance` showing the shipping margin separately, so operator can see both "product profit" (what partners share) and "shipping margin" (operator-only, e.g. small markup or accidental loss on logistics) at a glance.
+
+**Why two definitions instead of one:**
+
+- Changing FIN-1 globally would silently shift Net Profit numbers across the dashboard and historical comparisons (post-MAT-5 just shipped — too disruptive).
+- Partner-specific formula gives precise control without touching FIN-1's contracts.
+- Operator's view (FIN-1) and partner's view (PART-1) are answering different questions: "how is the shop doing overall?" vs. "what does this person get for their contribution to product creation?"
+
+This deviation is **intentional**, **documented**, and **stable** until either FIN-1 or PART-1 design evolves explicitly.
+
+## 7. How to update this document
+
+When any open question gets resolved (typically through a partner conversation or a new feature design), update §3 and move the resolved question to a "Resolved decisions" subsection. Keep the audit trail; never silently change the formula without updating this doc.
+
+The single most important rule: **partner trust depends on the definition staying stable or changing visibly**. If we ever rebase partner formulas on different math, document the change AND the operational reason here, so future Sergii (or future Cowork) understands why.
+
+## 8. References
 
 - `docs/design/materials-warehouse.md` v1.1 (Phase 3 design) — full Materials epic context
-- `docs/design/partner-payouts.md` — PART-1 design (uses Net Profit definition for `net_profit` formula)
+- `docs/design/partner-payouts.md` v1.1 — PART-1 design (uses `net_profit_product_only` formula for profit-share partners)
 - `implementation_plan.md` FIN-1 closure entry — original Net Profit formula introduction
 - `implementation_plan.md` MAT-5 closure entry — Phase B COGS cutover (`COALESCE(computed, manual, 0)`)
-- `backend/services/finance_service.py` — actual implementation
+- `backend/services/finance_service.py` — actual FIN-1 implementation
