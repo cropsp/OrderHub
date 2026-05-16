@@ -2976,6 +2976,186 @@ fail-loud-on-edge-case.
 
 ---
 
+**Sprint PART-1 — Partner Payouts monoblock** (Status: `DONE` — commit `bd6e528`; pytest 153 → 171)
+
+Goal: Close OrderHub's original raison d'être — Sergii's Excel-based partner
+payout loop. Ships two new entities (`PartnerSettlement` + `PartnerPayment`)
+with snapshot pattern at save-time, two payout formulas
+(`revenue_items_minus_fees` + `net_profit_product_only`), per-(shop, partner,
+currency) live balance computation, settlement-payment progress badges, and a
+new informational Shipping Net KPI card on `/shops/{id}/finance`. Operator UI
+replaces the Excel workflow end-to-end; partial payment tracking is
+first-class.
+
+The four profit-share partners migrate from FIN-1's Net Profit (which includes
+shipping economics) to the new `net_profit_product_only` formula that EXCLUDES
+shipping margin/cost — per `docs/design/profit-definition.md` §6, partners
+contribute nothing to shipping logistics and shouldn't share the resulting
+margin or loss. FIN-1's Net Profit definition itself stays UNCHANGED; both
+views coexist (operator-overall vs partner-only product economics).
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PART-1-1 | Two new SQLAlchemy models (`PartnerSettlement` + `PartnerPayment`) + one Alembic migration (ENUM + 2 tables + indexes + CHECK constraints + explicit ENUM drop in downgrade) | backend | DONE |
+| PART-1-2 | `finance_service` extensions: `compute_net_profit_product_only`, `compute_shipping_net`, `_run_product_only_aggregate` (parallel to existing `_run_kpi_aggregate`); subquery-based `items_per_order` JOIN to avoid order-line row multiplication | backend | DONE |
+| PART-1-3 | New `partner_payout_service` (9 methods) — `get_partner_balances` via TWO SEPARATE aggregate queries combined Python-side per rule #11 (explicitly NOT naive LEFT JOIN); `compute_settlement_payment_progress` returns dict for O(1) badge lookup | backend | DONE |
+| PART-1-4 | New `routers/partner_payouts.py` (9 endpoints, all `OWNER` + `MANAGER` via router-level `Depends(require_role(...))`) | backend | DONE |
+| PART-1-5 | `ShopFinanceResponse` extended with `shipping_net: KpiCard`; conditional render in `ShopFinancePage.tsx` reuses `_build_kpi` zero-row filter for auto-hide (no separate `<ShippingNetKpi>` wrapper — see Post-sprint notes) | backend + frontend | DONE |
+| PART-1-6 | Frontend `PartnerPayoutsSection` in `ShopFinancePage.tsx` composing balances summary + settlements table (with progress badges) + payments ledger + `CalculateSettlementModal` + `RecordPaymentModal` + custom `PartnerNameInput` autocomplete | frontend | DONE |
+| PART-1-7 | API client + React Query hooks with mutation-invalidation map (settlement create/delete invalidates settlements + balances + partner-names; payment create/delete also invalidates per-settlement progress) | frontend | DONE |
+| PART-1-8 | Tests: 17 new backend (9 service + 3 finance + 5 router) + 4 vitest files. +1 backend test from smoke-discovered bugfix (currency-mismatch progress). Final 171/171 | backend tests + frontend tests | DONE |
+
+**Post-sprint notes:**
+- **Plan deviation: dropped `<ShippingNetKpi>` wrapper component.** Plan-mode
+  OQ7 resolved to inline a conditional
+  `data.shipping_net.current.length > 0 && <FinanceKpiCard title="Shipping Net" ... />`
+  directly in the existing KPI grid in `ShopFinancePage.tsx:99-143`, rather
+  than building a separate wrapper as the original `task.md` scope listed.
+  Shared `<FinanceKpiCard>` primitive + existing `_build_kpi` zero-row filter
+  provide auto-hide-on-zero for free. CLAUDE.md §2 simplicity-first call;
+  trade-off is that `ShippingNetKpi.test.tsx` tests the conditional in the
+  page rather than an isolated component.
+- **Both formulas computed the same `base_amount` on Lamamarka during smoke.**
+  Lamamarka's single shipped order has 0 COGS / 0 fees / 0 overhead, so
+  `items_revenue − cogs − fees − overhead = items_revenue − fees`. Formulas
+  ARE distinct (different `formula_type` enum stored in DB, different SQL
+  paths through `finance_service`, different helper text under the dropdown);
+  they just degenerate to equal numbers on data-empty shops. NOT a bug;
+  expected per definitions. Real KoraKlenu shipped-order data (when seeded)
+  will exhibit visible divergence because the profit formula will subtract
+  COGS + overhead while revenue-share will not.
+- **Bugfix iteration mid-smoke: currency-blind settlement progress badge.**
+  Smoke Step 6 surfaced that `compute_settlement_payment_progress` summed all
+  linked payments regardless of currency, so a UAH payment linked to a USD
+  settlement (with the design-mandated warning shown and operator proceeding)
+  flipped the badge to "Overpaid by 185.01 USD" via arithmetic of
+  `15 USD + 200 UAH = 215` treated numerically as USD. Fix: JOIN to
+  `partner_settlements` + filter
+  `partner_payments.currency = partner_settlements.base_currency` in the
+  aggregate query. One new backend test
+  (`test_compute_settlement_payment_progress_excludes_mismatched_currency`).
+  Pytest 170 → 171. No frontend changes; the badge derivation in
+  `PartnerSettlementsTable.tsx` was already correct, only the input dict was
+  polluted. **Rule #15 now enforced at three layers**: warning UI on input +
+  per-currency aggregation in `get_partner_balances` + per-settlement progress
+  in `compute_settlement_payment_progress`.
+- **Auto-mode classifier did NOT block the commit this round.** Despite the
+  sprint touching 29 files (+3527 / −7), CC committed cleanly without the
+  direct-to-main friction observed in MICRO-CLEANUPS-1. Worth noting in case
+  the heuristic changes again.
+- **Pre-existing recharts warnings observed during smoke** — same
+  DASH-SHOP-WARNINGS pattern (parked); not introduced by PART-1. Console
+  otherwise clean across all 10 smoke steps (no JS errors, no React errors,
+  all 17 network requests 200).
+
+**Verified by smoke test (2026-05-16):**
+
+Used Lamamarka Shopify (single shipped order: 63 USD revenue, 3.02 USD
+shipping net — ideal positive scenario) for Steps 2–6 and 8–9; KoraKlenu
+(zero shipped orders + 450 UAH allocated overhead → −450 UAH base) for
+Step 7 negative-base banner. KoraKlenu's empty Partner Payouts section also
+covered the empty-state edge case in pre-flight.
+
+- **Step 1 pre-flight:** dev servers up; logged in as Микола Шевченко
+  (OWNER); Partner Payouts section renders empty-state ("NO PARTNER ACTIVITY
+  YET" + central CALCULATE SETTLEMENT CTA) on shops with zero settlements ✓
+- **Step 2 profit-share:** modal opens with helper text *"Excludes shipping
+  margin/cost. Partners share product-only profit."* Live preview at 50%:
+  Base 59.98 USD / Share 29.99 USD. Math: Revenue 63 − Shipping Net 3.02 ≈
+  items_revenue 59.98 ✓ formula correctly EXCLUDES shipping per rule #7.
+  Toast "Settlement saved"; per-partner balance row appears with Owed 29.99
+  USD (orange) ✓
+- **Step 3 revenue-share:** autocomplete dropdown surfaces "Тест Партнер"
+  after typing single character "Т" (validates OQ6 / custom
+  `<PartnerNameInput>`); formula switch updates helper text to *"Items
+  revenue minus Shopify/Etsy fees, no COGS subtracted"*. Saved; per-partner
+  balance correctly aggregates 29.99 + 15.00 = 44.99 USD (rule #11
+  no row-multiplication confirmed) ✓
+- **Step 4 linked partial payment:** per-row [+ Payment] pre-fills partner +
+  linked settlement + currency. Saved 15 USD against 29.99 USD settlement →
+  badge transitions grey "Unpaid" → orange "Paid 15.00 USD / 29.99 USD"
+  (partial state per design §5.4); other settlement badge unchanged ✓
+- **Step 5 unlinked standalone payment:** top-level [+ Record Payment] opens
+  with autocomplete already pre-populated; LINKED = "(none — counts toward
+  balance only)". Saved 10 USD unlinked → balance reduces to Owed 19.99 USD;
+  settlement-1 progress badge UNCHANGED ✓ unlinked payment correctly
+  contributes only to overall balance, not per-settlement progress (rule #12)
+- **Step 6 currency-mismatch:** orange banner *"⚠ Currency differs from
+  linked settlement (USD). The payment will not contribute to the USD
+  balance for this partner."* fires when CURRENCY is switched to UAH after
+  linking a USD settlement. Save active (warn not block) per rule #15.
+  Per-partner balance correctly creates a separate UAH row showing Overpaid
+  200 UAH while USD row stays at Owed 19.99 USD. **PROGRESS BADGE BUG
+  surfaced and fixed mid-smoke** — see Post-sprint notes ✓
+- **Step 7 negative-base banner (KoraKlenu):** preview shows Base −450.00
+  UAH (orange) / Share −112.50 UAH; banner *"⚠ Base is negative (loss
+  period). Saving will record a negative settlement. Sergii usually absorbs
+  losses; consider skipping."* matches rule #16 / design §6.4 exactly.
+  Cancelled without saving per Sergii's policy ✓
+- **Step 8 delete settlement with linked payments:** native `window.confirm()`
+  with body *"Delete this settlement?"* (Sergii confirmed manually — MCP
+  cannot click native dialogs, same friction pattern as AI_ONBOARDING.md §9
+  TTN delete). After confirm: settlement removed; ALL linked payments
+  survived with `LINKED TO = "(none)"` per `ondelete='SET NULL'` (rule #10).
+  Balance recalculated ✓
+- **Step 9 delete payment:** native confirm *"Delete payment of 500.00 UAH?"*
+  (manual click again). After confirm: payment row removed; per-partner
+  balance recomputed; "Settled in full" (green) badge state observed for the
+  first time in smoke ✓
+- **Step 10 console + edges:** console clean of PART-1-attributable warnings
+  (only pre-existing DASH-SHOP-WARNINGS recharts noise); all 17 network
+  requests 200 OK including all 6 PART-1 endpoints (`/partner-names`,
+  `/settlements`, `/payments`, `/balances`, `/preview` ×2); refresh
+  persistence confirmed across navigation; empty-state confirmed in
+  pre-flight; DESIGNER 403 covered by `test_partner_payouts_router.py`
+  role-gating cases (5 router tests passed in CC's gates) ✓
+- **Re-smoke after bugfix:** linked 500 UAH payment to 15.00 USD Items-Fees
+  settlement → badge correctly stays "Unpaid" (would have been "Overpaid by
+  485 USD" pre-fix). USD balance unchanged "Settled in full"; UAH 700 (= 200
+  prior unlinked + 500 new linked) surfaces as separate UAH row. Link
+  preserved in PAYMENTS table. Fix verified at all three layers ✓
+
+**Side observations (parked as PART-1 follow-ups):**
+- **PART-1-followup-1** — Delete actions on settlements and payments use
+  native `window.confirm()` instead of an in-app modal. Two operational
+  consequences: (a) blocks browser-MCP automation during smoke (workaround:
+  Sergii clicks manually — same pattern observed in NP-ROBUSTNESS-1 TTN
+  delete per AI_ONBOARDING §9), (b) makes it impossible to surface the
+  design §6.7 "linked payments will become unlinked" warning meaningfully
+  (see follow-up-2). Fix: build a small reusable `<ConfirmDialog>` (or
+  reuse the existing modal primitive) and wire it into both delete buttons.
+  Frontend-only, ~1–2 sessions. Cosmetic; low priority but unblocks both
+  browser-MCP smoke ergonomics and follow-up-2.
+- **PART-1-followup-2** — Settlement delete confirm body is bare *"Delete
+  this settlement?"* (captured via JS intercept during closure write) —
+  missing the linked-payments warning required by design §6.7 (*"This
+  settlement has N linked payments totaling X currency. Those payments will
+  remain in the ledger but no longer linked to a settlement."*). Operator
+  deleting a settlement with linked payments today has no in-flow indication
+  that the payments survive. Backend `ondelete='SET NULL'` is correct
+  (verified Step 8 smoke), so this is a UX-clarity gap, not a data risk.
+  Blocked on follow-up-1 (native `confirm()` cannot render multi-line
+  context-aware text gracefully); ship the in-app modal first, then add
+  warning copy + a payment-count query in the same change.
+
+- **Closes:** the original raison d'être of OrderHub. Sergii's Excel-based
+  partner payout workflow is replaced end-to-end: monthly cadence
+  calculator, two formula types covering all five of his real contracts,
+  snapshot-frozen settlements with delete-and-recreate semantics, partial
+  payment ledger with per-settlement progress and per-(partner, currency)
+  balance, and an informational Shipping Net KPI for operator-only
+  visibility into shipping margin (kept separate from partner-share
+  economics). FIN-1's Net Profit definition stays unchanged; PART-1 adds
+  the `net_profit_product_only` formula alongside per
+  `profit-definition.md` §6. **Two new parked follow-ups added** (both
+  cosmetic, both around delete-confirm UX, one blocks the other). PART-2
+  (PDF generation) waits for ≥1 month of real-world use per Sergii's signal
+  in `partner-payouts.md` §7. Next operational priority is Sergii's pick
+  from the parked items pool (PART-1-followup-1, PKG-UX-1, NP-ROBUSTNESS-1
+  follow-ups) versus a fresh epic.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3001,6 +3181,8 @@ in this document where applicable, to avoid duplication.
 | REFACTOR-EMPTY-STATE | Extract a shared `<EmptyStatePlaceholder>` component | Pattern repeated in 5 places after MAT-3 ships: `FinanceRevenueChart` ("No revenue data"), Materials list ("No materials registered yet"), Overhead list ("No overhead materials registered yet"), Movements ledger ("No movements yet"), BomEditor ("No recipe defined yet. Add materials to compute a production cost preview"). Each implementation uses a different inline structure but the same visual register ($ icon or analogue, opacity-50, centered text). YAGNI threshold (3 occurrences) was deliberately deferred during MAT-2; now we're at 5. Fix: one shared component accepting `icon`, `text`, optional `cta` (CTA button props), apply to the 5 sites. Pure refactoring — no behaviour change. Not urgent; bundle with the next frontend-only refactoring sprint. |
 | NP-ROBUSTNESS-1-followup-1 | React Query cache invalidation gap on shop PATCH (sender phone shows stale input echo) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). After saving a phone like `0633445320`, the modal continues showing `0633445320` until next page reload, instead of refetching the normalized backend value (`380633445320`). DB stores the correct normalized value; only the frontend cache is stale. Fix: ensure the shop-update mutation in `hooks/useShops.ts` (or wherever the PATCH mutation lives) calls `queryClient.invalidateQueries(['shops'])` (and per-shop key if exists) on success — currently the mutation likely returns the optimistically-sent payload to the cache rather than refetching. Cosmetic UX gap; no data loss; low-priority. |
 | NP-ROBUSTNESS-1-followup-2 | "Save button disabled when invalid" not implemented as advertised (validation fires on click only) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). CC's report claimed Save button is disabled when sender phone is invalid; reality is the button stays clickable and inline error appears AFTER click. Backend 422 still catches the bad input and surfaces the same error message inline, so the failure is loud and recoverable — but UX is less polished than promised (operator can click Save with garbage input, sees error after the fact, instead of seeing the error proactively as they type/blur). Fix: add a controlled-form validity state in `pages/ShopsPage.tsx` (or wherever the Logistics modal lives) that enables Save only when phone matches the UA-mobile regex. Cosmetic; low-priority. |
+| PART-1-followup-1 | Replace native `window.confirm()` with an in-app `<ConfirmDialog>` for settlement-delete and payment-delete actions in `PartnerSettlementsTable.tsx` + `PartnerPaymentsTable.tsx` | Discovered during PART-1 smoke (2026-05-16). Native browser `confirm()` blocks browser-MCP automation (Cowork needed Sergii's manual click on Steps 8 + 9 + re-smoke — same friction pattern as AI_ONBOARDING.md §9 TTN delete) AND cannot render multi-line context-aware warnings, blocking follow-up-2. Fix: build a small reusable `<ConfirmDialog>` (or reuse the existing modal primitive used by `CalculateSettlementModal`/`RecordPaymentModal`) and wire it into both delete buttons. Frontend-only, ~1–2 sessions. Cosmetic; low-priority but unblocks both browser-MCP smoke ergonomics and PART-1-followup-2. Best bundled with PART-1-followup-2 in a single sprint. |
+| PART-1-followup-2 | Settlement-delete confirm body missing design §6.7 warning about linked payments surviving as unlinked | Discovered during PART-1 closure-doc write (2026-05-16) — body captured via JS intercept of `window.confirm`. Current text is bare *"Delete this settlement?"*; design §6.7 mandates *"This settlement has N linked payments totaling X currency. Those payments will remain in the ledger but no longer linked to a settlement."* Operator deleting a settlement with linked payments has no in-flow indication that the payments survive. Backend `ondelete='SET NULL'` is correct (verified Step 8 smoke), so this is UX clarity only, not data risk. Blocked on PART-1-followup-1 (native `confirm()` cannot render multi-line context gracefully) — ship the in-app modal first, then add warning copy + a payment-count query in the same change. Low-priority. |
 
 ---
 
