@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Calculator, Plus, Users } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import {
   useDeletePayment,
@@ -10,13 +11,17 @@ import {
   usePayments,
   useSettlements,
 } from '@/hooks/usePartnerPayouts'
-import type { PartnerSettlement } from '@/api/partnerPayouts'
+import type { PartnerPayment, PartnerSettlement } from '@/api/partnerPayouts'
 
 import CalculateSettlementModal from './CalculateSettlementModal'
 import PartnerBalancesSummary from './PartnerBalancesSummary'
 import PartnerPaymentsTable from './PartnerPaymentsTable'
 import PartnerSettlementsTable from './PartnerSettlementsTable'
 import RecordPaymentModal from './RecordPaymentModal'
+
+type PendingConfirm =
+  | { kind: 'settlement'; target: PartnerSettlement }
+  | { kind: 'payment'; target: PartnerPayment }
 
 interface PartnerPayoutsSectionProps {
   shopId: string
@@ -40,6 +45,9 @@ export default function PartnerPayoutsSection({
   const [paymentPrefill, setPaymentPrefill] = useState<PartnerSettlement | null>(
     null,
   )
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(
+    null,
+  )
 
   const settlementsById = useMemo(() => {
     const out: Record<string, PartnerSettlement> = {}
@@ -58,16 +66,39 @@ export default function PartnerPayoutsSection({
     setPaymentOpen(true)
   }
 
-  const handleDeleteSettlement = async (s: PartnerSettlement) => {
-    const paid = Number(s.paid_amount)
-    const msg =
-      paid > 0
+  const handleDeleteSettlement = (s: PartnerSettlement) => {
+    setPendingConfirm({ kind: 'settlement', target: s })
+  }
+
+  const isMutatingConfirm =
+    deleteSettlement.isPending || deletePayment.isPending
+
+  const confirmBody = (() => {
+    if (!pendingConfirm) return ''
+    if (pendingConfirm.kind === 'settlement') {
+      const s = pendingConfirm.target
+      const paid = Number(s.paid_amount)
+      return paid > 0
         ? `This settlement has linked payments totaling ${paid.toFixed(
             2,
           )} ${s.base_currency}. Those payments will remain in the ledger but become unlinked. Delete settlement?`
         : 'Delete this settlement?'
-    if (!window.confirm(msg)) return
-    await deleteSettlement.mutateAsync(s.id)
+    }
+    const p = pendingConfirm.target
+    return `Delete payment of ${Number(p.amount).toFixed(2)} ${p.currency}?`
+  })()
+
+  const confirmTitle =
+    pendingConfirm?.kind === 'payment' ? 'Delete payment?' : 'Delete settlement?'
+
+  const handleConfirmDelete = async () => {
+    if (!pendingConfirm) return
+    if (pendingConfirm.kind === 'settlement') {
+      await deleteSettlement.mutateAsync(pendingConfirm.target.id)
+    } else {
+      await deletePayment.mutateAsync(pendingConfirm.target.id)
+    }
+    setPendingConfirm(null)
   }
 
   return (
@@ -134,17 +165,9 @@ export default function PartnerPayoutsSection({
             <PartnerPaymentsTable
               items={payments.data?.items ?? []}
               settlementsById={settlementsById}
-              onDelete={async (p) => {
-                if (
-                  !window.confirm(
-                    `Delete payment of ${Number(p.amount).toFixed(2)} ${
-                      p.currency
-                    }?`,
-                  )
-                )
-                  return
-                await deletePayment.mutateAsync(p.id)
-              }}
+              onDelete={(p) =>
+                setPendingConfirm({ kind: 'payment', target: p })
+              }
             />
           </div>
         </>
@@ -162,6 +185,18 @@ export default function PartnerPayoutsSection({
         onClose={() => setPaymentOpen(false)}
         shopId={shopId}
         prefillSettlement={paymentPrefill}
+      />
+      <ConfirmDialog
+        isOpen={pendingConfirm !== null}
+        onClose={() => {
+          if (!isMutatingConfirm) setPendingConfirm(null)
+        }}
+        title={confirmTitle}
+        body={confirmBody}
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        onConfirm={handleConfirmDelete}
+        isLoading={isMutatingConfirm}
       />
     </div>
   )
