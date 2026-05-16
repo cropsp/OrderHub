@@ -13,7 +13,8 @@ from fastapi.responses import JSONResponse
 from config import get_settings
 from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping, webhooks,
-    products, packaging, finance, materials, overhead_materials
+    products, packaging, finance, materials, overhead_materials,
+    partner_payouts,
 )
 
 from logger import setup_logging, get_logger
@@ -81,6 +82,7 @@ app.include_router(imports.router)
 app.include_router(attachments.router)
 app.include_router(dashboard.router)
 app.include_router(finance.router)
+app.include_router(partner_payouts.router)
 app.include_router(products.router)
 app.include_router(packaging.router)
 app.include_router(materials.router)

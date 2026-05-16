@@ -28,6 +28,8 @@ from models.material import (
     OverheadMaterialReceipt,
 )
 from models.bom import BomItem
+from models.partner_settlement import PartnerSettlement, PartnerSettlementFormula
+from models.partner_payment import PartnerPayment
 
 __all__ = [
     "Base",
@@ -56,4 +58,7 @@ __all__ = [
     "MaterialMovement",
     "MaterialMovementReason",
     "BomItem",
+    "PartnerSettlement",
+    "PartnerSettlementFormula",
+    "PartnerPayment",
 ]

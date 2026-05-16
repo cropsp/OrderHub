@@ -14,6 +14,7 @@ import {
 import FinanceKpiCard from '@/components/finance/FinanceKpiCard';
 import FinanceRevenueChart from '@/components/finance/FinanceRevenueChart';
 import DiagnosticBadge from '@/components/finance/DiagnosticBadge';
+import PartnerPayoutsSection from '@/components/finance/PartnerPayoutsSection';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { CurrencyAmount } from '@/types/finance';
 
@@ -140,6 +141,13 @@ export default function ShopFinancePage() {
                 value={data.allocated_overhead_expenses}
                 formatter={formatCount}
               />
+              {data.shipping_net.current.length > 0 && (
+                <FinanceKpiCard
+                  title="Shipping Net"
+                  value={data.shipping_net}
+                  formatter={formatCount}
+                />
+              )}
             </div>
 
             <div>
@@ -155,6 +163,12 @@ export default function ShopFinancePage() {
             <FinanceRevenueChart
               data={data.time_series}
               granularity={data.granularity}
+            />
+
+            <PartnerPayoutsSection
+              shopId={shopId}
+              periodStart={startIso}
+              periodEnd={endIso}
             />
           </>
         )}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import ShopFinancePage from '../ShopFinancePage';
 import type { ShopFinanceResponse } from '@/types/finance';
@@ -20,13 +21,25 @@ vi.mock('@/hooks/useShopFinance', () => ({
   useShopFinance: (...args: unknown[]) => mockFinance(...args),
 }));
 
+// PART-1: PartnerPayoutsSection uses react-query hooks; the section is mounted
+// inside ShopFinancePage. Stub it out — this test file targets KPI rendering
+// only, and PartnerPayoutsSection has its own dedicated tests.
+vi.mock('@/components/finance/PartnerPayoutsSection', () => ({
+  default: () => null,
+}));
+
 function renderPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <MemoryRouter initialEntries={['/shops/abc-123/finance']}>
-      <Routes>
-        <Route path="/shops/:shopId/finance" element={<ShopFinancePage />} />
-      </Routes>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/shops/abc-123/finance']}>
+        <Routes>
+          <Route path="/shops/:shopId/finance" element={<ShopFinancePage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -61,6 +74,7 @@ function buildResponse(overrides: Partial<ShopFinanceResponse> = {}): ShopFinanc
       total_orders_in_period: 12,
       orders_with_computed_cost: 0,
     },
+    shipping_net: { current: [], previous: [], change_percent: null },
     ...overrides,
   };
 }

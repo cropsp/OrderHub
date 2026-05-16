@@ -44,4 +44,7 @@ export interface ShopFinanceResponse {
   aov: KpiCard;
   time_series: TimeSeriesPoint[];
   diagnostic: DiagnosticInfo;
+  // PART-1: informational shipping margin KPI. current=[] when both
+  // shipping_revenue and shipping_np_cost are zero — frontend auto-hides.
+  shipping_net: KpiCard;
 }

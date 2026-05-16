@@ -23,7 +23,7 @@ from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.material import OverheadMaterialReceipt
-from models.order import Order, OrderStatus
+from models.order import Order, OrderItem, OrderStatus
 from models.shop import Shop
 from schemas.finance import (
     CurrencyAmount,
@@ -183,6 +183,181 @@ async def _run_overhead_aggregate(
     }
 
 
+async def _run_product_only_aggregate(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """Per-currency aggregate for PART-1 product-only formulas.
+
+    Differs from _run_kpi_aggregate in two ways:
+      - revenue is SUM(OrderItem.quantity * OrderItem.unit_price) joined via
+        a per-order subquery (avoids row multiplication on COGS/fees).
+      - fees is platform_fee ONLY (shipping_np_cost excluded — partners
+        contribute nothing to shipping logistics).
+    """
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    effective_cost_expr = func.coalesce(
+        Order.computed_production_cost, Order.production_cost, 0
+    )
+    items_subq = (
+        select(
+            OrderItem.order_id.label("order_id"),
+            func.sum(OrderItem.quantity * OrderItem.unit_price).label("items_subtotal"),
+        )
+        .group_by(OrderItem.order_id)
+        .subquery()
+    )
+    stmt = (
+        select(
+            Order.currency.label("currency"),
+            func.coalesce(func.sum(items_subq.c.items_subtotal), 0).label(
+                "items_revenue"
+            ),
+            func.sum(effective_cost_expr).label("cogs"),
+            func.coalesce(
+                func.sum(func.coalesce(Order.platform_fee, 0)), 0
+            ).label("non_shipping_fees"),
+        )
+        .select_from(Order)
+        .join(items_subq, items_subq.c.order_id == Order.id, isouter=True)
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.in_(REVENUE_STATUSES))
+        .where(cast(date_expr, Date) >= start)
+        .where(cast(date_expr, Date) <= end)
+        .group_by(Order.currency)
+    )
+    result = await db.execute(stmt)
+    return {
+        row.currency: {
+            "items_revenue": float(row.items_revenue or 0),
+            "cogs": float(row.cogs or 0),
+            "non_shipping_fees": float(row.non_shipping_fees or 0),
+        }
+        for row in result.all()
+    }
+
+
+async def _run_shipping_aggregate(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """Per-currency shipping revenue and shipping cost for PART-1 KPI.
+
+    shipping_revenue = SUM(total_price - items_subtotal_per_order)
+    shipping_cost    = SUM(COALESCE(shipping_np_cost, 0))
+    shipping_net     = shipping_revenue - shipping_cost
+    """
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    items_subq = (
+        select(
+            OrderItem.order_id.label("order_id"),
+            func.sum(OrderItem.quantity * OrderItem.unit_price).label("items_subtotal"),
+        )
+        .group_by(OrderItem.order_id)
+        .subquery()
+    )
+    stmt = (
+        select(
+            Order.currency.label("currency"),
+            func.coalesce(
+                func.sum(
+                    Order.total_price - func.coalesce(items_subq.c.items_subtotal, 0)
+                ),
+                0,
+            ).label("shipping_revenue"),
+            func.coalesce(
+                func.sum(func.coalesce(Order.shipping_np_cost, 0)), 0
+            ).label("shipping_cost"),
+        )
+        .select_from(Order)
+        .join(items_subq, items_subq.c.order_id == Order.id, isouter=True)
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.in_(REVENUE_STATUSES))
+        .where(cast(date_expr, Date) >= start)
+        .where(cast(date_expr, Date) <= end)
+        .group_by(Order.currency)
+    )
+    result = await db.execute(stmt)
+    rows: dict[str, dict] = {}
+    for row in result.all():
+        shipping_revenue = float(row.shipping_revenue or 0)
+        shipping_cost = float(row.shipping_cost or 0)
+        rows[row.currency] = {
+            "shipping_revenue": shipping_revenue,
+            "shipping_cost": shipping_cost,
+            "shipping_net": shipping_revenue - shipping_cost,
+        }
+    return rows
+
+
+async def compute_net_profit_product_only(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+) -> list[CurrencyAmount]:
+    """PART-1 partner profit-share base — excludes shipping economics.
+
+    items_revenue - cogs - platform_fee - allocated_overhead, per currency.
+    See docs/design/profit-definition.md §6 for the rationale.
+    """
+    kpi = await _run_product_only_aggregate(db, shop_id, period_start, period_end)
+    overhead = await _run_overhead_aggregate(db, shop_id, period_start, period_end)
+    merged: dict[str, float] = {}
+    for currency, row in kpi.items():
+        merged[currency] = (
+            row["items_revenue"] - row["cogs"] - row["non_shipping_fees"]
+        )
+    for currency, row in overhead.items():
+        merged[currency] = merged.get(currency, 0.0) - row["allocated_overhead"]
+    return [
+        CurrencyAmount(currency=c, amount=v)
+        for c, v in merged.items()
+        if v != 0
+    ]
+
+
+async def compute_revenue_items_minus_fees(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+) -> list[CurrencyAmount]:
+    """PART-1 revenue-share partner base — items revenue minus platform fees."""
+    kpi = await _run_product_only_aggregate(db, shop_id, period_start, period_end)
+    return [
+        CurrencyAmount(
+            currency=c,
+            amount=r["items_revenue"] - r["non_shipping_fees"],
+        )
+        for c, r in kpi.items()
+        if (r["items_revenue"] - r["non_shipping_fees"]) != 0
+    ]
+
+
+async def compute_shipping_net(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+) -> list[CurrencyAmount]:
+    """PART-1 informational KPI: shipping_revenue - shipping_cost per currency.
+
+    Auto-hide on FIN-1 is achieved by the _build_kpi zero-filter — empty
+    list = no card rendered on the frontend.
+    """
+    rows = await _run_shipping_aggregate(db, shop_id, period_start, period_end)
+    return [
+        CurrencyAmount(currency=c, amount=r["shipping_net"])
+        for c, r in rows.items()
+        if r["shipping_net"] != 0
+    ]
+
+
 async def _run_pipeline_aggregate(
     db: AsyncSession,
     shop_id: uuid.UUID,
@@ -295,6 +470,8 @@ async def get_shop_finance(
     overhead_previous = await _run_overhead_aggregate(db, shop_id, prev_start, prev_end)
     pipeline_current = await _run_pipeline_aggregate(db, shop_id, start_date, end_date)
     pipeline_previous = await _run_pipeline_aggregate(db, shop_id, prev_start, prev_end)
+    shipping_current = await _run_shipping_aggregate(db, shop_id, start_date, end_date)
+    shipping_previous = await _run_shipping_aggregate(db, shop_id, prev_start, prev_end)
     time_series = await _run_time_series(db, shop_id, start_date, end_date, granularity)
 
     # MAT-5: merge per-currency overhead into the kpi-row dicts so a currency
@@ -336,6 +513,7 @@ async def get_shop_finance(
     net_profit = _build_kpi(current_rows, previous_rows, "net_profit")
     aov = _build_kpi(current_rows, previous_rows, "aov")
     pipeline_value = _build_kpi(pipeline_current, pipeline_previous, "pipeline_value")
+    shipping_net = _build_kpi(shipping_current, shipping_previous, "shipping_net")
 
     current_count = sum(r["order_count"] for r in current_rows.values())
     previous_count = sum(r["order_count"] for r in previous_rows.values())
@@ -369,4 +547,5 @@ async def get_shop_finance(
         aov=aov,
         time_series=time_series,
         diagnostic=diagnostic,
+        shipping_net=shipping_net,
     )

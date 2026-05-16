@@ -62,3 +62,7 @@ class ShopFinanceResponse(BaseModel):
     aov: KpiCard
     time_series: list[TimeSeriesPoint]
     diagnostic: DiagnosticInfo
+    # PART-1: informational KPI for operator only (partners don't share in
+    # shipping). current=[] when both shipping_revenue and shipping_np_cost
+    # are zero — frontend auto-hides the card via that empty list.
+    shipping_net: KpiCard

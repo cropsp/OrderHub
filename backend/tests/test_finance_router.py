@@ -172,3 +172,76 @@ async def test_finance_overhead_aggregate_filters_by_shop_id():
         "Overhead aggregate is not grouped by currency. "
         f"Captured SQL: {overhead_sqls}"
     )
+
+
+# ─── PART-1 additions ──────────────────────────────────────────────────
+
+from services.finance_service import (  # noqa: E402
+    compute_net_profit_product_only,
+    compute_shipping_net,
+)
+from schemas.finance import CurrencyAmount  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_get_shop_finance_includes_shipping_aggregate_query():
+    """PART-1: get_shop_finance must invoke the shipping aggregate so
+    response.shipping_net is populated."""
+    db, captured, shop = _make_db_with_shop()
+    await get_shop_finance(
+        db=db,
+        shop_id=shop.id,
+        start_date=date(2026, 5, 1),
+        end_date=date(2026, 5, 31),
+    )
+    sqls = _compiled_sqls(captured)
+    shipping_sqls = [
+        s for s in sqls
+        if "shipping_np_cost" in s and "total_price - coalesce" in s
+    ]
+    assert shipping_sqls, (
+        "No shipping_net aggregate query was issued. "
+        f"Captured SQL: {sqls}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_compute_net_profit_product_only_sql_excludes_shipping():
+    """PART-1: SQL must NOT include shipping_np_cost (partners don't
+    share in shipping). Must JOIN order_items via subquery."""
+    db, captured, _ = _make_db_with_shop()
+    await compute_net_profit_product_only(
+        db=db,
+        shop_id=uuid.uuid4(),
+        period_start=date(2026, 5, 1),
+        period_end=date(2026, 5, 31),
+    )
+    sqls = _compiled_sqls(captured)
+    product_only_sql = next(
+        (s for s in sqls if "items_subtotal" in s or "quantity * order_items" in s),
+        None,
+    )
+    assert product_only_sql is not None, (
+        f"Product-only aggregate SQL was not issued. SQL: {sqls}"
+    )
+    assert "shipping_np_cost" not in product_only_sql, (
+        "Product-only aggregate must NOT reference shipping_np_cost. "
+        f"SQL: {product_only_sql}"
+    )
+    assert "platform_fee" in product_only_sql
+
+
+@pytest.mark.asyncio
+async def test_compute_shipping_net_returns_empty_list_when_zero():
+    """PART-1 auto-hide: when the SUM is zero (or no orders), shipping_net
+    returns an empty list — frontend uses that to skip rendering the card."""
+    db, _, _ = _make_db_with_shop()  # mocks return empty .all() rows
+    result = await compute_shipping_net(
+        db=db,
+        shop_id=uuid.uuid4(),
+        period_start=date(2026, 5, 1),
+        period_end=date(2026, 5, 31),
+    )
+    assert isinstance(result, list)
+    assert result == []  # no shipping data → empty list → KPI auto-hides
+
