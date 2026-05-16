@@ -3115,28 +3115,21 @@ covered the empty-state edge case in pre-flight.
   prior unlinked + 500 new linked) surfaces as separate UAH row. Link
   preserved in PAYMENTS table. Fix verified at all three layers ✓
 
-**Side observations (parked as PART-1 follow-ups):**
+**Side observations (parked as PART-1 follow-up):**
 - **PART-1-followup-1** — Delete actions on settlements and payments use
-  native `window.confirm()` instead of an in-app modal. Two operational
-  consequences: (a) blocks browser-MCP automation during smoke (workaround:
-  Sergii clicks manually — same pattern observed in NP-ROBUSTNESS-1 TTN
-  delete per AI_ONBOARDING §9), (b) makes it impossible to surface the
-  design §6.7 "linked payments will become unlinked" warning meaningfully
-  (see follow-up-2). Fix: build a small reusable `<ConfirmDialog>` (or
-  reuse the existing modal primitive) and wire it into both delete buttons.
-  Frontend-only, ~1–2 sessions. Cosmetic; low priority but unblocks both
-  browser-MCP smoke ergonomics and follow-up-2.
-- **PART-1-followup-2** — Settlement delete confirm body is bare *"Delete
-  this settlement?"* (captured via JS intercept during closure write) —
-  missing the linked-payments warning required by design §6.7 (*"This
-  settlement has N linked payments totaling X currency. Those payments will
-  remain in the ledger but no longer linked to a settlement."*). Operator
-  deleting a settlement with linked payments today has no in-flow indication
-  that the payments survive. Backend `ondelete='SET NULL'` is correct
-  (verified Step 8 smoke), so this is a UX-clarity gap, not a data risk.
-  Blocked on follow-up-1 (native `confirm()` cannot render multi-line
-  context-aware text gracefully); ship the in-app modal first, then add
-  warning copy + a payment-count query in the same change.
+  native `window.confirm()` instead of an in-app modal. Blocks browser-MCP
+  automation during smoke (workaround: Sergii clicks manually — same
+  pattern observed in NP-ROBUSTNESS-1 TTN delete per AI_ONBOARDING §9).
+  The settlement-delete confirm body already implements the design §6.7
+  linked-payments warning in `PartnerPayoutsSection.tsx:61-71` (`paid > 0`
+  branch produces *"This settlement has linked payments totaling X
+  currency. Those payments will remain in the ledger but become unlinked.
+  Delete settlement?"*) — that copy must be preserved verbatim when
+  migrating to the in-app modal. Fix: build a small reusable
+  `<ConfirmDialog>` (or reuse the existing dialog primitive used by
+  `CalculateSettlementModal` / `RecordPaymentModal`) and wire it into both
+  call sites in `PartnerPayoutsSection.tsx`. Frontend-only, ~1–2 sessions.
+  Cosmetic; low priority.
 
 - **Closes:** the original raison d'être of OrderHub. Sergii's Excel-based
   partner payout workflow is replaced end-to-end: monthly cadence
@@ -3147,12 +3140,112 @@ covered the empty-state edge case in pre-flight.
   visibility into shipping margin (kept separate from partner-share
   economics). FIN-1's Net Profit definition stays unchanged; PART-1 adds
   the `net_profit_product_only` formula alongside per
-  `profit-definition.md` §6. **Two new parked follow-ups added** (both
-  cosmetic, both around delete-confirm UX, one blocks the other). PART-2
+  `profit-definition.md` §6. **One new parked follow-up added** (cosmetic,
+  around delete-confirm UX). PART-2
   (PDF generation) waits for ≥1 month of real-world use per Sergii's signal
   in `partner-payouts.md` §7. Next operational priority is Sergii's pick
-  from the parked items pool (PART-1-followup-1, PKG-UX-1, NP-ROBUSTNESS-1
-  follow-ups) versus a fresh epic.
+  from the parked items pool (PKG-UX-1, NP-ROBUSTNESS-1 follow-ups) versus
+  a fresh epic.
+
+---
+
+**Sprint PART-1-followup-1 — In-app confirm dialog for partner payout deletes** (Status: `DONE` — commit `93f45ca`; pytest 171 → 171, vitest 17 → 18 files)
+
+Goal: Close the cosmetic follow-up parked at PART-1 closure — replace the
+two `window.confirm()` calls in `PartnerPayoutsSection.tsx` with a reusable
+in-app `<ConfirmDialog>` primitive. Removes the browser-MCP smoke friction
+observed during PART-1 (Cowork needed Sergii's manual click on every native
+dialog during Steps 8 + 9 + re-smoke — same pattern as AI_ONBOARDING.md §9
+TTN delete) and brings the partner-payout delete actions into visual
+register with the rest of the section (which already uses the shadcn Dialog
+primitive via `CalculateSettlementModal` / `RecordPaymentModal`).
+
+The design §6.7 linked-payments warning copy already implemented in the
+settlement-delete handler is preserved verbatim — this was a mechanism
+swap, not a copy or UX redesign.
+
+| ID | Task | Scope | Status |
+|---|---|---|---|
+| PART-1-fu-1-1 | New `frontend/src/components/ui/ConfirmDialog.tsx` — shadcn-Dialog-based primitive with props `isOpen` / `onClose` / `title` / `body` / `confirmLabel` (default "Delete") / `confirmVariant` (default destructive) / `onConfirm` / `isLoading`. Loader2 spinner on Confirm when `isLoading`; ESC + outside-click short-circuited during `isLoading` to prevent mid-flight dismissal | frontend | DONE |
+| PART-1-fu-1-2 | New `frontend/src/components/ui/__tests__/ConfirmDialog.test.tsx` — 4 vitest cases (renders title + body + buttons; `onConfirm` fires on Delete click; `onClose` fires on Cancel click; disabled + spinner when `isLoading=true`) | frontend tests | DONE |
+| PART-1-fu-1-3 | `PartnerPayoutsSection.tsx` — `pendingConfirm` discriminated-union state (`{kind: 'settlement', s} \| {kind: 'payment', p} \| null`); both `window.confirm()` blocks removed; settlement + payment copy preserved verbatim from the existing branches (paid > 0 §6.7 warning + paid == 0 bare + payment amount-currency); `setPendingConfirm(null)` runs after `await mutateAsync(...)` so failed mutations leave the dialog open and surface via the existing React Query toast path | frontend | DONE |
+
+**Post-sprint notes:**
+- **Auto-mode start, no plan-mode review.** Sergii ran CC in auto mode
+  per task.md's "plan mode OPTIONAL" guidance. Sprint was small and
+  well-scoped enough that all 3 OQs resolved cleanly during
+  implementation; gate outputs match the predicted deltas exactly
+  (vitest +1 file / +4 cases; pytest unchanged at 171). Sample of when
+  auto mode is the right call — single primitive + one section refactor
+  + 4 isolated test cases.
+- **Migration kept strictly to the two PART-1 call sites** per task.md
+  rule #2. The codebase has 5 other `window.confirm()` call sites
+  (`ProductsPage.tsx:130` archive, `AttachmentManager.tsx:62` file
+  delete, `DetailLogistics.tsx:455` TTN delete, `ShopsPage.tsx:597`
+  shop deactivate, `PackagingPage.tsx:51` packaging delete) that were
+  left untouched. Migrating those is intentionally future work — the
+  `<ConfirmDialog>` primitive now exists for any future sprint to
+  adopt one site at a time without rework.
+- **Pre-existing baseline noise noted but not addressed.** CC's
+  pre-commit gate run surfaced one `CustomersPage.test.tsx` vitest
+  failure verified on main before the sprint (via `git stash`) and 96
+  repo-wide lint errors in untouched files. None introduced by this
+  work. Carried over for any future test-cleanup or lint-sweep sprint.
+
+**Verified by smoke test (2026-05-16):**
+
+7 sub-steps walked on Lamamarka Shopify finance (period "This Year").
+Seeded a fresh Net Profit 15.00 USD settlement + 5 USD linked payment
+mid-smoke specifically to exercise the `paid > 0` §6.7-warning branch
+(the Items-Fees Unpaid carryover from PART-1 re-smoke covered the
+`paid == 0` bare branch).
+
+- **Bare body (paid == 0):** Items-Fees Unpaid trash → modal title
+  "Delete settlement?", body exactly *"Delete this settlement?"* ✓
+- **§6.7 body (paid > 0):** fresh Net Profit settlement with 5 USD
+  linked → trash → body exactly *"This settlement has linked payments
+  totaling 5.00 USD. Those payments will remain in the ledger but
+  become unlinked. Delete settlement?"* — verbatim match for the
+  `paid > 0` template at `PartnerPayoutsSection.tsx:64-67` ✓
+- **Payment body:** trash on 5.00 USD → body *"Delete payment of
+  5.00 USD?"*; trash on 200.00 UAH → body *"Delete payment of
+  200.00 UAH?"* — both exact template match ✓
+- **Dismissal parity:** Cancel button, ESC key, and outside-click all
+  close the modal without firing the delete mutation; verified via
+  re-locating the trash icon (still present) after each dismissal ✓
+- **Loading state:** mid-flight screenshot captured the dialog in
+  dissolve-out animation (faded header + faded buttons) right as the
+  mutation completed and the toast appeared. Full disabled-confirm +
+  Loader2 spinner state could not be reliably isolated on localhost
+  due to sub-100ms mutation RTT, but the dissolve frame proves the
+  async lifecycle is respected (no synchronous close on click). Code
+  review of `ConfirmDialog.tsx` confirms `isLoading` gates both the
+  Confirm button (disabled + Loader2) and the dismissal handlers ✓
+- **Console clean:** 58 messages over the session, all benign
+  (recharts DASH-SHOP-WARNINGS noise — parked, pre-existing; React
+  DevTools tip; Vite HMR debug). Zero JS errors, zero
+  PART-1-fu-1-attributable warnings. All 92 network requests 200 ✓
+- **Browser-MCP direct-click — the operational win:** 5+ in-app
+  delete-confirm flows clicked DIRECTLY via
+  `mcp__Claude_in_Chrome__computer left_click` (Items-Fees confirm,
+  Cancel button, fresh-settlement confirm with §6.7 body, 5 USD
+  payment confirm, 200 UAH payment confirm) without any native
+  `confirm()` interception and without Sergii's manual intervention.
+  Pre-fix PART-1 smoke required manual confirms on Steps 8 + 9 +
+  re-smoke; that friction is gone ✓
+
+- **Regression preserved:** `ondelete='SET NULL'` flow verified through
+  the new modal mechanism — the 5 USD payment linked to the deleted
+  Net Profit settlement survived in the PAYMENTS table with
+  `LINKED TO = "(none)"`, exactly as in PART-1 Step 8.
+
+- **Closes:** the one PART-1 parked follow-up. Browser-MCP smoke
+  ergonomics restored for partner-payout deletes; UI consistency with
+  the rest of the section achieved; design §6.7 copy preserved.
+  Reusable `<ConfirmDialog>` primitive now available under
+  `components/ui/` for any future sprint that wants to migrate one of
+  the remaining 5 `window.confirm()` call sites in the codebase. **One
+  parked item removed (PART-1-followup-1), zero new follow-ups added.**
 
 ---
 
@@ -3181,8 +3274,6 @@ in this document where applicable, to avoid duplication.
 | REFACTOR-EMPTY-STATE | Extract a shared `<EmptyStatePlaceholder>` component | Pattern repeated in 5 places after MAT-3 ships: `FinanceRevenueChart` ("No revenue data"), Materials list ("No materials registered yet"), Overhead list ("No overhead materials registered yet"), Movements ledger ("No movements yet"), BomEditor ("No recipe defined yet. Add materials to compute a production cost preview"). Each implementation uses a different inline structure but the same visual register ($ icon or analogue, opacity-50, centered text). YAGNI threshold (3 occurrences) was deliberately deferred during MAT-2; now we're at 5. Fix: one shared component accepting `icon`, `text`, optional `cta` (CTA button props), apply to the 5 sites. Pure refactoring — no behaviour change. Not urgent; bundle with the next frontend-only refactoring sprint. |
 | NP-ROBUSTNESS-1-followup-1 | React Query cache invalidation gap on shop PATCH (sender phone shows stale input echo) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). After saving a phone like `0633445320`, the modal continues showing `0633445320` until next page reload, instead of refetching the normalized backend value (`380633445320`). DB stores the correct normalized value; only the frontend cache is stale. Fix: ensure the shop-update mutation in `hooks/useShops.ts` (or wherever the PATCH mutation lives) calls `queryClient.invalidateQueries(['shops'])` (and per-shop key if exists) on success — currently the mutation likely returns the optimistically-sent payload to the cache rather than refetching. Cosmetic UX gap; no data loss; low-priority. |
 | NP-ROBUSTNESS-1-followup-2 | "Save button disabled when invalid" not implemented as advertised (validation fires on click only) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). CC's report claimed Save button is disabled when sender phone is invalid; reality is the button stays clickable and inline error appears AFTER click. Backend 422 still catches the bad input and surfaces the same error message inline, so the failure is loud and recoverable — but UX is less polished than promised (operator can click Save with garbage input, sees error after the fact, instead of seeing the error proactively as they type/blur). Fix: add a controlled-form validity state in `pages/ShopsPage.tsx` (or wherever the Logistics modal lives) that enables Save only when phone matches the UA-mobile regex. Cosmetic; low-priority. |
-| PART-1-followup-1 | Replace native `window.confirm()` with an in-app `<ConfirmDialog>` for settlement-delete and payment-delete actions in `PartnerSettlementsTable.tsx` + `PartnerPaymentsTable.tsx` | Discovered during PART-1 smoke (2026-05-16). Native browser `confirm()` blocks browser-MCP automation (Cowork needed Sergii's manual click on Steps 8 + 9 + re-smoke — same friction pattern as AI_ONBOARDING.md §9 TTN delete) AND cannot render multi-line context-aware warnings, blocking follow-up-2. Fix: build a small reusable `<ConfirmDialog>` (or reuse the existing modal primitive used by `CalculateSettlementModal`/`RecordPaymentModal`) and wire it into both delete buttons. Frontend-only, ~1–2 sessions. Cosmetic; low-priority but unblocks both browser-MCP smoke ergonomics and PART-1-followup-2. Best bundled with PART-1-followup-2 in a single sprint. |
-| PART-1-followup-2 | Settlement-delete confirm body missing design §6.7 warning about linked payments surviving as unlinked | Discovered during PART-1 closure-doc write (2026-05-16) — body captured via JS intercept of `window.confirm`. Current text is bare *"Delete this settlement?"*; design §6.7 mandates *"This settlement has N linked payments totaling X currency. Those payments will remain in the ledger but no longer linked to a settlement."* Operator deleting a settlement with linked payments has no in-flow indication that the payments survive. Backend `ondelete='SET NULL'` is correct (verified Step 8 smoke), so this is UX clarity only, not data risk. Blocked on PART-1-followup-1 (native `confirm()` cannot render multi-line context gracefully) — ship the in-app modal first, then add warning copy + a payment-count query in the same change. Low-priority. |
 
 ---
 
