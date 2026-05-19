@@ -1,14 +1,15 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { 
-  FileIcon, 
-  Upload, 
-  X, 
-  Download, 
-  FileText, 
-  ImageIcon, 
+import {
+  FileIcon,
+  Upload,
+  X,
+  Download,
+  FileText,
+  ImageIcon,
   FileCode,
-  Loader2
+  Loader2,
+  Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,7 @@ import { attachmentsApi } from '@/api/attachments';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { useToastStore } from '@/components/ui/Toast';
+import DraftGenerator from './draft/DraftGenerator';
 
 type AttachmentManagerProps = {
   orderId: string;
@@ -35,6 +37,20 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
   const deleteMutation = useDeleteAttachment();
   const [isUploading, setIsUploading] = useState(false);
   const { addToast } = useToastStore();
+  const [draftPhotoId, setDraftPhotoId] = useState<string | null>(null);
+
+  // Generate Draft is gated on having ≥1 REFERENCE-typed attachment
+  // (master rule 12). First REFERENCE wins; if there are several the
+  // operator can select via the per-row "Generate Draft" button.
+  const referenceAttachments = useMemo(
+    () => (attachments ?? []).filter((a) => a.attachment_type === 'reference'),
+    [attachments],
+  );
+  const primaryReference = referenceAttachments[0] ?? null;
+  const draftPhoto =
+    draftPhotoId
+      ? (attachments ?? []).find((a) => a.id === draftPhotoId) ?? null
+      : null;
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     setIsUploading(true);
@@ -63,7 +79,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
       try {
         await deleteMutation.mutateAsync(id);
         addToast('File deleted', 'success');
-      } catch (error) {
+      } catch {
         addToast('Failed to delete file', 'error');
       }
     }
@@ -89,6 +105,33 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
 
   return (
     <div className="space-y-3">
+      {/* Generate Draft button — only when the order has a REFERENCE photo. */}
+      {primaryReference && (
+        <Button
+          variant="outline"
+          className="w-full justify-start gap-2"
+          onClick={() => setDraftPhotoId(primaryReference.id)}
+        >
+          <Sparkles className="size-4 text-teal-400" />
+          <span className="truncate">
+            Generate Draft from {primaryReference.file_name}
+          </span>
+        </Button>
+      )}
+
+      {draftPhoto && (
+        <DraftGenerator
+          isOpen={!!draftPhotoId}
+          onClose={() => {
+            setDraftPhotoId(null);
+            void refetch();
+          }}
+          orderId={orderId}
+          photoAttachmentId={draftPhoto.id}
+          photoFilename={draftPhoto.file_name}
+        />
+      )}
+
       {/* Ultra-Compact Horizontal Upload Zone */}
       <div 
         {...getRootProps()} 
