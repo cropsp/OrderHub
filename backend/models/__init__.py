@@ -30,6 +30,7 @@ from models.material import (
 from models.bom import BomItem
 from models.partner_settlement import PartnerSettlement, PartnerSettlementFormula
 from models.partner_payment import PartnerPayment
+from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
 
 __all__ = [
     "Base",
@@ -61,4 +62,6 @@ __all__ = [
     "PartnerSettlement",
     "PartnerSettlementFormula",
     "PartnerPayment",
+    "IdlaserDraftJob",
+    "IdlaserDraftJobState",
 ]

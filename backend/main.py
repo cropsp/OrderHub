@@ -5,6 +5,7 @@ FastAPI application with CORS, exception handlers, and lifespan events.
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown events."""
     logger.info("=== OrderHub CRM starting ===")
     start_scheduler()
+
+    # ID-Laser asset wiring. Warn-only — designer flow works without
+    # idlaser; missing weights/template only disables Generate Draft.
+    try:
+        from idlaser.api import set_model_path
+        set_model_path(settings.IDLASER_MODEL_PATH)
+        if not Path(settings.IDLASER_MODEL_PATH).is_file():
+            logger.warning(
+                "IDLASER_MODEL_PATH missing: %s", settings.IDLASER_MODEL_PATH,
+            )
+        if not Path(settings.IDLASER_TEMPLATE_PATH).is_file():
+            logger.warning(
+                "IDLASER_TEMPLATE_PATH missing: %s",
+                settings.IDLASER_TEMPLATE_PATH,
+            )
+    except ImportError:
+        logger.warning(
+            "idlaser package not installed — Generate Draft will be unavailable",
+        )
+
     yield
     logger.info("=== OrderHub CRM shutting down ===")
 
