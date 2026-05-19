@@ -15,7 +15,7 @@ from config import get_settings
 from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping, webhooks,
     products, packaging, finance, materials, overhead_materials,
-    partner_payouts,
+    partner_payouts, idlaser,
 )
 
 from logger import setup_logging, get_logger
@@ -111,6 +111,7 @@ app.include_router(overhead_materials.router)
 app.include_router(mcp.router)
 app.include_router(shipping.router)
 app.include_router(webhooks.router)
+app.include_router(idlaser.router)
 
 
 # ─── Health Check ──────────────────────────────────────────
