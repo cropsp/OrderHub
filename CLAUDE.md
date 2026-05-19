@@ -145,11 +145,11 @@ Frontend entry point is the "Generate Draft" button in `AttachmentManager.tsx`, 
    `~/projects/idlaser/docs/training.md` for the retraining recipe.)
 4. Ensure `~/projects/idlaser/7001.svg` exists at the idlaser repo root.
    (User-supplied template; copy from prior Lamarka template archive.)
-5. Verify CRM's `docker-compose.yml` has the two bind-mount lines:
+5. Verify CRM's `docker-compose.yml` has the bind-mount line:
    ```yaml
    - /home/serhii/projects/idlaser:/idlaser:rw
-   - /home/serhii/projects/idlaser/models:/app/models:ro
    ```
+   (The separate `/app/models` mount was removed — it conflicted with CRM's SQLAlchemy models package. The ONNX weights are accessible at `/idlaser/models/card_detector.onnx` via the single `/idlaser` mount.)
 6. Inside CRM repo: `docker-compose build backend`
 7. `docker-compose up -d backend` — entrypoint runs `pip install -e /idlaser`.
 8. `docker-compose exec backend alembic upgrade head`

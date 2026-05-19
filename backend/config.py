@@ -55,10 +55,10 @@ class Settings(BaseSettings):
 
     # ─── ID-Laser draft pipeline ───────────────────────────────
     # Paths default to the bind-mount layout in docker-compose.yml:
-    # /idlaser is the editable-installed idlaser repo, /app/models is
-    # the ONNX weights mount. Template lives at idlaser repo root.
+    # /idlaser is the editable-installed idlaser repo; both the template
+    # and the ONNX weights are accessed via that single bind-mount.
     IDLASER_TEMPLATE_PATH: str = "/idlaser/7001.svg"
-    IDLASER_MODEL_PATH: str = "/app/models/card_detector.onnx"
+    IDLASER_MODEL_PATH: str = "/idlaser/models/card_detector.onnx"
     IDLASER_TIMEOUT_S: int = 60
 
     @property
