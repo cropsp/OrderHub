@@ -113,3 +113,51 @@ Performance: route-level chunk splitting (frontend). Testing: smoke tests with V
 - Designer shop access (SEC-05): a designer is granted access to a shop only if they have at least one order in that shop assigned to them. A designer with zero assignments gets 403 on every shop-scoped endpoint — onboarding must assign at least one order before the designer can use the system.
 - Designer access is shop-scoped, not order-scoped: a designer with any assigned order in shop X can access all shop-level endpoints (products, packaging, config) for that shop. Fine-grained order-level checks only apply in orders and attachments routers.
 - System user UUID `00000000-0000-0000-0000-000000000001` (`backend/constants.py:SYSTEM_USER_ID`) is referenced by webhook/scheduler audit rows. Never delete; never reuse. Installed by alembic migration `a1b2c3d4e5f6_add_persistent_system_user`.
+
+## ID-Laser draft pipeline (S004-mcp-wrapper)
+
+idlaser is a vendored library dependency; canonical source at github.com/cropsp/idlaser; bind-mount setup is transitional, submodule migration planned post-S004 as S005-submodule-migrate.
+
+The pipeline runs on the customer REFERENCE photo for an order and produces a DXF MOCKUP attachment. It exposes itself as `idlaser.api` — CRM imports only from that surface (never from `idlaser.pipeline` / `idlaser.detect` / etc.); internals may move, the `api` module won't.
+
+Three routes ship under `backend/routers/idlaser.py`, all role-gated to OWNER/MANAGER plus the order's assigned DESIGNER:
+- `POST /api/orders/{order_id}/generate-draft` — SSE stream, full pipeline.
+- `POST /api/orders/{order_id}/draft-jobs/{job_id}/manual-corners` — SSE stream, resumes after manager picks 4 corners on the original photo.
+- `GET  /api/orders/{order_id}/draft-jobs/{job_id}/status` — JSON polling fallback.
+
+Frontend entry point is the "Generate Draft" button in `AttachmentManager.tsx`, enabled iff the order has ≥1 REFERENCE attachment. It opens `DraftGenerator` (modal) which subscribes to the SSE stream via `@microsoft/fetch-event-source` (native EventSource cannot POST nor send Authorization headers).
+
+**Gotchas:**
+
+- **Bind-mounts, not requirements.txt**: idlaser is installed at container startup via `entrypoint.sh: pip install -e /idlaser`. It is NOT in `backend/requirements.txt` — adding it there would break bare-metal `pip install -r requirements.txt` runs (the bind-mounted `/idlaser` path doesn't exist outside the container). `docker-compose build` cannot use volume mounts either, so the install must happen at runtime, not build time.
+- **Template at idlaser repo root**: `7001.svg` lives at the idlaser repo root, not in a `templates/` subdir. The container reaches it via the `/idlaser:rw` bind-mount as `/idlaser/7001.svg` (this is the `IDLASER_TEMPLATE_PATH` default).
+- **Type drift risk**: `frontend/src/types/draftJob.ts` is a hand-written mirror of `backend/schemas/idlaser_draft_job.py`. There is no codegen tooling; if you change Pydantic field names/types, update the TS file too.
+- **SSE pattern**: this is the codebase's first **user-facing** SSE endpoint and uses `sse_starlette.EventSourceResponse` for auto-heartbeat. The raw `StreamingResponse(media_type="text/event-stream")` in `backend/routers/mcp.py` is the MCP-protocol-specific transport and is locked; **do not treat it as a reference pattern** for new user-facing SSE.
+- **Idlaser missing is non-fatal**: lifespan logs a warning if the model or template is absent, and the entrypoint warns if `/idlaser` isn't mounted. The rest of the app keeps working — only Generate Draft is unavailable.
+
+**First-time operator setup runbook:**
+
+1. `git clone https://github.com/cropsp/idlaser ~/projects/idlaser`
+2. `cd ~/projects/idlaser && pip install -e .[dev]`
+   (idlaser-side venv, for manual pipeline runs during ops)
+3. Ensure `~/projects/idlaser/models/card_detector.onnx` exists.
+   (Ships from idlaser S003.2 training output; if missing, see
+   `~/projects/idlaser/docs/training.md` for the retraining recipe.)
+4. Ensure `~/projects/idlaser/7001.svg` exists at the idlaser repo root.
+   (User-supplied template; copy from prior Lamarka template archive.)
+5. Verify CRM's `docker-compose.yml` has the two bind-mount lines:
+   ```yaml
+   - /home/serhii/projects/idlaser:/idlaser:rw
+   - /home/serhii/projects/idlaser/models:/app/models:ro
+   ```
+6. Inside CRM repo: `docker-compose build backend`
+7. `docker-compose up -d backend` — entrypoint runs `pip install -e /idlaser`.
+8. `docker-compose exec backend alembic upgrade head`
+9. `docker-compose restart frontend` (picks up `@microsoft/fetch-event-source`).
+10. Verify in browser: open any order with a REFERENCE attachment, click
+    "Generate Draft from {filename}", confirm modal opens, SSE events stream,
+    AUTO path produces a downloadable DXF.
+
+If step 7 logs "WARNING: /idlaser bind-mount not present" — the WSL path in `docker-compose.yml` doesn't match your username; edit the volume paths.
+
+If step 10's "Generate Draft" button is hidden — the order has no REFERENCE attachment. Upload one via the existing Production Assets upload zone first.
