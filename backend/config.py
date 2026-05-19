@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     # ─── MCP ───────────────────────────────────────────────────
     MCP_SERVER_PORT: int = 3001
 
+    # ─── ID-Laser draft pipeline ───────────────────────────────
+    # Paths default to the bind-mount layout in docker-compose.yml:
+    # /idlaser is the editable-installed idlaser repo, /app/models is
+    # the ONNX weights mount. Template lives at idlaser repo root.
+    IDLASER_TEMPLATE_PATH: str = "/idlaser/7001.svg"
+    IDLASER_MODEL_PATH: str = "/app/models/card_detector.onnx"
+    IDLASER_TIMEOUT_S: int = 60
+
     @property
     def is_development(self) -> bool:
         return self.ENVIRONMENT == "development"

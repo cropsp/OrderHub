@@ -3,6 +3,17 @@ set -e
 
 echo "=== OrderHub Backend Starting ==="
 
+# Install idlaser as an editable package from the bind-mounted /idlaser path.
+# Idempotent: pip detects the existing install and short-circuits on subsequent
+# starts. Skipped (with a warning) if /idlaser is missing — designer flow still
+# works without it.
+if [ -d "/idlaser" ]; then
+    echo "Installing idlaser (editable) from /idlaser..."
+    pip install --no-cache-dir -e /idlaser
+else
+    echo "WARNING: /idlaser bind-mount not present — Generate Draft will be unavailable."
+fi
+
 # Run Alembic migrations
 echo "Running database migrations..."
 alembic upgrade head
