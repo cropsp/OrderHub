@@ -193,6 +193,65 @@ async def test_pipeline_auto_path_finishes_ready_with_export_completed(monkeypat
     assert job.completed_at is not None
 
 
+# ─── 4b. Pipeline's bare export.completed is suppressed ───────────────
+# Regression: the pipeline emits its own "export.completed" stage at the
+# end (empty payload). Without suppression in progress_cb, the consumer
+# would see BOTH the pipeline's bare event AND the runner's enriched
+# event with result_attachment_id. The frontend aborts on the first
+# match (useDraftJob.ts:104-112) and loses the result_attachment_id.
+
+
+@pytest.mark.asyncio
+async def test_pipeline_bare_export_completed_is_suppressed(monkeypatch):
+    job = _make_job()
+    db = _make_db(get_result=job)
+    _patch_session_factory(monkeypatch, db)
+
+    monkeypatch.setattr(idlaser_service, "_bgr_from_bytes", lambda _: object())
+    monkeypatch.setattr(idlaser_service, "load_template", lambda _: object())
+
+    def fake_run(_bgr, _tmpl, progress):
+        # Pipeline emits an "export.completed" stage at the end with
+        # empty payload — this MUST be suppressed so only the runner's
+        # enriched version reaches the consumer.
+        progress("detect.classical.completed", {"candidates": 2, "k_face": 1})
+        progress("rectify.completed", {})
+        progress("export.completed", {})  # ← the bare one from pipeline
+        return _make_streaming_result("AUTO", dxf_bytes=b"DXFDATA")
+
+    monkeypatch.setattr(
+        idlaser_service, "_run_pipeline_with_retry", fake_run,
+    )
+
+    persisted_id = uuid.uuid4()
+
+    async def fake_persist(_db, _job, _bytes, _uploader):
+        att = MagicMock(spec=Attachment)
+        att.id = persisted_id
+        return att
+
+    monkeypatch.setattr(idlaser_service, "_persist_dxf", fake_persist)
+
+    events: list[dict] = []
+    async for event in idlaser_service.run_draft_pipeline_sse(
+        job, b"photo", job.triggered_by_id,
+    ):
+        events.append(event)
+
+    # Exactly ONE export.completed event reaches the consumer.
+    export_events = [e for e in events if e["type"] == "export.completed"]
+    assert len(export_events) == 1, (
+        f"Expected exactly one export.completed event, got "
+        f"{len(export_events)}: {export_events}"
+    )
+
+    # That single event is the runner's enriched one — carries the
+    # persisted attachment id and reports terminal 'ready' state.
+    only_export = export_events[0]
+    assert only_export["payload"].get("result_attachment_id") == str(persisted_id)
+    assert only_export["job_state"] == "ready"
+
+
 # ─── 5. REVIEW path: NEEDS_REVIEW + review_required event ─────────────
 
 

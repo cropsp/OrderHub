@@ -280,6 +280,14 @@ async def _stream(
 
     def progress_cb(stage: str, payload: dict[str, Any]) -> None:
         # Called from worker thread. Must not touch event loop directly.
+        # Suppress pipeline's terminal export.completed — the runner emits
+        # its own enriched version with result_attachment_id after
+        # persisting the DXF. Without this guard, the pipeline's
+        # empty-payload event would race ahead and the frontend's
+        # onmessage handler would abort the SSE connection before the
+        # enriched event arrives (useDraftJob.ts:104-112).
+        if stage == "export.completed":
+            return
         event = {
             "type": stage,
             "payload": payload,
