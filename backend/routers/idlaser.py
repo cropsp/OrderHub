@@ -92,7 +92,7 @@ async def generate_draft(
 
     async def event_gen():
         async for ev in idlaser_service.run_draft_pipeline_sse(
-            db, job, photo_bytes, current_user.id,
+            job, photo_bytes, current_user.id,
         ):
             yield await _serialize(ev)
 
@@ -123,7 +123,7 @@ async def submit_manual_corners(
 
     async def event_gen():
         async for ev in idlaser_service.run_reprocess_pipeline_sse(
-            db, job, photo_bytes, current_user.id, body.corners,
+            job, photo_bytes, current_user.id, body.corners,
         ):
             yield await _serialize(ev)
 

@@ -31,6 +31,7 @@ from tenacity import (
 )
 
 from config import get_settings
+from database import async_session_factory
 from logger import get_logger
 from models.attachment import Attachment, AttachmentType
 from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
@@ -71,6 +72,11 @@ except (ImportError, AttributeError):
     _ORT_FAIL = _OrtFailSentinel
 
 TRANSIENT_ML_ERRORS: tuple[type[BaseException], ...] = (_ORT_FAIL, OSError)
+
+
+# Holds references to detached runner tasks so the event loop doesn't GC
+# them after _stream exits. Tasks self-remove on completion.
+_RUNNER_TASKS: set[asyncio.Task] = set()
 
 
 @retry(
@@ -242,16 +248,21 @@ def _now_iso() -> str:
 
 
 async def _stream(
-    db: AsyncSession,
     job: IdlaserDraftJob,
     photo_bytes: bytes,
     triggered_by_id: uuid.UUID,
     *,
     manual_corners: list[list[float]] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Core SSE bridge. Sets job RUNNING, drains a thread-pipeline's
-    progress callbacks onto an asyncio.Queue, yields each event, and
-    finalises the job row (READY / NEEDS_REVIEW / FAILED) on the way out.
+    """Core SSE bridge. Spawns a fire-and-forget runner that owns its own
+    DB session, drains the pipeline's progress callbacks onto an
+    asyncio.Queue, yields each event, and finalises the job row
+    (READY / NEEDS_REVIEW / FAILED) on the way out.
+
+    The runner uses ``async_session_factory()`` to be independent of the
+    request-scoped session. If the SSE client aborts mid-stream the
+    runner keeps going to completion; the status GET endpoint serves as
+    the disconnect fallback.
 
     Two paths:
       - manual_corners is None → process_one_streaming (full pipeline)
@@ -260,25 +271,12 @@ async def _stream(
     loop = asyncio.get_running_loop()
     q: asyncio.Queue[dict | None] = asyncio.Queue()
 
-    # Mark RUNNING + record started_at before any thread work.
-    job.state = IdlaserDraftJobState.RUNNING
-    job.started_at = datetime.now(timezone.utc)
-    if manual_corners is not None:
-        job.manual_corners = manual_corners
-    await db.commit()
+    job_id = job.id
+    job_photo_attachment_id = job.photo_attachment_id
 
-    yield {
-        "type": "job.started",
-        "payload": {
-            "job_id": str(job.id),
-            "photo_attachment_id": (
-                str(job.photo_attachment_id)
-                if job.photo_attachment_id else None
-            ),
-        },
-        "timestamp": _now_iso(),
-        "job_state": job.state.value,
-    }
+    # Mutable holder for cross-task job_state visibility; runner is
+    # source of truth, consumer reads for event annotation.
+    state_holder = {"value": job.state.value}
 
     def progress_cb(stage: str, payload: dict[str, Any]) -> None:
         # Called from worker thread. Must not touch event loop directly.
@@ -292,128 +290,159 @@ async def _stream(
     template = load_template(settings.IDLASER_TEMPLATE_PATH)
 
     async def runner() -> None:
-        try:
-            bgr = _bgr_from_bytes(photo_bytes)
-            # IDLASER_TIMEOUT_S enforced here. asyncio.wait_for cancels
-            # the awaitable on timeout; the underlying thread is not
-            # killed but will finish on its own (bounded CPU pipeline).
-            if manual_corners is None:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        _run_pipeline_with_retry, bgr, template, progress_cb,
-                    ),
-                    timeout=settings.IDLASER_TIMEOUT_S,
-                )
-            else:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        _run_reprocess_with_retry,
-                        bgr,
-                        manual_corners,
-                        template,
-                        progress_cb,
-                    ),
-                    timeout=settings.IDLASER_TIMEOUT_S,
-                )
+        async with async_session_factory() as runner_db:
+            runner_job: IdlaserDraftJob | None = None
+            try:
+                runner_job = await runner_db.get(IdlaserDraftJob, job_id)
+                if runner_job is None:
+                    raise RuntimeError(f"Draft job {job_id} vanished")
 
-            if result.status == "AUTO":
-                attachment = await _persist_dxf(
-                    db, job, result.dxf_bytes or b"", triggered_by_id,
-                )
-                job.state = IdlaserDraftJobState.READY
-                job.result_attachment_id = attachment.id
-                job.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+                runner_job.state = IdlaserDraftJobState.RUNNING
+                runner_job.started_at = datetime.now(timezone.utc)
+                if manual_corners is not None:
+                    runner_job.manual_corners = manual_corners
+                await asyncio.shield(runner_db.commit())
+                state_holder["value"] = runner_job.state.value
+
                 loop.call_soon_threadsafe(
                     q.put_nowait,
                     {
-                        "type": "export.completed",
+                        "type": "job.started",
                         "payload": {
-                            "result_attachment_id": str(attachment.id),
+                            "job_id": str(job_id),
+                            "photo_attachment_id": (
+                                str(job_photo_attachment_id)
+                                if job_photo_attachment_id else None
+                            ),
                         },
                         "timestamp": _now_iso(),
                     },
                 )
-            else:
-                job.state = IdlaserDraftJobState.NEEDS_REVIEW
-                job.completed_at = datetime.now(timezone.utc)
-                await db.commit()
+
+                bgr = _bgr_from_bytes(photo_bytes)
+                # IDLASER_TIMEOUT_S enforced here. asyncio.wait_for cancels
+                # the awaitable on timeout; the underlying thread is not
+                # killed but will finish on its own (bounded CPU pipeline).
+                if manual_corners is None:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_pipeline_with_retry, bgr, template, progress_cb,
+                        ),
+                        timeout=settings.IDLASER_TIMEOUT_S,
+                    )
+                else:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            _run_reprocess_with_retry,
+                            bgr,
+                            manual_corners,
+                            template,
+                            progress_cb,
+                        ),
+                        timeout=settings.IDLASER_TIMEOUT_S,
+                    )
+
+                if result.status == "AUTO":
+                    attachment = await _persist_dxf(
+                        runner_db, runner_job, result.dxf_bytes or b"", triggered_by_id,
+                    )
+                    runner_job.state = IdlaserDraftJobState.READY
+                    runner_job.result_attachment_id = attachment.id
+                    runner_job.completed_at = datetime.now(timezone.utc)
+                    await asyncio.shield(runner_db.commit())
+                    state_holder["value"] = runner_job.state.value
+                    loop.call_soon_threadsafe(
+                        q.put_nowait,
+                        {
+                            "type": "export.completed",
+                            "payload": {
+                                "result_attachment_id": str(attachment.id),
+                            },
+                            "timestamp": _now_iso(),
+                        },
+                    )
+                else:
+                    runner_job.state = IdlaserDraftJobState.NEEDS_REVIEW
+                    runner_job.completed_at = datetime.now(timezone.utc)
+                    await asyncio.shield(runner_db.commit())
+                    state_holder["value"] = runner_job.state.value
+                    loop.call_soon_threadsafe(
+                        q.put_nowait,
+                        {
+                            "type": "review_required",
+                            "payload": {
+                                "reason": result.review_reason,
+                                "best_guess_corners": result.best_guess_corners,
+                                "rectified_preview_url": None,
+                            },
+                            "timestamp": _now_iso(),
+                        },
+                    )
+            except asyncio.TimeoutError:
+                msg = f"Exceeded {settings.IDLASER_TIMEOUT_S}s"
+                if runner_job is not None:
+                    runner_job.state = IdlaserDraftJobState.FAILED
+                    runner_job.error_message = msg
+                    runner_job.completed_at = datetime.now(timezone.utc)
+                    await asyncio.shield(runner_db.commit())
+                    state_holder["value"] = runner_job.state.value
                 loop.call_soon_threadsafe(
                     q.put_nowait,
                     {
-                        "type": "review_required",
-                        "payload": {
-                            "reason": result.review_reason,
-                            "best_guess_corners": result.best_guess_corners,
-                            "rectified_preview_url": None,
-                        },
+                        "type": "error",
+                        "payload": {"stage": "pipeline", "message": msg},
                         "timestamp": _now_iso(),
                     },
                 )
-        except asyncio.TimeoutError:
-            msg = f"Exceeded {settings.IDLASER_TIMEOUT_S}s"
-            job.state = IdlaserDraftJobState.FAILED
-            job.error_message = msg
-            job.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-            loop.call_soon_threadsafe(
-                q.put_nowait,
-                {
-                    "type": "error",
-                    "payload": {"stage": "pipeline", "message": msg},
-                    "timestamp": _now_iso(),
-                },
-            )
-        except Exception as exc:  # noqa: BLE001 — boundary
-            logger.exception(
-                "Pipeline failure for job %s: %s", job.id, exc,
-            )
-            job.state = IdlaserDraftJobState.FAILED
-            job.error_message = str(exc)
-            job.completed_at = datetime.now(timezone.utc)
-            await db.commit()
-            loop.call_soon_threadsafe(
-                q.put_nowait,
-                {
-                    "type": "error",
-                    "payload": {"stage": "pipeline", "message": str(exc)},
-                    "timestamp": _now_iso(),
-                },
-            )
-        finally:
-            loop.call_soon_threadsafe(q.put_nowait, None)  # sentinel
+            except Exception as exc:  # noqa: BLE001 — boundary
+                logger.exception(
+                    "Pipeline failure for job %s: %s", job_id, exc,
+                )
+                if runner_job is not None:
+                    runner_job.state = IdlaserDraftJobState.FAILED
+                    runner_job.error_message = str(exc)
+                    runner_job.completed_at = datetime.now(timezone.utc)
+                    await asyncio.shield(runner_db.commit())
+                    state_holder["value"] = runner_job.state.value
+                loop.call_soon_threadsafe(
+                    q.put_nowait,
+                    {
+                        "type": "error",
+                        "payload": {"stage": "pipeline", "message": str(exc)},
+                        "timestamp": _now_iso(),
+                    },
+                )
+            finally:
+                loop.call_soon_threadsafe(q.put_nowait, None)  # sentinel
 
-    # Note: if the client AbortController closes the SSE stream
-    # mid-pipeline, runner_task keeps pushing to the queue with no
-    # consumer — memory grows by event count until pipeline finishes.
-    # Acceptable for v1 (<10 concurrent users); revisit if profiling
-    # shows real leak under load.
     runner_task = asyncio.create_task(runner())
+    _RUNNER_TASKS.add(runner_task)
+    runner_task.add_done_callback(_RUNNER_TASKS.discard)
+
     try:
         while True:
             event = await q.get()
             if event is None:
                 break
-            event["job_state"] = job.state.value
+            event["job_state"] = state_holder["value"]
             yield event
     finally:
-        if not runner_task.done():
-            runner_task.cancel()
+        # Runner is fire-and-forget; status GET endpoint is the
+        # disconnect fallback. Pipeline is bounded by IDLASER_TIMEOUT_S.
+        pass
 
 
 async def run_draft_pipeline_sse(
-    db: AsyncSession,
     job: IdlaserDraftJob,
     photo_bytes: bytes,
     triggered_by_id: uuid.UUID,
 ) -> AsyncIterator[dict[str, Any]]:
     """Public: full-pipeline SSE stream (POST /generate-draft)."""
-    async for event in _stream(db, job, photo_bytes, triggered_by_id):
+    async for event in _stream(job, photo_bytes, triggered_by_id):
         yield event
 
 
 async def run_reprocess_pipeline_sse(
-    db: AsyncSession,
     job: IdlaserDraftJob,
     photo_bytes: bytes,
     triggered_by_id: uuid.UUID,
@@ -421,6 +450,6 @@ async def run_reprocess_pipeline_sse(
 ) -> AsyncIterator[dict[str, Any]]:
     """Public: manual-corners reprocess SSE stream (POST /manual-corners)."""
     async for event in _stream(
-        db, job, photo_bytes, triggered_by_id, manual_corners=corners,
+        job, photo_bytes, triggered_by_id, manual_corners=corners,
     ):
         yield event

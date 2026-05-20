@@ -25,6 +25,7 @@ Nine guards:
 
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -39,9 +40,10 @@ from services import idlaser_service
 # ─── DB / helpers ──────────────────────────────────────────────────────
 
 
-def _make_db(scalar_one_or_none=None):
+def _make_db(scalar_one_or_none=None, get_result=None):
     """Lightweight async-DB stub. Capture add/commit calls; one canned
-    scalar_one_or_none for the first execute() call."""
+    scalar_one_or_none for the first execute() call. ``get_result`` is
+    returned from ``db.get(...)`` (used by the runner's re-fetch)."""
     db = MagicMock()
 
     async def fake_execute(_stmt):
@@ -50,11 +52,25 @@ def _make_db(scalar_one_or_none=None):
         return r
 
     db.execute = AsyncMock(side_effect=fake_execute)
+    db.get = AsyncMock(return_value=get_result)
     db.add = MagicMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
     db.flush = AsyncMock()
     return db
+
+
+def _patch_session_factory(monkeypatch, db):
+    """Replace ``idlaser_service.async_session_factory`` with one that
+    yields ``db`` via an async context manager — matches the runner's
+    ``async with async_session_factory() as runner_db:`` usage."""
+    @asynccontextmanager
+    async def fake_ctx():
+        yield db
+
+    monkeypatch.setattr(
+        idlaser_service, "async_session_factory", lambda: fake_ctx(),
+    )
 
 
 def _make_job(order_id=None, photo_id=None) -> IdlaserDraftJob:
@@ -135,8 +151,9 @@ async def test_create_pending_job_inserts_pending_row():
 
 @pytest.mark.asyncio
 async def test_pipeline_auto_path_finishes_ready_with_export_completed(monkeypatch):
-    db = _make_db()
     job = _make_job()
+    db = _make_db(get_result=job)
+    _patch_session_factory(monkeypatch, db)
 
     monkeypatch.setattr(
         idlaser_service, "_bgr_from_bytes", lambda _: object(),
@@ -163,7 +180,7 @@ async def test_pipeline_auto_path_finishes_ready_with_export_completed(monkeypat
 
     events: list[dict] = []
     async for event in idlaser_service.run_draft_pipeline_sse(
-        db, job, b"photo", job.triggered_by_id,
+        job, b"photo", job.triggered_by_id,
     ):
         events.append(event)
 
@@ -181,8 +198,9 @@ async def test_pipeline_auto_path_finishes_ready_with_export_completed(monkeypat
 
 @pytest.mark.asyncio
 async def test_pipeline_review_path_emits_review_required(monkeypatch):
-    db = _make_db()
     job = _make_job()
+    db = _make_db(get_result=job)
+    _patch_session_factory(monkeypatch, db)
     corners = [[10.0, 10.0], [100.0, 10.0], [100.0, 100.0], [10.0, 100.0]]
 
     monkeypatch.setattr(idlaser_service, "_bgr_from_bytes", lambda _: object())
@@ -202,7 +220,7 @@ async def test_pipeline_review_path_emits_review_required(monkeypatch):
 
     events: list[dict] = []
     async for event in idlaser_service.run_draft_pipeline_sse(
-        db, job, b"photo", job.triggered_by_id,
+        job, b"photo", job.triggered_by_id,
     ):
         events.append(event)
 
@@ -222,8 +240,9 @@ async def test_pipeline_review_path_emits_review_required(monkeypatch):
 async def test_manual_corners_reprocess_persists_corners_and_uses_reprocess_fn(
     monkeypatch,
 ):
-    db = _make_db()
     job = _make_job()
+    db = _make_db(get_result=job)
+    _patch_session_factory(monkeypatch, db)
     corners = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]]
 
     monkeypatch.setattr(idlaser_service, "_bgr_from_bytes", lambda _: object())
@@ -250,7 +269,7 @@ async def test_manual_corners_reprocess_persists_corners_and_uses_reprocess_fn(
 
     events: list[dict] = []
     async for event in idlaser_service.run_reprocess_pipeline_sse(
-        db, job, b"photo", job.triggered_by_id, corners,
+        job, b"photo", job.triggered_by_id, corners,
     ):
         events.append(event)
 
@@ -264,8 +283,9 @@ async def test_manual_corners_reprocess_persists_corners_and_uses_reprocess_fn(
 
 @pytest.mark.asyncio
 async def test_unknown_error_sets_failed_and_emits_error(monkeypatch):
-    db = _make_db()
     job = _make_job()
+    db = _make_db(get_result=job)
+    _patch_session_factory(monkeypatch, db)
 
     monkeypatch.setattr(idlaser_service, "_bgr_from_bytes", lambda _: object())
     monkeypatch.setattr(idlaser_service, "load_template", lambda _: object())
@@ -279,7 +299,7 @@ async def test_unknown_error_sets_failed_and_emits_error(monkeypatch):
 
     events: list[dict] = []
     async for event in idlaser_service.run_draft_pipeline_sse(
-        db, job, b"photo", job.triggered_by_id,
+        job, b"photo", job.triggered_by_id,
     ):
         events.append(event)
 
@@ -294,8 +314,9 @@ async def test_unknown_error_sets_failed_and_emits_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_timeout_sets_failed_with_exceeded_message(monkeypatch):
-    db = _make_db()
     job = _make_job()
+    db = _make_db(get_result=job)
+    _patch_session_factory(monkeypatch, db)
 
     monkeypatch.setattr(idlaser_service, "_bgr_from_bytes", lambda _: object())
     monkeypatch.setattr(idlaser_service, "load_template", lambda _: object())
@@ -317,7 +338,7 @@ async def test_timeout_sets_failed_with_exceeded_message(monkeypatch):
     try:
         events: list[dict] = []
         async for event in idlaser_service.run_draft_pipeline_sse(
-            db, job, b"photo", job.triggered_by_id,
+            job, b"photo", job.triggered_by_id,
         ):
             events.append(event)
     finally:

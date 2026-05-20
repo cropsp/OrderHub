@@ -120,7 +120,7 @@ async def test_generate_draft_validates_photo_and_creates_job(monkeypatch):
     create = AsyncMock(return_value=fake_job)
     read_bytes = AsyncMock(return_value=b"PHOTOBYTES")
 
-    async def fake_run(db, job, photo_bytes, uploader_id):
+    async def fake_run(job, photo_bytes, uploader_id):
         yield {
             "type": "job.started",
             "payload": {},
