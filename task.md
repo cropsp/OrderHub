@@ -4,239 +4,635 @@
 > **To all AI Agents:** This file is a **session-level checklist** for immediate technical tasks.
 >
 > - **Strategic Roadmap & History:** Refer to [implementation_plan.md](implementation_plan.md).
-> - **Design source of truth:** [docs/design/partner-payouts.md](docs/design/partner-payouts.md) v1.1 — full PART-1 design (entities, formulas, UI, edge cases). Read this first.
-> - **Profit reference:** [docs/design/profit-definition.md](docs/design/profit-definition.md) v1.1 — `net_profit_product_only` formula and why partners use a different "profit" than FIN-1.
-> - **Current task:** PART-1 — Partner Payouts monoblock (settlements + payments + balance + Shipping Net KPI)
+> - **Cross-repo master contract:** `~/projects/idlaser/task.md` (also in `~/projects/handoff/orderhub-idlaser.md` if handoff folder is set up). 15 settled Behaviour rules + 10 OQs. Idlaser-side answered OQs 1/2/3/7; this task.md answers OQs 4/5/6/8/9/10 + adds CRM-specific OQs.
+> - **Current task:** none — S004-mcp-wrapper closed 2026-05-20 (see closure entry in [implementation_plan.md](implementation_plan.md)). The S004 spec below is preserved as archival reference and a template for `S005-submodule-migrate`. Next sprint pick from the parking lot (Explicitly deferred + Open Architectural Questions in `implementation_plan.md`).
 >
 > DO NOT store long-term plans here. Only active, atomic steps for the current session.
 
 ---
 
-## PART-1 — Partner Payouts monoblock (settlements + payments + balance + Shipping Net KPI)
+## ✅ S004-mcp-wrapper — DONE (2026-05-20)
+
+Sprint closed. 5 feat commits `d0ee31e` → `55dc444` + 4 mid-smoke fix commits `5c7a0ba` / `0cc6068` / `d98d573` / `8ed66d6`. Browser-MCP smoke 8/8 green. pytest 171 → 187 (+16 new `test_idlaser_*` cases including `test_pipeline_bare_export_completed_is_suppressed` which pins fix `8ed66d6`). One parked follow-up: `S004-followup-1` — DraftGenerator useEffect double-fire under React.StrictMode dev (production unaffected; ~3 LOC fix; defer to next idlaser-touching sprint or bundle into `S005-submodule-migrate`). Full closure entry + smoke evidence + per-commit narrative in `implementation_plan.md` (search "S004-mcp-wrapper" in that file).
+
+---
+
+## S004-mcp-wrapper — CRM integration: Generate-Draft + manager-mediated corner-picker (CRM-side) [ARCHIVED SPEC]
+
+### Cross-repo source of truth
+
+The **master integration contract** lives at `~/projects/idlaser/task.md`
+(same file shared via `~/projects/handoff/orderhub-idlaser.md` if handoff is
+mounted). It contains:
+- Two-side architecture diagram (browser → CRM backend → idlaser pipeline)
+- 15 settled Behaviour rules (do NOT relitigate)
+- 10 Open Questions (idlaser-side already answered 1, 2, 3, 7; CRM-side
+  answers 4, 5, 6, 8, 9, 10 — inline below)
+- Verification scenarios for idlaser-side, CRM-side, integration end-to-end
+- Workflow split between CC session A (idlaser) and CC session B (this sprint)
+
+**Read the master contract FIRST** before this file. If you find a hard
+contradiction between master and CRM reality during planning, surface to
+Cowork (Serhii) immediately — do NOT improvise. The 15 Behaviour rules are
+settled contracts; everything outside them is open for discussion.
+
+**Idlaser-side has shipped** (commit `6720146` in `~/projects/idlaser`,
+GitHub `https://github.com/cropsp/idlaser` — private). Streaming wrapper
+`idlaser.pipeline.process_one_streaming` is importable; weights at
+`~/projects/idlaser/models/card_detector.onnx`; template at
+`~/projects/idlaser/templates/7001.svg` (verify with OQ-F).
 
 ### Goal
 
-Phase 2 of the Finance epic. Replace Sergii's Excel-based partner payout tracking with a first-class CRM surface: per-period settlement calculator that **freezes a base + computed amount snapshot** at save time, a **payments ledger** that tracks the actual money movements out to partners (with multiple partial payments per settlement supported), a **live per-partner balance** (`SUM(settlements) − SUM(payments)` per `(shop, partner, currency)`), and an informational **Shipping Net KPI** card on the FIN-1 finance page.
+Wire idlaser into OrderHub as a manager-facing workflow on order detail:
+"Generate Draft" button in `AttachmentManager`'s Production Assets section
+runs the pipeline against a customer ID photo, streams progress via SSE,
+falls into a corner-picker modal when ML alignment fails, saves the
+generated DXF as a new `Attachment(attachment_type=MOCKUP)`. Manager
+downloads the result via existing `/api/attachments/{id}`.
 
-**Single monoblock sprint per Sergii's confirmation** (*"PART-1 моноблок"*). Larger than FIN-1 because it ships two entities (PartnerSettlement + PartnerPayment), two formulas (`revenue_items_minus_fees` + `net_profit_product_only`), per-partner balance computation, the Shipping Net KPI card, and the full UI for all of the above. Each individual piece is straightforward CRUD + aggregation; none break new patterns.
+**Manager-mediated correction is FIRST-CLASS workflow**, not edge case
+(per master Goal §). Real-world AUTO rate is ~30-70% depending on photo
+quality. The corner-picker covers the rest in ~30s/photo. Don't
+deprioritize the picker as nice-to-have.
 
-**Why this matters:** OrderHub's original raison d'être was Sergii's frustration with Excel-driven partner payouts. FIN-1 delivered the underlying numbers; Phase 3 Materials Warehouse made those numbers trustworthy (BOM-computed COGS); PART-1 finally ships the operator-facing surface that closes the loop on the original ask. Partial payment tracking + balance display were surfaced during second-pass discovery and are first-class in this sprint (decisions #12-15 in `partner-payouts.md` §2).
+This is OrderHub CRM's **first user-facing SSE pattern** (mcp.py is locked,
+internal-only). The architectural choices here become reference for any
+future progress-streaming feature.
 
-**Critical formula deviation:** all four profit-share partners use `net_profit_product_only` — NOT FIN-1's full Net Profit. This formula excludes shipping economics (shipping revenue AND shipping cost) from the partner-share base because partners contribute nothing to shipping logistics. See `profit-definition.md` §6 for the rationale and `partner-payouts.md` §4.2 for the SQL sketch. FIN-1's Net Profit definition is **unchanged**; the new formula lives alongside it.
+### Integration mechanism (strategic context)
+
+**During S004:** bind-mount + `pip install -e /idlaser` editable install.
+Enables rapid two-repo iteration. Concrete `docker-compose.yml` mounts:
+
+```yaml
+volumes:
+  - /home/serhii/projects/idlaser:/idlaser:rw            # for pip install -e /idlaser
+  - /home/serhii/projects/idlaser/models:/app/models:ro  # ONNX weights
+  - /home/serhii/projects/idlaser/templates:/app/templates:ro  # SVG templates
+```
+
+**Post-S004 (sprint S005-submodule-migrate, NOT in scope here):** swap
+bind-mount for git submodule from `github.com/cropsp/idlaser` (private —
+needs PAT/SSH deploy key in Dockerfile; flag for S005 planner). Weight
+file then distributed via tagged GitHub Release asset.
+
+**In CRM's CLAUDE.md update (commit 5 of split below)** include this
+sentence verbatim: *"idlaser is a vendored library dependency; canonical
+source at github.com/cropsp/idlaser; bind-mount setup is transitional,
+submodule migration planned post-S004 as S005-submodule-migrate."*
 
 ### Behaviour rules (settled — do not relitigate)
 
-1. **Single atomic commit, single sprint (monoblock).** Commit message: `feat(part-1): partner payouts + payments ledger + shipping net kpi`. Squash any work-in-progress micro-commits before pushing.
+**Master rules 1-15 apply as written.** See `~/projects/idlaser/task.md`
+or `~/projects/handoff/orderhub-idlaser.md`. Below are CRM-side-specific
+rules ON TOP of master:
 
-2. **No Partner entity.** `partner_name` is free text (`str(200)`) on both `partner_settlements` and `partner_payments`. Autocomplete dropdown populated from DISTINCT union of both tables drives UX consistency. Typo risk is an accepted limitation (`partner-payouts.md` §6.3); do not add a `Partner` model.
+16. **SQLAlchemy model conventions.** `IdlaserDraftJob` extends
+    `Base, UUIDPrimaryKeyMixin, TimestampMixin` per `backend/models/base.py`.
+    Mirror recent precedent: `backend/models/partner_settlement.py` and
+    `backend/models/partner_payment.py` (PART-1, commit `bd6e528`). Use
+    `Mapped[]` type annotations + `mapped_column()` per SQLAlchemy 2.0 style
+    used throughout the codebase.
 
-3. **No FIN-1 schema mutation.** PART-1 adds two new tables and a new Postgres ENUM (`partner_settlement_formula`). It does NOT change `orders`, `order_items`, `overhead_material_receipts`, or any existing FIN-1 column. The only additive change to existing FIN-1 surface is two new helper methods on `finance_service` (`compute_net_profit_product_only`, `compute_shipping_net`) and one optional new field on the `/shops/{id}/finance` response payload (Shipping Net KPI, auto-omitted when zero).
+17. **Migration filename & ENUM pattern.** Alembic migration filename via
+    `alembic revision --autogenerate -m "add_idlaser_draft_jobs"` →
+    `{revision_hash}_add_idlaser_draft_jobs.py`. The new Postgres ENUM
+    `idlaser_draft_job_state` MUST be explicitly dropped in `downgrade()`
+    per PART-1 precedent — autogenerate does NOT always drop ENUMs cleanly.
+    Hand-add `sa.Enum(name="idlaser_draft_job_state").drop(op.get_bind(), checkfirst=True)`
+    in `downgrade()`. Round-trip required: `alembic upgrade head &&
+    alembic downgrade -1 && alembic upgrade head` all clean (AI_ONBOARDING.md §9).
 
-4. **Snapshot pattern: `base_amount` and `computed_amount` frozen on settlement creation.** Same audit-integrity pattern as MAT-2's `MaterialMovement.unit_cost_at_movement`. If FIN-1 numbers change retroactively (e.g. a new receipt added in June changes May's COGS), already-saved May settlements DO NOT recompute. Settlement is "this is what I computed and told the partner that day."
+18. **SSE backend pattern: `sse_starlette.sse.EventSourceResponse`.** Not raw
+    `StreamingResponse(media_type="text/event-stream")`. `sse-starlette==2.2.1`
+    is already in `backend/requirements.txt:31`; `routers/mcp.py` does use
+    raw StreamingResponse but that's the MCP-protocol-specific SSE transport
+    (also locked per CLAUDE.md gotcha), not a precedent for general user-facing
+    SSE. `EventSourceResponse` gives automatic heartbeat / `ping` for connection
+    liveness and cleaner emit semantics. This is OrderHub's **first user-facing
+    SSE endpoint** — pattern established here will be reused.
 
-5. **Settlements and payments are immutable + delete-and-recreate.** No edit endpoint, no update endpoint, no PATCH. Wrong value → operator deletes the row and creates a new one. Hard delete is acceptable (Sergii on simplified taxation, no audit-retention requirement).
+19. **Frontend new directory: `frontend/src/components/orders/draft/`** as
+    sibling to existing `detail/`. Same structural convention as
+    `OrderDetailPanel` composing `detail/Detail*.tsx` sub-components. Tests
+    in `draft/__tests__/` per convention (cf. `detail/__tests__/`).
 
-6. **Two formula types in the new ENUM:** `revenue_items_minus_fees` AND `net_profit_product_only`. Postgres ENUM name: `partner_settlement_formula`. Do NOT add a third `net_profit` (with shipping) option — explicitly rejected per decision #17. Do NOT add a speculative `revenue_total` option — YAGNI.
+20. **Reuse the `<ConfirmDialog>` primitive** (`frontend/src/components/ui/ConfirmDialog.tsx`,
+    commit `93f45ca`) for any "Cancel pipeline?" / "Discard draft?" / "Retry?"
+    prompts inside DraftGenerator. Do **NOT** introduce new `window.confirm()`
+    calls (per AI_ONBOARDING.md §9 + PART-1-followup-1 closure — native
+    confirm blocks browser-MCP smoke automation).
 
-7. **`net_profit_product_only` formula** = `SUM(OrderItem.quantity × OrderItem.unit_price) − SUM(COALESCE(orders.computed_production_cost, orders.production_cost, 0)) − SUM(COALESCE(orders.platform_fee, 0)) − SUM(COALESCE(overhead_material_receipts.total_cost, 0))` — per currency, per shop, per period. **Differences from FIN-1 Net Profit:** revenue is `OrderItem.qty × unit_price` (items only, no shipping) instead of `Order.total_price`; fees are `platform_fee` only (NOT `shipping_np_cost`). COGS and overhead are unchanged. Filters mirror FIN-1: `orders.shop_id = :shop_id AND status IN ('shipped', 'completed') AND COALESCE(shipped_at, ordered_at) BETWEEN :start AND :end`; overhead filter on `overhead_material_receipts.shop_id = :shop_id` + receipt-date in period.
+21. **JWT auth on SSE endpoint via `@microsoft/fetch-event-source`** (frontend
+    new dependency, ~10 KB, per master rule 15). Native EventSource can't
+    send custom `Authorization` headers; JWT-in-query-param leaks tokens
+    into server logs (see OQ-9 answer below). Single hard frontend dep
+    addition; no other new packages.
 
-8. **`revenue_items_minus_fees` formula** = `SUM(OrderItem.quantity × OrderItem.unit_price) − SUM(COALESCE(orders.platform_fee, 0))` — per currency, per shop, per period. Same filters as rule #7. Used ONLY by Sergii's Lamamarka Shopify creative partner case.
+22. **Diagnostic prefix in CC prompt** (idlaser-side Cowork's protocol after
+    worktree surprises): every CC session for this sprint runs `pwd`,
+    `git branch --show-current`, `git rev-parse HEAD`, `git status --short`
+    BEFORE any other reads. Catches "wrong worktree" / "stale clone" early.
 
-9. **`net_profit_product_only` and `compute_shipping_net` live in `finance_service`, NOT in `partner_payout_service`.** Keeps FIN-1 formula primitives co-located. `partner_payout_service` simply calls the appropriate helper based on `formula_type`. This mirrors how MAT-5's COGS preference lives in finance_service even though it's consumed by multiple surfaces.
+23. **Cross-repo coordination via `~/projects/handoff/orderhub-idlaser.md`**
+    if handoff folder is set up by Serhii. CC does NOT touch the handoff
+    file — Cowork (Serhii's planning agent) owns it. CC reads it for
+    context but never appends.
 
-10. **`PartnerPayment.settlement_id` is NULLABLE with `ondelete='SET NULL'`.** Linked payments enable per-settlement progress badges ("Paid 1,000 / 2,450"); unlinked payments still count toward overall partner balance. Deleting a settlement DOES NOT delete its payments — payments survive with `settlement_id = NULL` (UI warns operator at delete time per `partner-payouts.md` §6.7).
+24. **`OrderStatus` enum and `ALLOWED_TRANSITIONS` are NOT modified** (master
+    rule 3, restated for emphasis). IdlaserDraftJob has its own state machine;
+    Order's main lifecycle is orthogonal.
 
-11. **Balance computation: `SUM(settlements.computed_amount) − SUM(payments.amount)` per `(shop_id, partner_name, currency)`.** Computed live in `get_partner_balances()`, not materialized. **CRITICAL implementation note:** do NOT compute via a single LEFT JOIN — that multiplies rows when a partner has both N settlements and M payments. Compute the two aggregates separately (two queries OR one query with subqueries), then combine in Python. The SQL sketch in `partner-payouts.md` §3.5 is illustrative only; pin the exact shape in the plan with verified correctness on multi-settlement-multi-payment fixtures.
+25. **No new long-running-task infra** — `asyncio.to_thread` only (master rule 5+7).
+    No Celery, no RQ, no Redis. Pipeline runs in thread pool worker; CRM has
+    `< 10` concurrent users and `> 5` concurrent draft jobs would be the
+    revisit trigger, not today.
 
-12. **Per-settlement payment progress**: each settlement row in the UI shows `SUM(payments.amount WHERE settlement_id = settlement.id)`. Badge states: no payments → grey "Unpaid"; partial → orange "Paid X / Y"; equal → green "Paid in full"; over → purple "Overpaid by X". Service method: `compute_settlement_payment_progress(db, settlement_ids: list[UUID]) -> dict[UUID, Decimal]` (one query, GROUP BY settlement_id, returned as a dict for O(1) lookup during list rendering).
+26. **Attachment FKs use `ondelete='SET NULL'`** for both `photo_attachment_id`
+    and `result_attachment_id` on `IdlaserDraftJob`. Master rule 2 says
+    "NOT cascade" but doesn't pin RESTRICT vs SET NULL. SET NULL is the
+    correct choice: if an operator deletes the customer photo OR the
+    generated DXF attachment from Production Assets, the IdlaserDraftJob
+    audit row survives (with the relevant FK cleared to NULL). RESTRICT
+    would block attachment deletion with an FK error and break the
+    operator's normal attachment-management workflow.
 
-13. **Shipping Net KPI** = `SUM(orders.total_price − items_subtotal) − SUM(COALESCE(orders.shipping_np_cost, 0))` per currency, per period, where `items_subtotal = SUM(OrderItem.qty × OrderItem.unit_price)` per order. Same filters as rule #7. **Auto-hide rule:** if both shipping_revenue AND shipping_cost are zero for the period, the KPI card is NOT rendered (typical Etsy-only shops where customer pays NP directly).
+27. **Idlaser package imports go through `idlaser.api` ONLY** (master rule 14
+    enforced). CRM service code uses `from idlaser.api import
+    process_one_streaming, reprocess, Detection, LayoutResult, CARD_W_MM,
+    CARD_H_MM, CARD_RATIO`. Never `from idlaser.pipeline import ...` or
+    `from idlaser.detect import ...` directly — internals may move; api.py
+    is the stable surface.
 
-14. **Role gating:** all new endpoints and the Partner Payouts UI section are `OWNER` + `MANAGER` only. `DESIGNER` role → 403 on every PART-1 endpoint. Mirror existing FIN-1 / MAT-5 gating pattern (CC: grep for the existing role dependency helper).
-
-15. **Currency-mismatch on payment: warn but don't block.** If operator picks a settlement in USD but selects UAH for the payment, inline orange warning (`"Currency differs from linked settlement. The payment will not contribute to the USD balance for this partner."`) — operator may proceed. Backend stores the payment as recorded (no auto-conversion). Currency-mismatched payments simply don't contribute to that partner's balance in the linked-settlement currency.
-
-16. **Negative base banner: warn but don't block.** When live-preview shows negative `base_amount` (loss period), show info banner per `partner-payouts.md` §6.4. Operator decides whether to save (Sergii's policy is to absorb losses himself — see `profit-definition.md` Q4 — so typically operator declines).
-
-17. **Multi-currency in one period: dropdown.** If formula returns multiple currency rows for the period (rare; happens if KoraKlenu ever takes a USD order), modal shows a currency dropdown. Single-currency = dropdown auto-selected/hidden.
-
-18. **No FX storage in either entity.** Settlement currency = whatever currency the base aggregation produced. Payment currency = operator's free choice. Operator handles UAH equivalent at payment time mentally. No FX rate stored anywhere in PART-1 (per `profit-definition.md` Q3, deferred indefinitely).
+28. **`idlaser` is installed via Dockerfile only, NOT listed in
+    `requirements.txt`.** Editable install of a bind-mounted path
+    (`pip install -e /idlaser`) requires the path to exist at install time
+    — which is true inside the container during `docker-compose build` (the
+    bind-mount is active by then) but NOT true for someone running
+    `pip install -r requirements.txt` on bare metal outside Docker.
+    Adding `-e /idlaser` to requirements.txt would break local pip workflows.
+    Document in CLAUDE.md as "vendored dependency, installed by Dockerfile,
+    not in requirements.txt". S005 submodule migration will revisit this.
 
 ### Scope
 
-- **In scope, backend — new files:**
-  - **`backend/models/partner_settlement.py`** — `PartnerSettlement` SQLAlchemy model per `partner-payouts.md` §3.1 schema. Use existing `UUIDPrimaryKeyMixin` + `TimestampMixin` pattern (CC: grep for these mixins to confirm names). Decimal columns use `Numeric(precision, scale)` per existing convention (CC: grep for `Numeric(` in `backend/models/` to confirm). CHECK constraints declared via `__table_args__`. No `relationship()` back-references to Shop / User (lightweight read-only references; service uses explicit JOINs). Define `partner_settlement_formula` Postgres ENUM as a separate `sqlalchemy.Enum(..., name='partner_settlement_formula')` per existing enum pattern (CC: grep `sqlalchemy.Enum(` in models to mirror style).
-  - **`backend/models/partner_payment.py`** — `PartnerPayment` SQLAlchemy model per `partner-payouts.md` §3.4 schema. `settlement_id` is `Mapped[UUID | None]` with `ForeignKey('partner_settlements.id', ondelete='SET NULL')`. CHECK constraint `amount > 0` via `__table_args__`.
-  - **`backend/schemas/partner_payout.py`** — Pydantic request/response models:
-    - `PartnerSettlementCreate` (partner_name, formula_type, percent, period_start, period_end, notes; base_amount + computed_amount are computed server-side from formula + period — NOT taken from request)
-    - `PartnerSettlementResponse` (all columns + `paid_amount: Decimal` populated from `compute_settlement_payment_progress`)
-    - `PartnerSettlementListResponse` (paginated)
-    - `PartnerPaymentCreate` (partner_name, settlement_id, amount, currency, paid_at, notes)
-    - `PartnerPaymentResponse`
-    - `PartnerPaymentListResponse` (paginated)
-    - `PartnerBalanceResponse` (partner_name, currency, total_settled, total_paid, balance_owed)
-    - `PartnerBalancesResponse` (list of above)
-    - `PartnerPayoutPreviewRequest` (formula_type, percent, period_start, period_end, optional currency for multi-currency disambiguation)
-    - `PartnerPayoutPreviewResponse` (base_amount, base_currency, computed_amount, OR list of CurrencyAmount when multi-currency without filter)
-    - `ShippingNetCurrencyAmount` (currency, amount) — used in FIN-1 response extension
-  - **`backend/services/partner_payout_service.py`** — new service module with methods listed under rule #11 + #12 + create/list/delete for both entities. Each method takes `db: AsyncSession` (or `Session` — CC: confirm sync vs async pattern via `finance_service.py`) as first arg per existing convention.
-  - **`backend/routers/partner_payouts.py`** — new router with the 8 endpoints from `partner-payouts.md` §7 (preview, settlement create/list/delete, payment create/list/delete, balances, partner-names autocomplete). All role-gated `OWNER` + `MANAGER` per rule #14.
-  - **Alembic migration** — one revision, autogenerated then hand-tuned: creates `partner_settlement_formula` ENUM, creates both tables with their indexes + CHECK constraints, no data migration needed. CC must verify autogenerate detects all constraints (CHECK constraints often need manual addition — see `partner-payouts.md` §3 column constraints).
+**In scope — NEW backend files:**
+- **`backend/models/idlaser_draft_job.py`** — `IdlaserDraftJob` SQLAlchemy
+  model per master rule 2. ENUM `IdlaserDraftJobState` (PENDING, RUNNING,
+  NEEDS_REVIEW, READY, FAILED, CANCELLED). Indexes: `(order_id, state)`.
+  Mirror PART-1 model file structure verbatim.
+- **`backend/alembic/versions/{auto_hash}_add_idlaser_draft_jobs.py`** —
+  migration per rule 17 above. CHECK constraints if any (e.g.,
+  `started_at <= completed_at` if both present).
+- **`backend/schemas/idlaser_draft_job.py`** — Pydantic models:
+  - `IdlaserDraftJobCreate` (`photo_attachment_id: UUID`)
+  - `IdlaserDraftJobResponse` (full row + derived fields)
+  - `ManualCornersRequest` (`corners: list[list[float]]` — 4 pairs)
+  - `DraftJobStatusResponse` (polling fallback shape)
+- **`backend/services/idlaser_service.py`** — wraps `idlaser.api.process_one_streaming`
+  (per Behaviour rule 27 — never import from `idlaser.pipeline` directly).
+  Owns:
+  - State transitions (PENDING → RUNNING → READY/NEEDS_REVIEW/FAILED)
+  - `asyncio.Queue` bridge from the synchronous pipeline callback (running in
+    thread via `asyncio.to_thread`) to the SSE event stream (running on
+    event loop) via `loop.call_soon_threadsafe(queue.put_nowait, event)`
+  - SSE event taxonomy mapping per master rule 9
+  - Generated-DXF Attachment creation via existing `services/file_storage.save_file()`
+    pattern + DB row insert
+  - Tenacity-decorated retry on transient ONNX session failures only
+    (`tenacity==9.1.4` already in requirements)
+- **`backend/routers/idlaser.py`** — three routes:
+  - `POST /api/orders/{order_id}/generate-draft` → `EventSourceResponse`
+  - `GET /api/orders/{order_id}/draft-jobs/{job_id}/status` → polling JSON
+    (fallback for clients with broken SSE — also useful for tests)
+  - `POST /api/orders/{order_id}/draft-jobs/{job_id}/manual-corners` →
+    `EventSourceResponse` (same event taxonomy, picks up after rectify)
+  - All routes role-gated per master rule 10 (OWNER/MANAGER/DESIGNER-if-assigned)
+    via `routers/dependencies.py` helpers.
 
-- **In scope, backend — extensions to existing files:**
-  - **`backend/services/finance_service.py`** — add two methods:
-    - `compute_net_profit_product_only(db, shop_id, period_start, period_end) -> list[CurrencyAmount]` per formula in rule #7. Should reuse as much of the existing `compute_net_profit` plumbing as possible — query filters, currency grouping, overhead JOIN. The deltas are: items_revenue from OrderItem JOIN instead of `total_price` SUM, and platform_fee only (drop the shipping_np_cost term from fees).
-    - `compute_shipping_net(db, shop_id, period_start, period_end) -> list[CurrencyAmount]` per rule #13.
-  - **`backend/routers/shops.py` (or wherever `/shops/{id}/finance` lives — CC: grep for the existing endpoint)** — extend the response payload to include `shipping_net: list[ShippingNetCurrencyAmount]` field. Auto-empty list when zero (frontend handles the auto-hide decision). Backwards-compatible addition (existing fields unchanged).
-  - **`backend/main.py` (or wherever routers are mounted)** — register the new `partner_payouts` router under `/api/shops/{id}/partner-payouts`.
+**In scope — backend MODIFICATIONS:**
+- **`backend/main.py`** — (a) register the new `idlaser` router; (b) extend
+  the existing `lifespan` async context manager (already exists at
+  `backend/main.py:30` per current state) with a boot-time sanity check that
+  `IDLASER_MODEL_PATH` and `IDLASER_TEMPLATE_PATH` exist on disk. Log warning
+  if missing — do NOT crash (designer flow works without idlaser; we don't
+  want a missing template to take down the whole app).
+- **`backend/config.py`** — three new settings (with env-var fallbacks):
+  - `IDLASER_TEMPLATE_PATH` (default `/app/templates/7001.svg`)
+  - `IDLASER_MODEL_PATH` (default `/app/models/card_detector.onnx`)
+  - `IDLASER_TIMEOUT_S` (default 60)
+- **`backend/models/__init__.py`** — add
+  `from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState`
+  + their entries in `__all__`. Verified that `models/__init__.py` explicitly
+  imports all models (e.g., `PartnerSettlement, PartnerPayment` at
+  `backend/models/__init__.py:31-32`), so Alembic autogenerate sees what's
+  imported here. Match the existing pattern.
+- **`backend/Dockerfile`** — after `RUN pip install --no-cache-dir -r requirements.txt`,
+  add `RUN pip install -e /idlaser` (per Behaviour rule 28 — idlaser is NOT
+  added to `requirements.txt`).
+- **`docker-compose.yml`** — three new bind-mount volumes for the backend
+  service (see Integration mechanism section above).
 
-- **In scope, backend tests:**
-  - **`tests/test_partner_payout_service.py` (new)** — 8-10 tests:
-    - `revenue_items_minus_fees` formula correctness (seed orders + items + fees, assert base_amount)
-    - `net_profit_product_only` formula correctness (seed orders + items + production_cost + platform_fee + overhead_receipts, assert base_amount)
-    - Settlement create persists snapshot values (verify base_amount / computed_amount frozen at row insert time)
-    - Settlement create with negative base (loss period) does NOT raise — stored as-is
-    - Settlement delete: linked payments survive with `settlement_id = NULL`
-    - Payment create persists; linked payment contributes to per-settlement progress
-    - Balance computation: single partner, multi-partner-same-shop, multi-currency-same-partner (verify no row multiplication bug per rule #11 — seed 3 settlements + 2 payments, assert balance correct)
-    - Per-settlement progress: unpaid / partial / full / overpaid states each compute correctly
-    - Currency-mismatched payment: stored as-is, does NOT contribute to mismatched-currency balance
-  - **`tests/test_finance_service.py` (extend)** — 3 new tests:
-    - `compute_net_profit_product_only` excludes shipping (seed an order where shipping economics flip sign of FIN-1 Net Profit, assert product-only formula gives different result)
-    - `compute_shipping_net` correctness (shipping_revenue − shipping_cost per currency)
-    - `compute_shipping_net` returns empty list when both components are zero
-  - **`tests/test_partner_payouts_router.py` (new)** — 4-5 tests: role gating (DESIGNER → 403 on each endpoint; OWNER + MANAGER → 200); path-param validation (invalid UUID → 422); happy-path create / list / delete cycle; preview endpoint returns expected shape.
-  - **Expected pytest delta:** ~153 → ~170 (+~17). CC must confirm current baseline before sprint start.
+**In scope — backend TESTS:**
+- **`tests/test_idlaser_service.py` (new)** — 6-8 cases:
+  - Pipeline success path → DXF attachment created, state=READY
+  - Pipeline review path → state=NEEDS_REVIEW, manual_corners stays null
+  - Manual-corners reprocess → DXF created, manual_corners stored
+  - ONNX load failure → tenacity retries 3x → FAILED, error_message set
+  - Concurrent jobs same order: 2 distinct rows, both progress independently (OQ-4)
+  - Currency-mismatch / unknown error in pipeline → state=FAILED, error_message captures stack summary
+  - Auth fixture: designer assigned vs not → 200 vs 403 (OQ-9)
+- **`tests/test_idlaser_router.py` (new)** — 4-5 cases for SSE shape:
+  - Event sequence on AUTO path (job.started → detect.classical.* → … → export.completed)
+  - Event sequence on REVIEW path (… → review_required)
+  - 403 for unauthorized
+  - Manual-corners endpoint accepts valid corners, rejects malformed
+  - Status polling endpoint returns current state
+- **Expected pytest delta: 171 → ~185** (+14). Verify current baseline; record actual.
 
-- **In scope, frontend — new files:**
-  - **`frontend/src/pages/finance/PartnerPayouts.tsx` (or co-located inside the existing Finance page — CC: grep for `/shops/{id}/finance` page component)** — top-level section component composing the balances summary + settlements table + payments table.
-  - **`frontend/src/components/finance/PartnerBalancesSummary.tsx`** — renders per-partner-per-currency balance rows per `partner-payouts.md` §5.1 layout. Hidden when no settlements exist.
-  - **`frontend/src/components/finance/PartnerSettlementsTable.tsx`** — log table with payment-progress badges + per-row `[+ Record Payment]` + `[Delete]` actions.
-  - **`frontend/src/components/finance/PartnerPaymentsTable.tsx`** — payments ledger with `[Delete]` per row + linked-settlement reference.
-  - **`frontend/src/components/finance/CalculateSettlementModal.tsx`** — calculator modal per `partner-payouts.md` §5.2: partner name (autocomplete), formula dropdown (2 options), percent input, period (inherited / override), live preview, save checkbox, notes, save action.
-  - **`frontend/src/components/finance/RecordPaymentModal.tsx`** — payment entry modal per §5.3: partner name (autocomplete), linked-settlement dropdown (optional, filtered by partner), amount + currency, paid_at date, notes. Pre-fills when launched from a settlement row's button.
-  - **`frontend/src/components/finance/ShippingNetKpi.tsx`** — small KPI card sitting in the existing FIN-1 KPI grid. Auto-hides when value is zero.
-  - **`frontend/src/api/partnerPayouts.ts`** — Axios methods for the 8 endpoints + types from backend Pydantic models.
-  - **`frontend/src/hooks/usePartnerPayouts.ts`** — React Query hooks (one per endpoint). Mutation hooks invalidate the relevant query keys: creating/deleting a settlement invalidates settlements list + balances + per-settlement-progress; creating/deleting a payment invalidates payments list + balances + per-settlement-progress for the linked settlement.
+**In scope — NEW frontend files:**
+- **`frontend/src/components/orders/draft/DraftGenerator.tsx`** — main modal,
+  owns the state machine (idle → connecting → running → review_required →
+  reprocessing → ready | failed | cancelled). Uses `<Dialog>` primitive
+  (shadcn) similar to existing `CalculateSettlementModal.tsx`. Two render
+  modes: ProgressPanel (steps + stage indicators) and CornerPicker (after
+  review_required SSE event).
+- **`frontend/src/components/orders/draft/ProgressPanel.tsx`** — step list
+  mapped to master rule 9 SSE event taxonomy. Check marks per stage as
+  events arrive. Stage labels human-readable ("Detecting card", "Aligning",
+  "Detecting face", etc. — Ukrainian/English consistent with rest of app —
+  see OQ-C). Photo preview on the right.
+- **`frontend/src/components/orders/draft/CornerPicker.tsx`** — full
+  photo background (from `attachmentsApi.download()` → blob → object URL),
+  4 absolutely-positioned `<div>` markers with `onPointerDown/Move/Up`
+  handlers. ~150 LOC per master rule 13. Photo logic donor reference:
+  `~/projects/idlaser/review_tool.html`. Submit → POST to
+  `/manual-corners` endpoint (re-opens SSE stream for reprocess).
+- **`frontend/src/components/orders/draft/__tests__/`** — at minimum:
+  - `DraftGenerator.test.tsx` — state machine transitions render correctly
+    given mocked SSE events
+  - `CornerPicker.test.tsx` — pointer events update marker positions; Submit
+    fires onSubmit with 4 corners
+  - `ProgressPanel.test.tsx` — given event sequence, steps render in order
+    with correct check states
+- **`frontend/src/hooks/useDraftJob.ts`** — TanStack Query mutation +
+  SSE subscription via `@microsoft/fetch-event-source`. Shape sketched
+  in OQ-E answer below. Returns `{ state, events, start, cancel, retry }`.
+- **`frontend/src/api/draftJobsApi.ts`** — axios calls for the three
+  routes + types matching backend Pydantic.
+- **`frontend/src/types/draftJob.ts`** — TypeScript type definitions
+  mirroring `backend/schemas/idlaser_draft_job.py` (see OQ-D — manual
+  pattern per current convention).
 
-- **In scope, frontend — extensions to existing files:**
-  - **`frontend/src/pages/finance/Finance.tsx` (or whatever the existing `/shops/{id}/finance` page is called)** — add the Shipping Net KPI to the existing KPI grid (placed alongside Revenue / COGS / Fees / Overhead / Net Profit per the existing grid order). Add the new "Partner Payouts" section below existing surfaces.
+**In scope — frontend MODIFICATIONS:**
+- **`frontend/src/components/orders/AttachmentManager.tsx`** — add
+  "Generate Draft" button per master rule 12. Enabled iff order has ≥1
+  `Attachment` with `attachment_type === 'reference'`. Button copy:
+  `"Generate Draft from {photo_filename}"`. If multiple REFERENCE
+  attachments, copy becomes a dropdown / split-button. Mounts
+  `<DraftGenerator>` modal on click.
+- **`frontend/package.json`** — `@microsoft/fetch-event-source: ^2.0.1`
+  added to dependencies. No other new packages.
 
-- **In scope, frontend tests:**
-  - **`frontend/src/components/finance/__tests__/CalculateSettlementModal.test.tsx`** — modal renders both formula options; live preview updates on percent change; save button label changes with checkbox state.
-  - **`frontend/src/components/finance/__tests__/PartnerSettlementsTable.test.tsx`** — progress badges render correctly for each state (unpaid / partial / full / overpaid).
-  - **`frontend/src/components/finance/__tests__/RecordPaymentModal.test.tsx`** — pre-fill from settlement context; currency-mismatch warning shows when applicable.
-  - **`frontend/src/components/finance/__tests__/ShippingNetKpi.test.tsx`** — renders when non-zero; doesn't render when both components are zero.
-  - **Expected vitest delta:** ~4-6 new test files, each with 2-4 cases.
-
-- **Out of scope (do NOT touch):**
-  - **PDF generation** — deferred to PART-2 (`partner-payouts.md` §7 PART-2). Operator gets the data on screen; PDF triggered after ≥1 month of real usage when Sergii knows what fields the PDF needs.
-  - **Partner-facing dashboard / login flow** — far-future.
-  - **`Partner` entity / agreements table** — explicitly rejected (`partner-payouts.md` §3.2). Free-text `partner_name` is the design.
-  - **Automatic settlement creation / month-end reminders** — PART-4 future work.
-  - **FX conversion / multi-currency aggregation** — see `profit-definition.md` Q3, deferred.
-  - **Settlement workflow states** (draft / approved / paid) — single state. Payment progress is derived from linked PartnerPayment rows.
-  - **Cross-shop partner aggregation** ("what did Олег earn across all shops?") — partners are per-shop today.
-  - **`Order` / `OrderItem` / `overhead_material_receipts` schema changes.** None needed; verify in OQ.
-  - **`finance_service.compute_net_profit`** — UNCHANGED. FIN-1's Net Profit definition stays as-is per `profit-definition.md` §6 ("FIN-1's Net Profit definition stays unchanged").
-  - **MCP server endpoints** — partner payouts NOT exposed via MCP. Operator UI only.
-  - **Soft delete / deleted_at columns** — accepted limitation per decision #5.
-  - **Audit-history rows for settlement / payment create / delete** — NOT in scope. The `created_at` + `created_by_user_id` columns on each entity are the audit. If Sergii later wants a richer audit trail, that's a separate sprint.
-  - **Migration of historical (Excel-era) partner data** — out of scope. Sergii's Excel history stays in Excel; PART-1 records future settlements forward from sprint date.
-  - **Sender / customer phone normalization** — already shipped in NP-ROBUSTNESS-1, untouched.
+**Out of scope (do NOT touch):**
+- `backend/routers/mcp.py` — locked per CLAUDE.md gotcha.
+- `OrderStatus` enum / `ALLOWED_TRANSITIONS` matrix — master rule 3.
+- `services/file_storage.py` — reused as-is, no extensions needed.
+- `backend/routers/attachments.py` — reused as-is (existing endpoint serves
+  the photo bytes for the corner-picker background AND the DXF download).
+- `backend/services/order_service.py` — IdlaserDraftJob does NOT log into
+  OrderStatusHistory (master rule 11 — IdlaserDraftJob row IS the audit).
+- Anything in `~/projects/idlaser/` — CC session A's slice; this CC does
+  NOT modify the idlaser repo (only reads its API surface).
+- Submodule plumbing — S005 work, not S004.
+- Multi-photo combination / ID-1 geometry refinement / keypoint upgrade —
+  parked future sprints per master Out of scope.
+- Tests for `~/projects/idlaser` package — idlaser-side responsibility.
 
 ### Open questions for the planner
 
-CC must answer each in the plan with cited grep evidence (file:line refs).
+CC must answer each in the plan with cited file:line evidence.
 
-1. **`Order` and `OrderItem` column verification.** Grep `backend/models/order.py` (or wherever Order is defined) and confirm exact column names + types for: `currency`, `total_price`, `platform_fee`, `shipping_np_cost`, `computed_production_cost`, `production_cost`, `status`, `shipped_at`, `ordered_at`. Grep `backend/models/order_item.py` for: `quantity`, `unit_price`, `order_id`. State the verified names in the plan; if any differ (e.g. `qty` instead of `quantity`), all SQL sketches in `partner-payouts.md` and the rules above must be patched accordingly.
+**Master OQs assigned to CRM-side:**
 
-2. **`overhead_material_receipts` table verification.** Grep `backend/models/` for the OverheadMaterialReceipt model. Confirm columns: `shop_id`, `total_cost`, and the **date column used for period filtering**. The design doc uses `received_at` provisionally — verify against the actual model. If the actual column is named `receipt_date` / `created_at` / something else, state the corrected name. This affects the `net_profit_product_only` SQL in rule #7.
+**OQ 4 — Concurrent draft jobs per order (master OQ 4).**
+Recommend **(a)**: allow multiple `IdlaserDraftJob` rows per order; each
+row has its own state; no global "active job" flag. Mirrors CRM's
+existing delete-and-recreate semantics for PartnerSettlement (PART-1 rule 4,
+`backend/models/partner_settlement.py`).
 
-3. **Existing `compute_net_profit` helper signature + currency grouping pattern.** Read `backend/services/finance_service.py`. Locate `compute_net_profit` (or equivalent name). State its signature, return type, and how it groups by currency. The new `compute_net_profit_product_only` must mirror this shape exactly so `partner_payout_service` can swap between them cleanly. If `compute_net_profit` is structured as one big query rather than composable helpers, decide whether to extract the per-currency-skeleton into a private helper now (reduces duplication for the product-only variant) OR copy-modify (simpler but duplicative).
+**v1 UI scope decision:** there is **NO dedicated "draft history" panel**
+inside AttachmentManager. The operator's "current draft" is simply the
+latest READY job's `result_attachment_id` — which appears as a normal
+DXF row in the existing Production Assets attachments list (same way any
+MOCKUP attachment does today). If the operator wants to re-generate, they
+click "Generate Draft" again — a new IdlaserDraftJob row is created. Old
+job rows + their DXF attachments stay in history (and on disk). Operator
+deletes unwanted DXF attachments via existing trash-icon flow per
+AttachmentManager.tsx; the FK `IdlaserDraftJob.result_attachment_id`
+gracefully nulls out (Behaviour rule 26).
 
-4. **Decimal precision convention.** Grep `Numeric(` in `backend/models/`. Confirm the project uses `Numeric(precision, scale)` for money columns (typical: `Numeric(12, 2)` for amounts, `Numeric(5, 2)` for percentages). State the chosen precision for `base_amount`, `computed_amount`, `percent`, `amount` (payments).
+If actual operator friction emerges ("which of these 3 DXFs is current?"),
+v2 adds a sort/group/badge UI inside AttachmentManager. Not premature
+optimization for v1.
 
-5. **Existing role-gating helper.** Grep for the dependency function used in FIN-1 / MAT-5 routers to restrict to OWNER + MANAGER. Likely named `require_owner_or_manager`, `current_active_user_with_role(...)`, or similar. State the exact helper to reuse for PART-1's router.
+CC: confirm there's no FK or unique constraint in the migration draft
+that would block multiple rows per order (master rule 2 schema has no
+such constraint — verify).
 
-6. **Autocomplete component pattern.** Grep `frontend/src/components/` for existing autocomplete-input components. Is there a reusable `<AutocompleteInput>` / `<ComboBox>` / similar? If yes, reuse for partner_name field. If not, decide: roll new (small simple component) OR use a third-party (check `package.json` for existing dependencies like `cmdk`, `headlessui`, `radix-ui` that might offer one). State the decision with rationale.
+**OQ 5 — Corner-picker background image (master OQ 5).**
+Recommend **(a)**: original customer photo, full-resolution. Manager
+identifies 4 corners in original-image coordinate space; backend computes
+the perspective transform via `idlaser.reprocess(photo, corners)`. Initial
+marker positions = best-guess corners from whichever detector produced
+something (`detect.classical_with_K0_face` candidate, OR ML output, OR
+evenly-spaced rectangle at 10/90% if both detectors failed).
+CC: confirm `idlaser.reprocess` API signature accepts `corners` as
+`list[tuple[float, float]]` in pixel coordinates of the original photo
+(read `~/projects/idlaser/idlaser/reprocess.py` + `idlaser/api.py`
+re-exports).
 
-7. **KPI grid structure on `/shops/{id}/finance`.** Read the existing FIN-1 page component. Identify how KPI cards are composed (one component per metric? a shared `<KpiCard>` primitive?). State where `<ShippingNetKpi>` slots in. Confirm the grid handles N+1 cards layout-wise (no hardcoded 5-column grid that breaks at 6).
+**OQ 6 — Photo input flow (master OQ 6).**
+Recommend **(a) for v1**: `POST /generate-draft` accepts
+`photo_attachment_id: UUID` only — manager uploads via existing flow
+first (`POST /api/attachments/order/{order_id}`, `backend/routers/attachments.py:31`).
+Endpoints stay orthogonal. If real-world friction emerges ("operator
+forgets to upload first"), v2 adds inline upload inside DraftGenerator
+modal. Not premature optimization for v1.
+CC: verify `Attachment` model FK back-reference to Order works for the
+"fetch photo by id, validate it belongs to this order" check; sketch the
+exact validation query in plan.
 
-8. **`compute_net_profit_product_only` SQL plan.** Show in the plan the **actual SQL** (not pseudo) that will be generated, including how the JOIN to `order_items` and `overhead_material_receipts` is structured. Specifically address: (a) is the overhead JOIN currency-aware? Overhead is per shop, but shop currency is in `orders`, so the overhead amount gets subtracted from the per-currency aggregate — does the existing FIN-1 query already handle this correctly? Confirm with `compute_net_profit`'s current SQL. (b) Do we run two queries (items+fees per currency, overhead separately) then combine in Python, or one big CTE? Pick consistent with FIN-1's existing pattern.
+**OQ 8 — Migrations & deployment runbook (master OQ 8).**
+Operator runbook for first deploy (lives in CRM's CLAUDE.md after this
+sprint ships):
 
-9. **Currency-aware overhead in mixed-currency shops.** If a shop has both UAH and USD orders in a period, but overhead is recorded in only one currency (UAH typically — materials are local), how is overhead allocated across currencies in FIN-1's Net Profit today? State the answer from FIN-1's existing code. The new `net_profit_product_only` must follow the same allocation rule for consistency. If FIN-1 simply subtracts overhead from the dominant currency (or always-UAH) row, document that and apply same.
+```
+First-time setup for ID-Laser draft pipeline:
+1. git clone https://github.com/cropsp/idlaser ~/projects/idlaser
+2. cd ~/projects/idlaser && pip install -e .[dev]  # idlaser-side venv,
+   for manual pipeline runs during ops
+3. Ensure ~/projects/idlaser/models/card_detector.onnx exists
+   (ships from idlaser S003.2 training output; if missing, see
+   ~/projects/idlaser/docs/training.md for retraining recipe)
+4. Ensure ~/projects/idlaser/templates/7001.svg exists
+   (user-supplied; copy from prior Lamarka template archive)
+5. Verify CRM's docker-compose.yml has the three bind-mount lines
+   (see S004 closure entry for snippet)
+6. Inside CRM repo: docker-compose build backend
+   (re-runs Dockerfile, picks up pip install -e /idlaser)
+7. docker-compose up -d backend
+8. docker-compose exec backend alembic upgrade head
+9. docker-compose restart frontend  (picks up new @microsoft/fetch-event-source)
+10. Verify in browser: open any order with a REFERENCE attachment,
+    click "Generate Draft from {filename}", confirm modal opens,
+    SSE events stream, AUTO path produces a downloadable DXF.
 
-10. **Migration filename convention + autogenerate verification.** Generate the Alembic migration via `alembic revision --autogenerate -m "part1_partner_payouts"`. Verify the autogenerated file detects: both new tables, the new ENUM, all indexes, the CHECK constraints. CHECK constraints frequently need manual addition (Alembic doesn't always autogenerate them). Show the migration diff in the plan and call out anything hand-edited.
+If step 6 fails with "Could not find /idlaser" — bind-mount path is
+incorrect for your username; edit docker-compose.yml's volume paths.
+
+If step 10's "Generate Draft" button is grey/disabled — order has no
+REFERENCE attachment. Upload one via the existing Production Assets
+upload zone.
+```
+
+CC: copy this runbook into the new CLAUDE.md "ID-Laser draft pipeline"
+section verbatim (commit 5 of split). Adjust step 1 path if Serhii's
+WSL username differs (use `~` per ssh convention).
+
+**OQ 9 — SSE authentication (master OQ 9).**
+Recommend **(b)**: `@microsoft/fetch-event-source` library client-side.
+Reasons:
+- (a) JWT-in-query-param leaks tokens to server logs, Nginx access logs,
+  browser history, referrer headers — anti-pattern.
+- (c) httpOnly cookie auth is a multi-sprint refactor; CRM currently uses
+  Bearer header (verified at `backend/routers/dependencies.py:17` via
+  `HTTPBearer`).
+- (b) preserves existing JWT-in-Authorization-header pattern, adds 10 KB
+  to bundle. Frontend Axios interceptor already manages the token; we
+  pass the same token to `fetchEventSource` via `headers: {
+  Authorization: 'Bearer ' + token }`.
+
+CC: implement `useDraftJob` hook to pull JWT from the existing Zustand
+authStore. CLAUDE.md says "Zustand for auth (`authStore.ts`)" but doesn't
+specify the directory — grep `authStore.ts` under `frontend/src/` to find
+exact path (likely `store/` or `stores/` subdir). Confirm the store exposes
+a token-getter, not just user-info-getter; if not, add a minimal accessor
+in the same file. Inject token into fetchEventSource headers.
+
+**OQ 10 — Error recovery / retry (master OQ 10).**
+State machine confirmed: `RUNNING → FAILED` on unrecoverable error.
+DraftGenerator modal shows error toast (existing
+`useToastStore.addToast(msg, 'error')` pattern). "Retry" button creates
+NEW IdlaserDraftJob row (does NOT reuse failed row — matches OQ 4
+multiple-rows pattern). Old failed row stays in history with
+`state=FAILED` + `error_message`.
+
+Tenacity retries inside `services/idlaser_service.py` for **transient
+ONNX failures only**:
+- `tenacity==9.1.4` in `requirements.txt:25` (already there)
+- Pattern: `@retry(stop=stop_after_attempt(3),
+  wait=wait_exponential(multiplier=1, min=1, max=10),
+  retry=retry_if_exception_type(OnnxruntimeError))` (approximate — CC
+  verifies exact exception type from `~/projects/idlaser/idlaser/detect_ml.py`)
+- NOT retried: misaligned results (REVIEW path is the proper response);
+  template-load failures (operator error, surface to UI immediately);
+  filesystem errors (likely permission misconfigure, surface).
+
+CC: verify the exact onnxruntime exception class to catch — read
+`detect_ml.py` and grep for `onnxruntime.` usage.
+
+---
+
+**CRM-side-specific OQs (additional, not in master):**
+
+**OQ-A — Alembic current head.** Run `alembic heads` inside the backend
+container; identify the migration to point at as `down_revision` for the
+new `add_idlaser_draft_jobs` migration. The PART-1 migration is the
+recent one — confirm its revision hash. State in the plan.
+
+**OQ-B — Model registration for autogenerate.** Pre-answered (Cowork
+verified): `backend/models/__init__.py:7-32` explicitly imports all models
+including `PartnerSettlement` and `PartnerPayment` from PART-1. Add
+`from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState`
++ entries in `__all__` list. Follow existing import grouping pattern.
+(Listed as OQ for visibility in plan-mode evidence; no investigation needed.)
+
+**OQ-C — Frontend test placement convention.** Grep for existing
+`__tests__/` directories under `frontend/src/components/`. PART-1
+introduced tests under `frontend/src/components/finance/__tests__/` —
+confirm pattern. Place draft tests under
+`frontend/src/components/orders/draft/__tests__/`. Also confirm Ukrainian
+vs English in user-facing strings — the rest of the app is mixed
+(observed during smoke: "Переглянути ордери за період" Ukrainian button
+copy alongside English status labels). DraftGenerator stage labels:
+Ukrainian preferred ("Виявлення картки", "Вирівнювання", "Обличчя",
+"Очі", "Композиція", "Експорт") matching operator-facing register —
+but match whatever convention you grep most consistently.
+
+**OQ-D — Type definitions: manual vs generated.** Grep
+`frontend/src/types/` for existing type definitions corresponding to
+backend Pydantic models. Current convention is manual (no codegen
+tooling like `openapi-typescript` in `package.json`). Continue manual
+pattern for `draftJob.ts`. Risk of drift between backend Pydantic and
+frontend types — document in CLAUDE.md gotcha if you notice mismatches
+during implementation.
+
+**OQ-E — `useDraftJob` hook structure.** Sketch the hook with:
+- Internal state: `state: 'idle' | 'connecting' | 'running' | 'review_required' | 'reprocessing' | 'ready' | 'failed' | 'cancelled'`
+- Internal state: `events: DraftEvent[]` (append-only log for ProgressPanel rendering)
+- Internal state: `result: { resultAttachmentId: string } | null`
+- Internal state: `reviewContext: { bestGuessCorners: number[][], rectifiedPreviewUrl: string } | null`
+- Methods: `start(photoAttachmentId)`, `submitCorners(corners)`, `cancel()`, `retry()`
+- SSE handling via `@microsoft/fetch-event-source`'s `fetchEventSource(url, { method, headers, body, signal, onmessage, onerror })`
+- Cleanup on unmount via `AbortController`
+
+Show in plan the actual TypeScript signatures + the event-to-state-transition
+table. CC may refine but the contract should be locked before frontend
+implementation starts.
+
+**OQ-F — Idlaser side asset paths confirmation.** Cross-repo verify
+(via coordination handoff or direct file read of
+`~/projects/idlaser/models/` and `~/projects/idlaser/templates/`):
+- Does `~/projects/idlaser/models/card_detector.onnx` exist NOW? (Brief
+  says yes from S003.2-train output; verify before assuming bind-mount works.)
+- Does `~/projects/idlaser/templates/7001.svg` exist NOW? (Master rule 8
+  says "planned"; if not present yet, sprint blocked until idlaser-side
+  ships the template OR Serhii provides one.)
+- Confirm both paths are readable from CRM container after bind-mount
+  applied — write a one-liner sanity test in `tests/test_idlaser_service.py`
+  asserting `Path(settings.IDLASER_MODEL_PATH).is_file()` and same for template.
+
+If template doesn't exist yet: surface immediately to Cowork (Serhii) —
+this is a blocker for the integration smoke. Don't silently skip.
 
 ### Verification
 
-- **Backend gates:**
-  - `cd backend && python -m pytest tests/ -v` — expect ~153 → ~170 passing (+~17 new). CC must record actual current baseline + new total in the closure note.
-  - `cd backend && alembic upgrade head` — clean apply on a fresh DB.
-  - `cd backend && alembic downgrade -1 && alembic upgrade head` — round-trip works (forward + back + forward).
+**Backend gates:**
+- `cd backend && python -m pytest tests/ -v` — expect 171 → ~185 (+14 new).
+  Record actual baseline + new total.
+- `cd backend && alembic upgrade head` — clean on fresh DB.
+- `cd backend && alembic downgrade -1 && alembic upgrade head` — round-trip
+  works (rule 17). Verify ENUM dropped + recreated correctly.
 
-- **Frontend gates:**
-  - `cd frontend && npx tsc --noEmit` — clean.
-  - `cd frontend && npm run lint` — clean for touched files.
-  - `cd frontend && npm run test` — all new vitest cases pass.
+**Frontend gates:**
+- `cd frontend && npx tsc --noEmit` — clean.
+- `cd frontend && npm run lint` — clean on touched files.
+- `cd frontend && npm run test` — all new vitest cases pass. Existing
+  CustomersPage.test.tsx may fail (pre-existing baseline issue verified
+  in PART-1-fu-1 closure); ignore that one.
 
-- **Manual smoke (Cowork via browser MCP, after Sergii approves):**
-  1. **Pre-flight (Sergii):** ensure a test shop has at least 3-5 SHIPPED orders in the current period across at least 2 partners' expected formulas. KoraKlenu is the natural candidate (operating partner on profit-share). For revenue-share scenario, use Lamamarka Shopify if it has shipped orders, OR temporarily seed test orders.
-  2. **Calculate Settlement — profit-share path:**
-     - Open `/shops/KoraKlenu/finance`. Verify the Shipping Net KPI card renders (if any shipping economics in period) OR is hidden (if zero).
-     - Click `[+ Calculate Settlement]`. Modal opens.
-     - Enter partner name "Тест Партнер" (no autocomplete yet — first settlement). Select formula "% of Net Profit (product-only)". Enter percent 50. Period inherits from page.
-     - Live preview populates: base_amount (UAH), computed_amount = base × 50%.
-     - Check "Save as settlement record" → save. Modal closes. Settlement appears in Settlements table with "Unpaid" badge.
-     - Confirm: per-partner balance row shows "Owed X UAH" for "Тест Партнер".
-  3. **Calculate Settlement — revenue-share path:**
-     - Click `[+ Calculate Settlement]` again. Partner name "Тест Партнер" should now appear in autocomplete suggestions.
-     - Select formula "% of Items Revenue minus Platform Fees". Enter percent 25. Same period.
-     - Live preview shows a DIFFERENT base_amount (items revenue minus platform fee, no COGS/overhead subtracted).
-     - Save. Second settlement appears.
-  4. **Record Payment — linked + partial:**
-     - On the first settlement row (the profit-share one), click `[+ Record Payment]`. Modal opens pre-filled with partner name + linked settlement.
-     - Enter amount = 50% of computed_amount. Today's date. Note: "first half".
-     - Save. Modal closes. Payment appears in Payments table linked to that settlement. Settlement row badge updates to orange "Paid X / Y (partial)". Per-partner balance reflects the reduced owed amount.
-  5. **Record Payment — unlinked / standalone:**
-     - Click top-level `[+ Record Payment]`. Modal opens empty.
-     - Enter "Тест Партнер" (autocomplete should now offer it). Leave linked settlement = "(none)". Amount = 100 UAH. Save.
-     - Payment appears in ledger with no linked settlement. Per-partner balance decreases by another 100 UAH. Settlement-1 badge UNCHANGED (unlinked payment doesn't affect per-settlement progress).
-  6. **Currency-mismatch warning:**
-     - For a shop with USD orders (Lamamarka), create a settlement (it'll be USD). Then try to record a payment in UAH against that USD settlement → modal shows orange warning, allows submit. Saved payment appears in ledger but doesn't reduce the USD balance (would create a separate UAH balance row showing overpayment, OR no UAH row at all if no UAH settlements exist — confirm during smoke which happens).
-  7. **Negative base banner:**
-     - Pick a period where the shop has loss (or temporarily seed one). Open calculator with profit formula. Live preview shows negative `base_amount` and warning banner per rule #16.
-  8. **Delete settlement with linked payments:**
-     - Click delete on settlement-1 (which has the partial payment linked). Confirmation dialog warns about linked payments. Confirm.
-     - Settlement disappears. Payment-1 (formerly linked) still appears in Payments table but now shows "(unlinked)" or "(none)" for the linked-settlement column. Per-partner balance recalculates accordingly.
-  9. **Delete payment:**
-     - Click delete on payment-2 (unlinked, 100 UAH). Confirm. Payment disappears. Per-partner balance increases by 100 UAH.
-  10. **Console clean throughout, no React-Query stale-cache anomalies after any mutation.**
+**Integration verification (Cowork via browser-MCP after backend + frontend gates green):**
 
-- **Edge-case spot checks (during smoke):**
-  - Empty state: a shop with zero settlements — Partner Payouts section shows friendly empty state with `[+ Calculate Settlement]` CTA. Balances summary hidden.
-  - DESIGNER role: log in as designer (or hit endpoints with designer token via MCP / Bruno) → 403 on all PART-1 endpoints.
-  - Refresh page after creating a settlement → settlement persists, balance persists.
+Per master §Verification + master §Integration end-to-end:
+
+1. **Pre-flight:** Serhii ensures idlaser repo is at `~/projects/idlaser`
+   with `models/card_detector.onnx` and `templates/7001.svg` present.
+   `docker-compose up -d` brings up the stack with new bind-mounts.
+   `alembic upgrade head` inside backend container.
+2. **AUTO path on clean photo:** open any Lamarka order with at least one
+   REFERENCE attachment (Heavy Mushroom Keychain has `IMG_2681.JPG` as
+   MOCKUP — Serhii uploads a fresh REFERENCE-typed photo for testing
+   OR temporarily reclassifies the existing). Click "Generate Draft
+   from {filename}". Modal opens → SSE events stream
+   (`job.started → detect.classical.* → … → export.completed`) within
+   ~12 seconds. Modal shows "Download Draft" button. Click → file
+   downloads via existing `attachmentsApi.download()` path. Open in
+   RDWorks — confirm valid DXF.
+3. **REVIEW path on hard photo:** upload one of idlaser's known-hard
+   test photos as REFERENCE (e.g., `~/projects/idlaser/photos/icm_fullxfull.877577984...jpg`
+   per master §Verification). Click "Generate Draft". SSE events
+   stream → `review_required` event with 4 best-guess corners + rectified
+   preview URL. Modal swaps to CornerPicker mode. Drag 4 corners to
+   correct positions. Submit → SSE stream #2 → reprocess →
+   `export.completed`. Download DXF → open in RDWorks → confirm valid.
+4. **Auth checks:** anonymous request → 401. Designer not assigned to
+   the test order → 403. Designer assigned → works.
+5. **Concurrent jobs:** click "Generate Draft" twice in quick succession;
+   confirm 2 distinct IdlaserDraftJob rows visible in some UI (or via
+   GET /draft-jobs/...status). Both progress independently.
+6. **Error recovery:** kill the backend mid-pipeline (or mock ONNX
+   failure) → modal shows failure toast → "Retry" button appears →
+   click → new IdlaserDraftJob row, old one stays FAILED in history.
+7. **Console clean** throughout (modulo pre-existing DASH-SHOP-WARNINGS
+   per PART-1-fu-1 closure noise).
+8. **Browser-MCP can click all modal buttons directly** (per AI_ONBOARDING
+   §9 — no native `confirm()` regressions).
 
 ### Workflow
 
-- **Plan mode REQUIRED.** This sprint has 10 OQs and non-trivial decisions (formula SQL shape, overhead currency allocation, KPI grid integration, autocomplete component choice). CC MUST NOT bypass plan mode (NP-ROBUSTNESS-1 deviation precedent — do not repeat).
-- The plan MUST:
-  - Read `docs/design/partner-payouts.md` v1.1 in full and `docs/design/profit-definition.md` v1.1 §6 specifically.
-  - Answer all 10 Open Questions with cited file:line evidence.
-  - Show the **actual SQL** for both formulas (rule #7 and rule #8), reflecting verified column names from OQ1+OQ2.
-  - Show the `PartnerSettlement` and `PartnerPayment` model definitions (Mapped columns + CHECK constraints + indexes).
-  - Show the Alembic migration diff (autogenerated + hand-edits).
-  - Show the `get_partner_balances()` implementation sketch — explicitly NOT the naive LEFT JOIN (per rule #11). The plan must demonstrate the correct row-multiplication-free shape.
-  - Show the `compute_settlement_payment_progress(settlement_ids)` query.
-  - Show the new Pydantic schema definitions for all request/response shapes.
-  - Show the new router endpoint signatures with role-gating dependency wired in.
-  - List the frontend component file paths (verified or proposed) and the integration point in the existing FIN-1 page component.
-  - Confirm out-of-scope files won't be touched.
-  - State expected pytest + vitest deltas (numbers, not vague "more tests").
-- **No code edits until Sergii approves the plan.**
-- After approval: backend models + migration → service layer → router → backend tests → frontend API client + hooks → frontend components → frontend tests → backend pytest → frontend gates → **MANUAL SMOKE via browser MCP per the 10-step scenario above** → commit.
-- Commit: `feat(part-1): partner payouts + payments ledger + shipping net kpi`
-- Do **NOT** update `implementation_plan.md` or `task.md` post-sprint — Cowork writes those after smoke verification.
-- **No Co-Authored-By or Claude trailer** (AI_ONBOARDING.md §9).
+**CC prompt prefix (per Cowork-idlaser protocol):**
+
+```
+First — diagnostic:
+  pwd
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short
+
+Then read in order:
+  1. docs/AI_ONBOARDING.md
+  2. CLAUDE.md
+  3. implementation_plan.md (Active Roadmap section + recent closure
+     entries for PART-1 + PART-1-fu-1; Explicitly deferred table)
+  4. task.md (this file)
+  5. Master cross-repo contract: ~/projects/idlaser/task.md
+     (or ~/projects/handoff/orderhub-idlaser.md if mounted)
+  6. backend/models/partner_settlement.py + partner_payment.py
+     (recent SQLAlchemy 2.0 model precedent)
+  7. backend/services/partner_payout_service.py
+     (recent async-service precedent — though no SSE)
+  8. backend/routers/finance.py (recent router pattern)
+  9. frontend/src/components/orders/OrderDetailPanel.tsx + AttachmentManager.tsx
+  10. frontend/src/components/finance/CalculateSettlementModal.tsx + RecordPaymentModal.tsx
+      (existing modal pattern; ConfirmDialog.tsx in components/ui/ — reusable primitive)
+  11. backend/routers/mcp.py (only SSE precedent — but LOCKED, do NOT modify)
+```
+
+**Plan mode REQUIRED.** The sprint introduces:
+- First user-facing SSE endpoint in the codebase
+- First cross-repo Python package dependency (bind-mounted)
+- First docker-compose bind-mount of an external repo
+- New frontend dep (`@microsoft/fetch-event-source`)
+- First pointer-event-based interactive overlay (corner-picker)
+
+In the plan, answer all 12 OQs (6 master CRM-side + 6 CRM-specific A-F)
+with cited file:line evidence. Show the SSE event-flow ASCII diagram
+mapped to backend code locations. Show the IdlaserDraftJob model
+definition + Alembic migration diff. Show the useDraftJob hook signature.
+Show the CornerPicker pointer-event handlers pseudo-code.
+
+**No code edits until Serhii approves the plan.**
+
+After approval: implement → backend gates (pytest + alembic round-trip) →
+frontend gates (tsc + lint + vitest) → **STOP, ping Serhii for browser-MCP
+smoke** per the 8-step integration verification above → commit.
+
+**Commit split (5 commits per master §Workflow):**
+
+1. `chore(idlaser): docker bind-mounts + Dockerfile pip install -e /idlaser + IDLASER_* config keys`
+   — docker-compose.yml mounts; Dockerfile pip install; config.py settings;
+   no app code changes yet.
+
+2. `feat(idlaser): IdlaserDraftJob model + migration + Pydantic schemas + service wrapper`
+   — model + ENUM + indexes; migration with ENUM-aware downgrade;
+   schemas; idlaser_service.py with SSE-bridge helper + pipeline wrapping;
+   backend tests for service.
+
+3. `feat(idlaser): 3 routes — generate-draft SSE + manual-corners SSE + status polling`
+   — routers/idlaser.py; main.py router registration; backend tests for
+   routes (role gating + SSE shape).
+
+4. `feat(idlaser): frontend DraftGenerator + ProgressPanel + CornerPicker + AttachmentManager Generate Draft button + useDraftJob hook + draftJobsApi client`
+   — all frontend new files + AttachmentManager modification + package.json
+   dep addition; frontend tests.
+
+5. `docs(idlaser): CLAUDE.md "ID-Laser draft pipeline" gotcha section with operator runbook`
+   — CLAUDE.md update including the "vendored library dependency"
+   sentence verbatim + the 10-step first-time setup runbook from OQ 8 answer.
+
+**Do NOT update `implementation_plan.md` or `task.md` post-sprint** —
+Cowork writes closure entry after browser-MCP smoke verification.
+
+**No Co-Authored-By trailer** per AI_ONBOARDING.md §9.

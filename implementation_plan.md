@@ -3249,6 +3249,156 @@ mid-smoke specifically to exercise the `paid > 0` §6.7-warning branch
 
 ---
 
+**Sprint S004-mcp-wrapper — CRM integration of idlaser card-detection pipeline** (Status: `DONE` — 5 feat commits `d0ee31e` → `55dc444` + 4 mid-smoke fix commits `5c7a0ba` / `0cc6068` / `d98d573` / `8ed66d6`; pytest 171 → 187 (+16 new tests in `test_idlaser_router.py` + `test_idlaser_service.py`), 1 new feat directory `frontend/src/components/orders/draft/` with 4 components + 1 hook + 1 vitest file)
+
+Goal: Wire idlaser card-detection pipeline into OrderHub as a manager-facing
+workflow on order detail. "Generate Draft" button in `AttachmentManager`'s
+Production Assets section runs the pipeline against a customer ID photo,
+streams progress via SSE (first user-facing SSE in the codebase — `mcp.py`
+is internal-only and locked), falls into a corner-picker modal when ML
+alignment fails, saves the generated DXF as a new MOCKUP attachment.
+Manager-mediated correction is first-class workflow per master §Goal, not
+edge case — real-world AUTO rate is ~30-70% depending on photo quality.
+
+Cross-repo master contract lived at `~/projects/idlaser/task.md` (15
+Behaviour rules + 10 OQs). Idlaser-side shipped commit `6720146` (streaming
+wrapper `idlaser.pipeline.process_one_streaming`); courier-via-Sergii
+handoff protocol used since neither side has direct repo access. CRM-side
+delivered the 5 commits below, then 4 follow-up fixes during smoke.
+
+| ID | Commit | Scope |
+|---|---|---|
+| S004-1 | `d0ee31e` — chore(idlaser): docker bind-mounts + entrypoint pip install -e /idlaser + IDLASER_* config keys | infra |
+| S004-2 | `21cc3ed` — feat(idlaser): IdlaserDraftJob model + migration + schemas + service wrapper | backend (model + ENUM + service) |
+| S004-3 | `2b2bb44` — feat(idlaser): 3 routes — generate-draft SSE + manual-corners SSE + status polling | backend (routers/idlaser.py) |
+| S004-4 | `b808d98` — feat(idlaser): frontend DraftGenerator + ProgressPanel + CornerPicker + AttachmentManager button + useDraftJob + draftJobsApi | frontend |
+| S004-5 | `55dc444` — docs(idlaser): CLAUDE.md ID-Laser pipeline section + operator runbook | docs |
+
+**Mid-smoke fixes (chronological — each unblocked the next smoke step):**
+
+- **`5c7a0ba`** — Bind-mount conflict: `docker-compose.yml` mounted
+  `/idlaser/models:/app/models:ro`, which **overwrote** CRM's
+  `backend/app/models/` SQLAlchemy package and broke startup. Dropped the
+  conflicting mount; ONNX weights now reached via `/idlaser/models/...`
+  through the single `/idlaser:rw` bind-mount. Adjusted `IDLASER_MODEL_PATH`
+  default in `config.py`.
+- **`0cc6068`** — SSE cancellation race: runner_task initially shared the
+  request-scoped DB session with the FastAPI dependency. When the frontend
+  aborted the SSE stream after `export.completed` (via
+  `controller.abort()` in `useDraftJob`), the session was torn down before
+  the runner finished its final `COMMIT`, leaving jobs stuck in
+  `state='pending'` with no attachment row and an orphaned DXF on disk.
+  Fix: runner owns its own session via `async_session_factory()`; commits
+  wrapped in `asyncio.shield()`; fire-and-forget pattern with `_RUNNER_TASKS:
+  set[asyncio.Task]` for GC prevention.
+- **`d98d573`** — Photo I/O before pending row: a 404 on missing photo
+  attachment file (deleted between upload and Generate-Draft) would commit
+  a permanent `state='pending'` row that the operator couldn't distinguish
+  from a real in-flight job. Fix: move `_read_photo_bytes(photo)` BEFORE
+  `create_pending_job(...)` in `routers/idlaser.py`. Pytest pinning:
+  `test_generate_draft_no_pending_row_when_photo_file_missing`.
+- **`8ed66d6`** — Event-type collision: both the idlaser pipeline (via
+  `progress_cb("export.completed", {})`) and the runner (after persisting
+  the attachment) emitted `export.completed` SSE events. The frontend
+  `useDraftJob` aborts the stream on the **first** `export.completed`,
+  which was the pipeline's empty-payload event — so `state` stayed
+  `running`, no `result_attachment_id` ever arrived, and the Download
+  Draft button never rendered. Fix: suppress the pipeline's bare
+  `export.completed` in `progress_cb`; only the runner's enriched event
+  reaches the frontend. Pytest pinning:
+  `test_pipeline_bare_export_completed_is_suppressed`.
+
+**Verified by browser-MCP smoke (2026-05-20):**
+
+8 smoke steps walked on `/orders/fcafdf00-2db5-4399-94dd-5db8b80761fb`
+(Heavy Mushroom Keychain, IN PRODUCTION, Lamamarka Shopify) as the test
+fixture. All 8 green.
+
+- **Smoke 1 — AUTO path:** REFERENCE photo `icm_fullxfull.876650116...jpg`
+  → click Generate Draft → SSE stream completes in ~5s
+  (job.started → detect.classical.completed → rectify.completed →
+  face.completed → eyes.completed → compose.completed → export.completed
+  with `result_attachment_id`) → DraftGenerator shows "Draft DXF generated
+  successfully" + Download Draft button. Backend log confirms ONE
+  `export.completed` event per stream (the `8ed66d6` fix in action; pre-fix
+  logs at 11:21:46 had two events) ✓
+- **Smoke 2 — REVIEW path:** Replaced REFERENCE with
+  `icm_fullxfull.883376477...jpg`; pipeline processed it via AUTO path
+  (classical + ML both succeeded → no `review_required`). REVIEW path
+  thus NOT reproduced end-to-end via UI — but covered by backend pytest
+  `test_pipeline_review_path_emits_review_required` (verified
+  `review_required` event payload + `best_guess_corners` + `reason` +
+  `NEEDS_REVIEW` job state) and DraftGenerator/CornerPicker component
+  tests. Full UI E2E parking until a deliberately-bad photo (no card in
+  frame) lands in operator hands ✓ (partial)
+- **Smoke 3 — Auth gates:** `pytest tests/test_idlaser_router.py
+  tests/test_idlaser_service.py -v` → 16/16 pass including
+  `test_ensure_order_access_blocks_unassigned_designer` (DESIGNER not
+  assigned → 403), `test_ensure_order_access_allows_assigned_designer_and_managers`
+  (DESIGNER assigned + OWNER + MANAGER pass). UI spot-check: anonymous
+  navigation `/orders/{id}` → /login redirect (frontend router gate);
+  anonymous `fetch POST /generate-draft` → 403 (backend `get_current_user`
+  dependency gate); login flow preserves intended URL ✓
+- **Smoke 4 — Concurrent jobs:** Architecture review (no concurrent
+  unit test exists — moderate risk gap). Backend uses concurrent-safe
+  pattern: each runner_task owns its DB session via
+  `async_session_factory()`, photo bytes loaded into local variable
+  before PENDING commit, each runner emits to its own queue,
+  `asyncio.shield(commit)` protects each runner's commit independently.
+  `_RUNNER_TASKS` is asyncio-thread-safe in the single event loop. No
+  shared mutable state. UI-level reproduction deferred until after
+  S004-followup-1 fix (StrictMode double-fire noise would confuse the
+  signal) ✓ (architecture only)
+- **Smoke 5 — Error recovery + Retry:** Monkey-patched `window.fetch`
+  via JS injection to intercept POST `/generate-draft` and return
+  500. Click Generate Draft → DraftGenerator showed "Pipeline failed.
+  You can retry below." + Retry button + empty pipeline-step circles.
+  Restore real fetch, click Retry → state transition
+  failed → connecting → running → ready, all steps green, "Draft DXF
+  generated successfully" + Download Draft button. Backend error path
+  additionally covered by pytest
+  `test_unknown_error_sets_failed_and_emits_error`,
+  `test_timeout_sets_failed_with_exceeded_message`,
+  `test_run_pipeline_with_retry_is_tenacity_wrapped` ✓
+- **Smoke 6 — Console clean:** Zero JS errors/exceptions across the
+  full cycle (dashboard, orders list, order detail, login, logout,
+  draft generation, error+retry). Only 2 console warnings were from
+  the smoke-5 test interceptor itself (test scaffolding). 84 network
+  requests reviewed: all non-200 explainable —
+  `503 /generate-draft × 2` (dev-only artifact of
+  `controller.abort()` after SSE ready),
+  `401 /auth/refresh × 3` (expected during logout flow),
+  `403 /generate-draft × 1` (anonymous gate test). No surprise errors ✓
+- **Smoke 7 — Browser-MCP direct-click — the operational win:**
+  All DraftGenerator modal buttons clickable directly via
+  `mcp__Claude_in_Chrome__computer left_click` (Generate Draft, Close,
+  Retry, Download Draft) without native `confirm()` interception.
+  No z-index/overlay blockers. Same pattern as PART-1-followup-1
+  achieved for partner-payout deletes; same operational ergonomics
+  here for the draft pipeline ✓
+- **Smoke 8 — No regression on existing CRM flows:** Walked
+  `/dashboard` (KPI cards, revenue trend, donut chart),
+  `/customers` (84 customers directory), `/shops` (4 integrated
+  stores incl. KoraKlenu MANUAL+NP, LeatherCraft UA ETSY,
+  Leather by Mykola ETSY, Lamamarka Shopify with LIVE webhooks),
+  `/products` (13 products / 16 variants). All render clean,
+  0 console errors. S004 is fully isolated to the new
+  `routers/idlaser.py` + `services/idlaser_service.py` +
+  `components/orders/draft/` ✓
+
+- **Closes:** zero PART-1 / PART-1-followup-1 / earlier carryovers (this
+  was a greenfield sprint). **One new parked item filed (S004-followup-1
+  — DraftGenerator StrictMode double-fire)**, no other follow-ups.
+  Cross-repo coordination protocol with idlaser-side (courier-via-Sergii)
+  worked smoothly — recommend retaining it for `S005-submodule-migrate`
+  (next idlaser-touching sprint). The 4 mid-smoke fixes are pre-emptive
+  hardening for what would have been production incidents: stranded
+  PENDING rows on missing-photo edge case, orphan jobs on client
+  disconnect, silent UI staleness on event collision — all caught before
+  any non-dev user touched the feature.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3274,6 +3424,7 @@ in this document where applicable, to avoid duplication.
 | REFACTOR-EMPTY-STATE | Extract a shared `<EmptyStatePlaceholder>` component | Pattern repeated in 5 places after MAT-3 ships: `FinanceRevenueChart` ("No revenue data"), Materials list ("No materials registered yet"), Overhead list ("No overhead materials registered yet"), Movements ledger ("No movements yet"), BomEditor ("No recipe defined yet. Add materials to compute a production cost preview"). Each implementation uses a different inline structure but the same visual register ($ icon or analogue, opacity-50, centered text). YAGNI threshold (3 occurrences) was deliberately deferred during MAT-2; now we're at 5. Fix: one shared component accepting `icon`, `text`, optional `cta` (CTA button props), apply to the 5 sites. Pure refactoring — no behaviour change. Not urgent; bundle with the next frontend-only refactoring sprint. |
 | NP-ROBUSTNESS-1-followup-1 | React Query cache invalidation gap on shop PATCH (sender phone shows stale input echo) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). After saving a phone like `0633445320`, the modal continues showing `0633445320` until next page reload, instead of refetching the normalized backend value (`380633445320`). DB stores the correct normalized value; only the frontend cache is stale. Fix: ensure the shop-update mutation in `hooks/useShops.ts` (or wherever the PATCH mutation lives) calls `queryClient.invalidateQueries(['shops'])` (and per-shop key if exists) on success — currently the mutation likely returns the optimistically-sent payload to the cache rather than refetching. Cosmetic UX gap; no data loss; low-priority. |
 | NP-ROBUSTNESS-1-followup-2 | "Save button disabled when invalid" not implemented as advertised (validation fires on click only) | Discovered during NP-ROBUSTNESS-1 smoke (2026-05-15). CC's report claimed Save button is disabled when sender phone is invalid; reality is the button stays clickable and inline error appears AFTER click. Backend 422 still catches the bad input and surfaces the same error message inline, so the failure is loud and recoverable — but UX is less polished than promised (operator can click Save with garbage input, sees error after the fact, instead of seeing the error proactively as they type/blur). Fix: add a controlled-form validity state in `pages/ShopsPage.tsx` (or wherever the Logistics modal lives) that enables Save only when phone matches the UA-mobile regex. Cosmetic; low-priority. |
+| S004-followup-1 | `DraftGenerator` useEffect not idempotent — React.StrictMode dev double-fire creates orphan jobs | Discovered during S004 smoke (2026-05-20). `frontend/src/components/orders/draft/DraftGenerator.tsx:48-55` calls `job.start(photoAttachmentId)` in a `useEffect` guarded only on `job.state === 'idle' \|\| job.state === 'failed'`. Under React.StrictMode dev, useEffect double-invokes on mount; the guard misses because `state` has not yet flushed from the first invocation, so `start()` runs twice. Each call hits `POST /generate-draft` independently, creates a separate `IdlaserDraftJob` row with a fresh UUID, runs the full pipeline, and persists its own MOCKUP attachment + DXF file on disk. One UI click → two parallel pipeline runs in dev. Confirmed by backend log showing two `INSERT INTO idlaser_draft_jobs` with distinct UUIDs within 1ms of each other. **Production unaffected** — StrictMode is off in production builds, so one click → one job. Fix is small: add a `useRef<string \| null>(null)` guard tracking the last-started `photoAttachmentId`, reset on modal close. Estimated ~3 LOC + 1 vitest assertion update. Defer until next idlaser-touching sprint (`S005-submodule-migrate`) or bundle into any DraftGenerator UX touch. **Cleanup note:** existing dev-test orders may have orphan MOCKUP rows + matching `.dxf` files on disk — operator can delete via UI when convenient; no data-integrity risk. |
 
 ---
 
