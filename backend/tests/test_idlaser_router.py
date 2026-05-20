@@ -158,6 +158,44 @@ async def test_generate_draft_validates_photo_and_creates_job(monkeypatch):
     assert "payload" in parsed and "timestamp" in parsed and "job_state" in parsed
 
 
+# ─── 3b. generate_draft does NOT create PENDING row when file missing ─
+
+
+@pytest.mark.asyncio
+async def test_generate_draft_no_pending_row_when_photo_file_missing(monkeypatch):
+    """File-on-disk validation precedes create_pending_job. A
+    `_read_photo_bytes` failure must return 4xx without ever calling
+    `create_pending_job` (no stranded PENDING rows in DB)."""
+    order_id = uuid.uuid4()
+    photo_id = uuid.uuid4()
+    user = _make_user(UserRole.MANAGER)
+    order = _make_order(order_id)
+    db = _make_db(order)
+
+    fake_photo = MagicMock()
+    fake_photo.id = photo_id
+
+    validate = AsyncMock(return_value=fake_photo)
+    create = AsyncMock()  # must NOT be called
+    read_bytes = AsyncMock(
+        side_effect=HTTPException(status_code=404, detail="Photo file missing on disk")
+    )
+
+    monkeypatch.setattr(router_module.idlaser_service, "validate_photo_attachment", validate)
+    monkeypatch.setattr(router_module.idlaser_service, "create_pending_job", create)
+    monkeypatch.setattr(router_module.idlaser_service, "_read_photo_bytes", read_bytes)
+
+    body = IdlaserDraftJobCreate(photo_attachment_id=photo_id)
+    with pytest.raises(HTTPException) as exc:
+        await router_module.generate_draft(
+            order_id=order_id, body=body, current_user=user, db=db,
+        )
+    assert exc.value.status_code == 404
+    validate.assert_awaited_once()
+    read_bytes.assert_awaited_once()
+    create.assert_not_awaited()  # ← key invariant: no stranded PENDING row
+
+
 # ─── 4. manual-corners refuses when photo deleted ─────────────────────
 
 

@@ -85,10 +85,13 @@ async def generate_draft(
     photo = await idlaser_service.validate_photo_attachment(
         db, order_id, body.photo_attachment_id,
     )
+    # Read the photo bytes BEFORE committing a PENDING row. A missing-on-disk
+    # photo would otherwise strand a permanent state='pending' row that the
+    # operator can't distinguish from a real in-flight job.
+    photo_bytes = await idlaser_service._read_photo_bytes(photo)
     job = await idlaser_service.create_pending_job(
         db, order_id, body.photo_attachment_id, current_user.id,
     )
-    photo_bytes = await idlaser_service._read_photo_bytes(photo)
 
     async def event_gen():
         async for ev in idlaser_service.run_draft_pipeline_sse(
