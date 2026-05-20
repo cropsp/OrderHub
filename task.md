@@ -5,7 +5,7 @@
 >
 > - **Strategic Roadmap & History:** Refer to [implementation_plan.md](implementation_plan.md).
 > - **Cross-repo master contract:** `~/projects/idlaser/task.md` (also in `~/projects/handoff/orderhub-idlaser.md` if handoff folder is set up). 15 settled Behaviour rules + 10 OQs. Idlaser-side answered OQs 1/2/3/7; this task.md answers OQs 4/5/6/8/9/10 + adds CRM-specific OQs.
-> - **Current task:** none — S004-mcp-wrapper closed 2026-05-20 (see closure entry in [implementation_plan.md](implementation_plan.md)). The S004 spec below is preserved as archival reference and a template for `S005-submodule-migrate`. Next sprint pick from the parking lot (Explicitly deferred + Open Architectural Questions in `implementation_plan.md`).
+> - **Current task:** S005-submodule-migrate — replace transitional idlaser bind-mount + entrypoint pip install with git submodule + Dockerfile build-time install. Bundles commit 0 for S004-followup-1 (DraftGenerator StrictMode double-fire fix). See spec below.
 >
 > DO NOT store long-term plans here. Only active, atomic steps for the current session.
 
@@ -13,7 +13,265 @@
 
 ## ✅ S004-mcp-wrapper — DONE (2026-05-20)
 
-Sprint closed. 5 feat commits `d0ee31e` → `55dc444` + 4 mid-smoke fix commits `5c7a0ba` / `0cc6068` / `d98d573` / `8ed66d6`. Browser-MCP smoke 8/8 green. pytest 171 → 187 (+16 new `test_idlaser_*` cases including `test_pipeline_bare_export_completed_is_suppressed` which pins fix `8ed66d6`). One parked follow-up: `S004-followup-1` — DraftGenerator useEffect double-fire under React.StrictMode dev (production unaffected; ~3 LOC fix; defer to next idlaser-touching sprint or bundle into `S005-submodule-migrate`). Full closure entry + smoke evidence + per-commit narrative in `implementation_plan.md` (search "S004-mcp-wrapper" in that file).
+Sprint closed. 5 feat commits `d0ee31e` → `55dc444` + 4 mid-smoke fix commits `5c7a0ba` / `0cc6068` / `d98d573` / `8ed66d6` + 1 docs closure commit `7b33184`. Browser-MCP smoke 8/8 green. pytest 171 → 187 (+16 new `test_idlaser_*` cases including `test_pipeline_bare_export_completed_is_suppressed` which pins fix `8ed66d6`). One parked follow-up: `S004-followup-1` — DraftGenerator useEffect double-fire under React.StrictMode dev (production unaffected; ~3 LOC fix; bundled into S005 below as commit 0). Full closure entry + smoke evidence + per-commit narrative in `implementation_plan.md` (search "S004-mcp-wrapper" in that file).
+
+---
+
+## S005-submodule-migrate — Migrate idlaser from docker bind-mount to git submodule
+
+### Goal
+
+Replace the transitional bind-mount + runtime `pip install -e /idlaser`
+(established in S004) with a git submodule + build-time install. **Zero
+functional change for end users** — Generate Draft button → SSE → DXF
+flow remains identical. Same routes, same DB schema, same React
+components, same pipeline. This is pure infrastructure refactor
+discharging the technical debt explicitly marked at S004 close:
+
+> *"idlaser is a vendored library dependency; canonical source at
+> github.com/cropsp/idlaser; bind-mount setup is transitional, submodule
+> migration planned post-S004 as S005-submodule-migrate."*
+> — CLAUDE.md, "ID-Laser draft pipeline" section, verbatim per S004
+> Behaviour rule.
+
+**Bonus:** bundle the `S004-followup-1` fix (DraftGenerator
+StrictMode double-fire creates orphan jobs in dev) as commit 0. The fix
+is frontend-only (~3 LOC + 1 vitest assertion) and unrelated to the
+submodule mechanics, but lives in idlaser-adjacent code, so the cost
+of bundling is near-zero and the operational benefit (clean dev cycle
+during S005 smoke) is real.
+
+### Cross-repo source of truth
+
+The **master integration contract** from S004 lives at
+`~/projects/idlaser/task.md` (same file via
+`~/projects/handoff/orderhub-idlaser.md` if handoff is mounted). The
+15 Behaviour rules from S004 master remain in force — no
+relitigation. S005 adds CRM-side-only refinements; idlaser-side has
+exactly one upstream action (tag a release — see Rule 9 below).
+
+**Idlaser-side coordination protocol:** courier-via-Sergii (same as
+S004). Cowork drafts the idlaser-side tag request as a brief file in
+`docs/cross-project/idlaser-S005-coordination.md` (created during plan
+mode); Sergii couriers it to the idlaser-Cowork session; idlaser-side
+publishes a tagged release (e.g. `v1.0.0`); confirms back via Sergii;
+THEN CRM-side starts CC implementation.
+
+### Behaviour rules (settled — do not relitigate)
+
+1. **Zero functional change for end users.** Generate Draft → SSE →
+   DXF pipeline behaves identically pre- and post-migration. Same
+   `routers/idlaser.py`, same `services/idlaser_service.py`, same
+   `frontend/src/components/orders/draft/*`. If a code change to
+   these files is required to make the migration work, that is a
+   bug in the migration design — surface to Cowork before committing.
+
+2. **idlaser remains vendored, not on PyPI.** Submodule is the new
+   vendoring mechanism; no public package publish, no internal PyPI
+   mirror.
+
+3. **`backend/external/idlaser/` is the canonical path.** Replaces
+   both the `/idlaser:rw` Docker bind-mount and the old
+   `/idlaser/...` config defaults in `backend/config.py:60-61`. The
+   directory does NOT exist before the submodule is added in
+   commit 1.
+
+4. **No `Co-Authored-By` trailer** per AI_ONBOARDING.md §9.
+
+5. **Bare-metal `start-dev.sh` still works post-migration.** Commit 2
+   updates `start-dev.sh` to run, in the venv-active block, both
+   `git submodule update --init --recursive`
+   AND `pip install -e backend/external/idlaser` after the existing
+   `pip install -r requirements.txt`. The host venv must see the
+   idlaser package as importable; the Docker image's site-packages
+   is a separate install path. (Without this rule, the Docker path
+   works but bare-metal silently breaks — the original `pip install
+   -e /idlaser` line in entrypoint.sh covered both via mount path
+   coincidence, which we're losing.)
+
+6. **ONNX weights remain bundled inside the submodule** as a regular
+   binary commit at `backend/external/idlaser/models/card_detector.onnx`
+   (~80 MB). This adds ~80 MB to idlaser's git history (a one-time
+   cost paid in the idlaser repo, not CRM). Trade-off vs GitHub
+   Release asset + entrypoint download: we explicitly choose
+   `git clone` predictability over runtime network dependency. A
+   `git clone --depth=1 --recurse-submodules` keeps CRM-side clone
+   time bounded since only the latest tagged release is fetched.
+
+7. **Commit 0 (S004-followup-1 fix) is frontend-only and independent
+   of cross-repo coordination.** It can be safely committed and even
+   merged on its own if idlaser-side tag is delayed. Bundled into
+   S005 only for efficiency; do NOT block on it if Cowork later
+   decides to ship commit 0 ahead of the rest.
+
+8. **All 5 commits (0-4 below) land on a single feature branch
+   `s005-submodule-migrate`** for review-time atomicity. Squash merge
+   is NOT permitted — each commit's narrative matters for future
+   archeology (per CLAUDE.md "Surgical changes" principle).
+
+9. **Idlaser-side MUST publish a tagged release before CC starts
+   implementation.** Cowork requests the tag via courier-via-Sergii
+   as the first cross-repo action. CC plan-mode SHOULD NOT run until
+   the tag SHA is known (so commit 1 can pin to a specific SHA, not
+   "main HEAD as of plan time"). If tag is delayed, commit 0 can
+   still ship independently per Rule 7.
+
+### Open Questions (resolve in plan-mode, with cited file:line evidence)
+
+| ID | OQ | Trade-off |
+|---|---|---|
+| OQ-A | Docker build submodule auth — pre-clone on host (CC's recommendation; Sergii's host already has the repo from S004 setup) vs PAT build-arg via Docker `--secret` mount vs SSH deploy key in Dockerfile | Simplicity (host-clone) vs CI reproducibility (PAT/SSH) vs secret-handling overhead |
+| OQ-C | Submodule pin strategy — track a tagged release (e.g. `v1.0.0`) vs pin to an explicit commit SHA inside the tag | Stability (SHA) vs cleaner update story (`git submodule update --remote --to-tag vX.Y.Z`) |
+| OQ-D | Dockerfile single-stage (current) vs multi-stage (dev deps stripped from runtime image) | Build complexity vs image size — measure idlaser dev-deps size first |
+| OQ-E | Downgrade / retry path if `git submodule update --init` fails on operator machine (network blip, missing deploy key, no internet on first boot) | Need explicit error message + recovery procedure in `start-dev.sh`; do NOT silently fall back to old bind-mount path |
+| OQ-F | `start-dev.sh` submodule-init flow — auto-run `git submodule update --init` if `backend/external/idlaser/` is empty, vs require operator to run it manually with clear error | Operator surprise (auto) vs script complexity (manual prompt) |
+| OQ-G | Old-branch compatibility — once commit 3 lands and bind-mount removed from docker-compose.yml, operators on old branches (pre-S005) need to re-add the bind-mount line locally to build. Worth documenting prominently? | One-paragraph runbook note vs explicit `git checkout` hook |
+| OQ-H | Operator `.env` file may have `IDLASER_TEMPLATE_PATH=/idlaser/7001.svg` and `IDLASER_MODEL_PATH=/idlaser/models/card_detector.onnx` from S004 setup. These env vars OVERRIDE the new defaults in commit 3 silently. Migration strategy: (a) commit 3 also updates `.env.example` + entrypoint warns loudly if old path detected, (b) silent migration relying on operator to read CLAUDE.md, (c) hard-fail entrypoint if old path detected with clear "your .env is out of date" message | UX of upgrade (loud warn) vs friction (hard-fail) vs silent-but-confusing |
+
+### Verification gates
+
+Each gate must pass before the next commit is approved.
+
+**Backend gates (no change expected — pure refactor):**
+- `pytest tests/ -v` → 187 → 187 (S005 does NOT add backend code, only
+  bootstrap; if any test count changes, that's a regression to
+  investigate)
+- `alembic upgrade head` clean (no new migration this sprint)
+
+**Frontend gates:**
+- `npx tsc --noEmit` clean
+- `npm run lint` clean
+- `npx vitest run` → existing test count + 1 new assertion in
+  `DraftGenerator.test.tsx` for the StrictMode guard (commit 0)
+
+**Docker mode gate:**
+- `docker compose build` succeeds with NO external `/idlaser:rw`
+  bind-mount in `docker-compose.yml` (verify by `grep -c /idlaser
+  docker-compose.yml` → 0)
+- `docker compose up` brings backend healthy
+- Browser-MCP smoke step 1 (AUTO path) succeeds end-to-end
+
+**Bare-metal mode gate:**
+- Fresh-clone operator workflow: `git clone --recurse-submodules`
+  succeeds; `./start-dev.sh` succeeds without manual intervention
+  (per OQ-F decision)
+- Generate Draft AUTO path works against bare-metal backend
+
+**Regression gates (smoke — confirm S004 fixes still in place):**
+- Browser-MCP smoke step 1: **expect exactly ONE
+  `INSERT INTO idlaser_draft_jobs` per UI click** (regression test
+  for commit 0 — `S004-followup-1` fix). Confirm via
+  `tail -100 backend/logs/server.log | grep -c "INSERT INTO
+  idlaser_draft_jobs"` after one click. Pre-fix it was 2; post-fix
+  it must be 1.
+- All 8 S004 smoke steps still green (auto, review-via-pytest,
+  auth, concurrent-architecture-review, error-recovery,
+  console-clean, browser-mcp-clickable, no-regression)
+
+**Closure-time tasks (post-smoke, in Cowork's closure commit):**
+- `S004-followup-1` row REMOVED from "Explicitly deferred" table in
+  `implementation_plan.md`
+- New S005 closure entry written in `implementation_plan.md`
+- `task.md` archives S005 spec the same way S004 spec is archived
+  in this file
+
+### Workflow
+
+**CC prompt prefix (per Cowork-idlaser protocol):**
+
+```
+First — diagnostic:
+  pwd
+  git branch --show-current
+  git rev-parse HEAD
+  git status --short
+
+Then read in order:
+  1. docs/AI_ONBOARDING.md
+  2. CLAUDE.md — focus on "ID-Laser draft pipeline" section
+  3. implementation_plan.md S004 closure entry (search
+     "S004-mcp-wrapper") + Explicitly deferred row S004-followup-1
+  4. task.md (this file) — sections below "S005-submodule-migrate"
+  5. Master cross-repo contract: ~/projects/idlaser/task.md
+     (or ~/projects/handoff/orderhub-idlaser.md if mounted)
+  6. backend/Dockerfile (lines 1-31 — current bootstrap)
+  7. backend/entrypoint.sh (lines 6-15 — install block to be removed)
+  8. docker-compose.yml (line 29 — bind-mount to be removed)
+  9. backend/config.py (lines 58-62 — IDLASER_* defaults to be updated)
+  10. start-dev.sh (full — gets new submodule init + pip install steps)
+  11. frontend/src/components/orders/draft/DraftGenerator.tsx
+      (lines 48-55 — useEffect to be guarded against StrictMode)
+```
+
+**Plan mode REQUIRED.** S005 introduces:
+- First git submodule in the OrderHub monorepo
+- First Docker build-time COPY of an external repo
+- First bare-metal vs Docker dual-path bootstrap inside `start-dev.sh`
+  (today it's bare-metal only)
+- First `.env` migration scenario (OQ-H)
+
+In the plan, answer all 7 OQs (A, C, D, E, F, G, H) with cited
+file:line evidence. Show the exact `git submodule add ...` command,
+the Dockerfile diff (lines to remove + lines to add), the
+`start-dev.sh` diff, and the `frontend/src/components/orders/draft/DraftGenerator.tsx`
+useEffect guard pseudo-code. Cite the idlaser-side tag SHA that will
+be pinned in commit 1 (Cowork will provide this SHA after
+courier-via-Sergii confirms tag).
+
+**No code edits until Sergii approves the plan.**
+
+After approval: implement → backend gates (pytest + alembic
+no-op confirm) → frontend gates (tsc + lint + vitest) → docker
+gate → bare-metal gate → **STOP, ping Sergii for browser-MCP
+smoke** per the verification gates above → commit. Then Cowork
+writes closure entry.
+
+**Commit split (5 commits, on branch `s005-submodule-migrate`):**
+
+0. `fix(s004-fu-1): ref-based guard in DraftGenerator useEffect against React.StrictMode double-fire`
+   — `frontend/src/components/orders/draft/DraftGenerator.tsx:48-55`
+   only; `useRef<string | null>(null)` tracking last-started
+   `photoAttachmentId`, reset on modal close; 1 new vitest
+   assertion in `DraftGenerator.test.tsx`. Independent of
+   submodule mechanics (per Rule 7).
+
+1. `chore(s005): add idlaser as git submodule at backend/external/idlaser`
+   — new `.gitmodules` file; submodule pinned to `{SHA-from-tag}` per
+   OQ-C answer; no other file changes. Verify clone succeeds in CI.
+
+2. `refactor(s005): move idlaser pip install from entrypoint to Dockerfile build-time + bare-metal start-dev.sh updates`
+   — `backend/Dockerfile:15-21` comment block replaced with
+   `COPY ./external/idlaser ./external/idlaser` + `RUN pip install
+   --no-cache-dir -e ./external/idlaser`; `backend/entrypoint.sh:6-15`
+   install block deleted entirely (lines 6 → 16 collapse);
+   `start-dev.sh` gains submodule-init + `pip install -e
+   backend/external/idlaser` steps after the existing `pip install
+   -r requirements.txt` block per Rule 5 + OQ-F answer. Docker mode
+   still uses the old `/idlaser:rw` bind-mount as a fallback
+   (kept for commit 3's atomic removal).
+
+3. `chore(s005): drop docker-compose /idlaser bind-mount + update IDLASER_* config defaults`
+   — `docker-compose.yml:29` line deleted (whole `/idlaser:rw`
+   line, not the whole `volumes:` block); `backend/config.py:60-62`
+   defaults updated to `/app/external/idlaser/7001.svg` and
+   `/app/external/idlaser/models/card_detector.onnx`; `.env.example`
+   updated to match; `entrypoint.sh` warning per OQ-H answer. Point
+   of no return — old branches will fail to build after this commit
+   merges to main (per OQ-G runbook note in commit 4).
+
+4. `docs(s005): CLAUDE.md "ID-Laser draft pipeline" section rewrite + AI_ONBOARDING.md runbook update`
+   — replace the "Bind-mounts, not requirements.txt" gotcha with
+   "Submodule, not requirements.txt" gotcha; replace the "First-time
+   operator setup runbook" 10 steps with the new
+   `git clone --recurse-submodules` flow; document OQ-G transition
+   (operators on old branches) and OQ-H `.env` migration prominently;
+   update CLAUDE.md "Build & Run" section if `start-dev.sh`
+   invocation changes.
+
+**Do NOT update `implementation_plan.md` or `task.md` post-sprint** —
+Cowork writes closure entry after browser-MCP smoke verification.
+
+**No Co-Authored-By trailer** per AI_ONBOARDING.md §9.
 
 ---
 
