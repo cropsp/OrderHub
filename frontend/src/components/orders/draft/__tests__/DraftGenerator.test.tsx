@@ -98,4 +98,26 @@ describe('DraftGenerator', () => {
       expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument(),
     )
   })
+
+  it('calls start() only once under React.StrictMode double-invoke', () => {
+    const startSpy = vi.fn()
+    ;(useDraftJob as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...baseJob,
+      state: 'idle',
+      start: startSpy,
+    })
+    render(
+      <React.StrictMode>
+        <DraftGenerator
+          isOpen={true}
+          onClose={() => {}}
+          orderId="o1"
+          photoAttachmentId="p1"
+          photoFilename="test.jpg"
+        />
+      </React.StrictMode>,
+    )
+    expect(startSpy).toHaveBeenCalledTimes(1)
+    expect(startSpy).toHaveBeenCalledWith('p1')
+  })
 })

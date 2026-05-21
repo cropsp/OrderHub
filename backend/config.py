@@ -54,11 +54,11 @@ class Settings(BaseSettings):
     MCP_SERVER_PORT: int = 3001
 
     # ─── ID-Laser draft pipeline ───────────────────────────────
-    # Paths default to the bind-mount layout in docker-compose.yml:
-    # /idlaser is the editable-installed idlaser repo; both the template
-    # and the ONNX weights are accessed via that single bind-mount.
-    IDLASER_TEMPLATE_PATH: str = "/idlaser/7001.svg"
-    IDLASER_MODEL_PATH: str = "/idlaser/models/card_detector.onnx"
+    # Paths default to the git submodule layout (S005):
+    # backend/external/idlaser is COPYed into the image at
+    # /app/external/idlaser by the Dockerfile and editable-installed there.
+    IDLASER_TEMPLATE_PATH: str = "/app/external/idlaser/7001.svg"
+    IDLASER_MODEL_PATH: str = "/app/external/idlaser/models/card_detector.onnx"
     IDLASER_TIMEOUT_S: int = 60
 
     @property

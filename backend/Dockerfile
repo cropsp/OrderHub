@@ -12,13 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Note: idlaser is installed at container startup (entrypoint.sh:
-# `pip install -e /idlaser`) — NOT here. docker-compose bind-mounts
-# defined in `volumes:` are runtime-only and are not active during
-# `docker-compose build`, so the editable install must happen after
-# the mount is in place. idlaser is intentionally absent from
-# requirements.txt to keep bare-metal pip runs working. See CLAUDE.md
-# "ID-Laser draft pipeline".
+# idlaser is installed at build time from the in-tree git submodule at
+# backend/external/idlaser (S005). Kept out of requirements.txt because
+# the path is repo-relative and idlaser is not on PyPI. COPY first so
+# the pip install layer caches independently of unrelated source changes.
+# See CLAUDE.md "ID-Laser draft pipeline".
+COPY ./external/idlaser ./external/idlaser
+RUN pip install --no-cache-dir -e ./external/idlaser
 
 # Application code
 COPY . .

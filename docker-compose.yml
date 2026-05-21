@@ -26,7 +26,6 @@ services:
     env_file: .env
     volumes:
       - uploads_data:/app/uploads
-      - /home/serhii/projects/idlaser:/idlaser:rw
     ports:
       - "8000:8000"
     command: bash entrypoint.sh

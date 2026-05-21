@@ -114,9 +114,9 @@ Performance: route-level chunk splitting (frontend). Testing: smoke tests with V
 - Designer access is shop-scoped, not order-scoped: a designer with any assigned order in shop X can access all shop-level endpoints (products, packaging, config) for that shop. Fine-grained order-level checks only apply in orders and attachments routers.
 - System user UUID `00000000-0000-0000-0000-000000000001` (`backend/constants.py:SYSTEM_USER_ID`) is referenced by webhook/scheduler audit rows. Never delete; never reuse. Installed by alembic migration `a1b2c3d4e5f6_add_persistent_system_user`.
 
-## ID-Laser draft pipeline (S004-mcp-wrapper)
+## ID-Laser draft pipeline (S004-mcp-wrapper + S005-submodule-migrate)
 
-idlaser is a vendored library dependency; canonical source at github.com/cropsp/idlaser; bind-mount setup is transitional, submodule migration planned post-S004 as S005-submodule-migrate.
+idlaser is a vendored library dependency, canonical source at github.com/cropsp/idlaser, integrated as a **git submodule at `backend/external/idlaser`**, pinned to a specific SHA (currently `e5bb5cf`, idlaser tag `v1.0.0`). The submodule is COPYed into the Docker image and editable-installed at build time; bare-metal `start-dev.sh` mirrors the install into the host venv.
 
 The pipeline runs on the customer REFERENCE photo for an order and produces a DXF MOCKUP attachment. It exposes itself as `idlaser.api` — CRM imports only from that surface (never from `idlaser.pipeline` / `idlaser.detect` / etc.); internals may move, the `api` module won't.
 
@@ -129,35 +129,67 @@ Frontend entry point is the "Generate Draft" button in `AttachmentManager.tsx`, 
 
 **Gotchas:**
 
-- **Bind-mounts, not requirements.txt**: idlaser is installed at container startup via `entrypoint.sh: pip install -e /idlaser`. It is NOT in `backend/requirements.txt` — adding it there would break bare-metal `pip install -r requirements.txt` runs (the bind-mounted `/idlaser` path doesn't exist outside the container). `docker-compose build` cannot use volume mounts either, so the install must happen at runtime, not build time.
-- **Template at idlaser repo root**: `7001.svg` lives at the idlaser repo root, not in a `templates/` subdir. The container reaches it via the `/idlaser:rw` bind-mount as `/idlaser/7001.svg` (this is the `IDLASER_TEMPLATE_PATH` default).
+- **Submodule, not requirements.txt**: idlaser lives at `backend/external/idlaser` as a git submodule and is editable-installed by the Dockerfile (`COPY ./external/idlaser` + `RUN pip install -e ./external/idlaser`). It is NOT in `backend/requirements.txt` because the path is repo-relative and idlaser is not on PyPI. Adding it to requirements.txt would break bare-metal `pip install -r requirements.txt` runs in fresh clones where the submodule isn't yet initialized. `start-dev.sh` auto-runs `git submodule update --init` if `backend/external/idlaser/pyproject.toml` is missing (see runbook below).
+- **Pinning to a SHA, not a branch**: idlaser's default branch is `master`, not `main`. The submodule is pinned to a specific commit SHA, so `--branch` is intentionally absent from `.gitmodules`. To update: `cd backend/external/idlaser && git fetch && git checkout <new-sha> && cd ../../.. && git add backend/external/idlaser && git commit -m "chore: bump idlaser to <new-sha>"`.
+- **Bundled ONNX weights**: idlaser's `.gitignore` whitelists `models/card_detector.onnx` (11.6 MB) so the submodule clone arrives ready-to-run. Other weights (`card_detector.pt`, `unet_resnet34_*.pth`) stay ignored — they're training-side only. Template `7001.svg` lives at the idlaser repo root (not in a `templates/` subdir).
 - **Type drift risk**: `frontend/src/types/draftJob.ts` is a hand-written mirror of `backend/schemas/idlaser_draft_job.py`. There is no codegen tooling; if you change Pydantic field names/types, update the TS file too.
 - **SSE pattern**: this is the codebase's first **user-facing** SSE endpoint and uses `sse_starlette.EventSourceResponse` for auto-heartbeat. The raw `StreamingResponse(media_type="text/event-stream")` in `backend/routers/mcp.py` is the MCP-protocol-specific transport and is locked; **do not treat it as a reference pattern** for new user-facing SSE.
-- **Idlaser missing is non-fatal**: lifespan logs a warning if the model or template is absent, and the entrypoint warns if `/idlaser` isn't mounted. The rest of the app keeps working — only Generate Draft is unavailable.
+- **Idlaser missing is non-fatal**: lifespan logs a warning if the model or template is absent. The rest of the app keeps working — only Generate Draft is unavailable.
+- **`.env` migration (post-S005)**: if your local `backend/.env` predates S005 it may have `IDLASER_TEMPLATE_PATH=/idlaser/7001.svg` and `IDLASER_MODEL_PATH=/idlaser/models/card_detector.onnx` — or host paths like `/home/<user>/projects/idlaser/...` from earlier bare-metal setup. These OVERRIDE the new submodule-layout defaults silently. Entrypoint warns loudly on startup if it detects pre-S005 `/idlaser/*` paths; **host-path overrides like `/home/<user>/projects/idlaser/...` are NOT caught by the warn** and only surface via the lifespan "file missing" log line. Cleanup: unset both vars in `backend/.env` (to pick up new defaults) or update them to `/app/external/idlaser/7001.svg` and `/app/external/idlaser/models/card_detector.onnx`.
+- **Pre-S005 branches**: any branch checked out from before S005 merged will lack `backend/external/idlaser/` and will fail `docker compose build` (the COPY line errors). Either re-merge `main` into the branch or temporarily revert the Dockerfile changes for archeological inspection. Operators only — Sergii is single-operator, so this is rarely encountered.
 
 **First-time operator setup runbook:**
 
-1. `git clone https://github.com/cropsp/idlaser ~/projects/idlaser`
-2. `cd ~/projects/idlaser && pip install -e .[dev]`
-   (idlaser-side venv, for manual pipeline runs during ops)
-3. Ensure `~/projects/idlaser/models/card_detector.onnx` exists.
-   (Ships from idlaser S003.2 training output; if missing, see
-   `~/projects/idlaser/docs/training.md` for the retraining recipe.)
-4. Ensure `~/projects/idlaser/7001.svg` exists at the idlaser repo root.
-   (User-supplied template; copy from prior Lamarka template archive.)
-5. Verify CRM's `docker-compose.yml` has the bind-mount line:
-   ```yaml
-   - /home/serhii/projects/idlaser:/idlaser:rw
+1. Clone CRM with submodules:
+   ```bash
+   git clone --recurse-submodules https://github.com/cropsp/OrderHub ~/projects/OrderHub
+   # OR for an existing clone:
+   cd ~/projects/OrderHub && git submodule update --init --recursive
    ```
-   (The separate `/app/models` mount was removed — it conflicted with CRM's SQLAlchemy models package. The ONNX weights are accessible at `/idlaser/models/card_detector.onnx` via the single `/idlaser` mount.)
-6. Inside CRM repo: `docker-compose build backend`
-7. `docker-compose up -d backend` — entrypoint runs `pip install -e /idlaser`.
-8. `docker-compose exec backend alembic upgrade head`
-9. `docker-compose restart frontend` (picks up `@microsoft/fetch-event-source`).
-10. Verify in browser: open any order with a REFERENCE attachment, click
-    "Generate Draft from {filename}", confirm modal opens, SSE events stream,
-    AUTO path produces a downloadable DXF.
+2. Verify submodule populated:
+   ```bash
+   ls backend/external/idlaser/7001.svg \
+      backend/external/idlaser/models/card_detector.onnx
+   # both should print without error
+   ```
+3. `docker compose build backend`
+   (Dockerfile COPYs `backend/external/idlaser` and runs `pip install -e ./external/idlaser` during build — no runtime install step.)
+4. `docker compose up -d backend`
+5. `docker compose exec backend alembic upgrade head`
+6. `docker compose restart frontend` (picks up `@microsoft/fetch-event-source`).
+7. Verify in browser: open any order with a REFERENCE attachment, click "Generate Draft from {filename}", confirm modal opens, SSE events stream, AUTO path produces a downloadable DXF.
 
-If step 7 logs "WARNING: /idlaser bind-mount not present" — the WSL path in `docker-compose.yml` doesn't match your username; edit the volume paths.
+**Bare-metal (non-Docker) setup:** `start-dev.sh` is local-only (intentionally not committed — see `AI_ONBOARDING.md` §9). After cloning + initializing the submodule (steps 1-2 above), add the following block to your local `start-dev.sh` once, immediately after the existing `source venv/bin/activate` block (around line 65):
 
-If step 10's "Generate Draft" button is hidden — the order has no REFERENCE attachment. Upload one via the existing Production Assets upload zone first.
+**If you use start-dev.sh, add locally:**
+
+```bash
+# Ensure idlaser submodule is populated and editable-installed in the venv (S005).
+# Docker mode installs idlaser via Dockerfile build-time; bare-metal must mirror
+# that step here so `import idlaser.api` works in the host venv.
+IDLASER_DIR="$PROJECT_DIR/backend/external/idlaser"
+if [ ! -f "$IDLASER_DIR/pyproject.toml" ]; then
+    log "idlaser submodule empty — running git submodule update --init..."
+    cd "$PROJECT_DIR"
+    if ! git submodule update --init --recursive backend/external/idlaser; then
+        error "git submodule update --init failed for backend/external/idlaser."
+        error "Recovery:"
+        error "  1. Verify read access to github.com/cropsp/idlaser (the repo is private)."
+        error "  2. Configure git auth — either 'gh auth login' or an SSH deploy key."
+        error "  3. Re-run: git submodule update --init --recursive"
+        error "Generate Draft will be unavailable until the submodule populates."
+        exit 1
+    fi
+    cd "$BACKEND_DIR"
+fi
+log "Installing idlaser (editable) into backend venv..."
+pip install -e "$IDLASER_DIR" -q
+```
+
+(`PROJECT_DIR` + `BACKEND_DIR` are already defined at the top of `start-dev.sh`; this block reuses them. `cd "$BACKEND_DIR"` restores the working directory the subsequent `python seed.py` block expects.)
+
+After applying these lines, `./start-dev.sh` handles steps 1-3 automatically on each launch — submodule init if empty + venv editable install. If submodule clone fails (auth/network), the script exits non-zero with the recovery instructions above; configure `gh auth login` or an SSH deploy key and re-run.
+
+If step 3 fails with `COPY failed: forget to populate the submodule?` — run step 1's `git submodule update --init --recursive` first.
+
+If step 7's "Generate Draft" button is hidden — the order has no REFERENCE attachment. Upload one via the existing Production Assets upload zone first.
