@@ -7,7 +7,7 @@
  *  - "Download Draft" final state: when state=ready.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
 
 import {
@@ -43,11 +43,21 @@ export default function DraftGenerator({
   const job = useDraftJob(orderId);
   const { addToast } = useToastStore();
   const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  // Tracks the photoAttachmentId for which start() has already been called
+  // during the current modal-open cycle. Prevents React.StrictMode dev
+  // double-invoke of this effect from creating two IdlaserDraftJob rows
+  // for a single user click. Reset on modal close. See S004-followup-1.
+  const lastStartedRef = useRef<string | null>(null);
 
   // Kick off the job whenever the modal opens with a new photo id.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      lastStartedRef.current = null;
+      return;
+    }
+    if (lastStartedRef.current === photoAttachmentId) return;
     if (job.state !== 'idle' && job.state !== 'failed') return;
+    lastStartedRef.current = photoAttachmentId;
     void job.start(photoAttachmentId);
     // Deliberately not depending on `job` itself — the hook's identity
     // is stable; including it would re-fire on every state change.
