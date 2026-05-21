@@ -109,19 +109,26 @@ THEN CRM-side starts CC implementation.
    is NOT permitted — each commit's narrative matters for future
    archeology (per CLAUDE.md "Surgical changes" principle).
 
-9. **Idlaser-side MUST publish a tagged release before CC starts
-   implementation.** Cowork requests the tag via courier-via-Sergii
-   as the first cross-repo action. CC plan-mode SHOULD NOT run until
-   the tag SHA is known (so commit 1 can pin to a specific SHA, not
-   "main HEAD as of plan time"). If tag is delayed, commit 0 can
-   still ship independently per Rule 7.
+9. **Idlaser-side tag delivered — `v1.0.0` at commit
+   `e5bb5cfdb212540c969fcf4bfbfe22005147ed13`** (courier delivery
+   2026-05-20). The tag commit also includes idlaser-side pre-tag
+   prep (`e5bb5cf chore: bundle card_detector.onnx for submodule
+   consumers (S005-prep)`) that fixed a `.gitignore` quirk —
+   `models/` rule was preventing the ONNX weight from being tracked
+   in git, so a submodule clone would have arrived with an empty
+   `models/` dir and broken backend startup. Idlaser-Cowork caught
+   this proactively before tagging. **CC plan-mode is now
+   unblocked.** Confirmed bundled paths: `7001.svg` at repo root,
+   `models/card_detector.onnx` (11.6 MB, mAP50=0.952). CRM
+   `backend/config.py` post-S005 defaults (`/app/external/idlaser/7001.svg`
+   and `/app/external/idlaser/models/card_detector.onnx`) are correct.
 
 ### Open Questions (resolve in plan-mode, with cited file:line evidence)
 
 | ID | OQ | Trade-off |
 |---|---|---|
 | OQ-A | Docker build submodule auth — pre-clone on host (CC's recommendation; Sergii's host already has the repo from S004 setup) vs PAT build-arg via Docker `--secret` mount vs SSH deploy key in Dockerfile | Simplicity (host-clone) vs CI reproducibility (PAT/SSH) vs secret-handling overhead |
-| OQ-C | Submodule pin strategy — track a tagged release (e.g. `v1.0.0`) vs pin to an explicit commit SHA inside the tag | Stability (SHA) vs cleaner update story (`git submodule update --remote --to-tag vX.Y.Z`) |
+| ~~OQ-C~~ | ~~Submodule pin strategy~~ | **RESOLVED 2026-05-20:** pin to commit SHA `e5bb5cfdb212540c969fcf4bfbfe22005147ed13` (idlaser tag `v1.0.0`). See Rule 9. Branch-agnostic pin; future tag updates explicit via SHA bump commit (not `--remote --to-tag`). |
 | OQ-D | Dockerfile single-stage (current) vs multi-stage (dev deps stripped from runtime image) | Build complexity vs image size — measure idlaser dev-deps size first |
 | OQ-E | Downgrade / retry path if `git submodule update --init` fails on operator machine (network blip, missing deploy key, no internet on first boot) | Need explicit error message + recovery procedure in `start-dev.sh`; do NOT silently fall back to old bind-mount path |
 | OQ-F | `start-dev.sh` submodule-init flow — auto-run `git submodule update --init` if `backend/external/idlaser/` is empty, vs require operator to run it manually with clear error | Operator surprise (auto) vs script complexity (manual prompt) |
@@ -210,13 +217,18 @@ Then read in order:
   (today it's bare-metal only)
 - First `.env` migration scenario (OQ-H)
 
-In the plan, answer all 7 OQs (A, C, D, E, F, G, H) with cited
-file:line evidence. Show the exact `git submodule add ...` command,
-the Dockerfile diff (lines to remove + lines to add), the
-`start-dev.sh` diff, and the `frontend/src/components/orders/draft/DraftGenerator.tsx`
-useEffect guard pseudo-code. Cite the idlaser-side tag SHA that will
-be pinned in commit 1 (Cowork will provide this SHA after
-courier-via-Sergii confirms tag).
+In the plan, answer 6 OQs — **OQ-C is PRE-RESOLVED per Rule 9** (pin
+to commit SHA `e5bb5cfdb212540c969fcf4bfbfe22005147ed13`, not tag
+object SHA, not branch name; idlaser default branch is `master` not
+`main` so `--branch` flag is wrong anyway, hence SHA-pin chosen).
+Remaining: A (Docker build auth), D (single vs multi-stage),
+E (downgrade path), F (start-dev.sh init flow), G (old-branch
+compat), H (.env migration). Each with cited file:line evidence.
+Show the exact `git submodule add` command (no `--branch` flag,
+pin to e5bb5cf after add), the Dockerfile diff (lines to remove +
+lines to add), the `start-dev.sh` diff, and the
+`frontend/src/components/orders/draft/DraftGenerator.tsx` useEffect
+guard pseudo-code.
 
 **No code edits until Sergii approves the plan.**
 
@@ -236,8 +248,15 @@ writes closure entry.
    submodule mechanics (per Rule 7).
 
 1. `chore(s005): add idlaser as git submodule at backend/external/idlaser`
-   — new `.gitmodules` file; submodule pinned to `{SHA-from-tag}` per
-   OQ-C answer; no other file changes. Verify clone succeeds in CI.
+   — new `.gitmodules` file; submodule pinned to commit SHA
+   `e5bb5cfdb212540c969fcf4bfbfe22005147ed13` (idlaser tag `v1.0.0`,
+   delivered via courier 2026-05-20). OQ-C is **PRE-RESOLVED**: pin
+   to commit SHA, not tag object SHA `bc1086a...` (idlaser-Cowork
+   explicitly flagged the annotated-tag vs commit distinction). No
+   other file changes in this commit. **Submodule add command must
+   NOT use `--branch main`** — idlaser default branch is `master`,
+   not `main`; pinning to explicit SHA is branch-agnostic and that's
+   the chosen approach per OQ-C. Verify clone succeeds in CI.
 
 2. `refactor(s005): move idlaser pip install from entrypoint to Dockerfile build-time + bare-metal start-dev.sh updates`
    — `backend/Dockerfile:15-21` comment block replaced with
