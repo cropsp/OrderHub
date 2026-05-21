@@ -5,7 +5,7 @@
 >
 > - **Strategic Roadmap & History:** Refer to [implementation_plan.md](implementation_plan.md).
 > - **Cross-repo master contract:** `~/projects/idlaser/task.md` (also in `~/projects/handoff/orderhub-idlaser.md` if handoff folder is set up). 15 settled Behaviour rules + 10 OQs. Idlaser-side answered OQs 1/2/3/7; this task.md answers OQs 4/5/6/8/9/10 + adds CRM-specific OQs.
-> - **Current task:** S005-submodule-migrate — replace transitional idlaser bind-mount + entrypoint pip install with git submodule + Dockerfile build-time install. Bundles commit 0 for S004-followup-1 (DraftGenerator StrictMode double-fire fix). See spec below.
+> - **Current task:** none — S005-submodule-migrate closed 2026-05-21 (see closure entry in [implementation_plan.md](implementation_plan.md)). The S005 spec below is preserved for archival reference. Next sprint pick from the parking lot — most relevant: `S005-followup-1` (config.py path defaults rewrite, ~5 LOC) or `S005-followup-2` (Vite proxy SSE chunking investigation).
 >
 > DO NOT store long-term plans here. Only active, atomic steps for the current session.
 
@@ -13,11 +13,17 @@
 
 ## ✅ S004-mcp-wrapper — DONE (2026-05-20)
 
-Sprint closed. 5 feat commits `d0ee31e` → `55dc444` + 4 mid-smoke fix commits `5c7a0ba` / `0cc6068` / `d98d573` / `8ed66d6` + 1 docs closure commit `7b33184`. Browser-MCP smoke 8/8 green. pytest 171 → 187 (+16 new `test_idlaser_*` cases including `test_pipeline_bare_export_completed_is_suppressed` which pins fix `8ed66d6`). One parked follow-up: `S004-followup-1` — DraftGenerator useEffect double-fire under React.StrictMode dev (production unaffected; ~3 LOC fix; bundled into S005 below as commit 0). Full closure entry + smoke evidence + per-commit narrative in `implementation_plan.md` (search "S004-mcp-wrapper" in that file).
+Sprint closed. 5 feat commits `d0ee31e` → `55dc444` + 4 mid-smoke fix commits `5c7a0ba` / `0cc6068` / `d98d573` / `8ed66d6` + 1 docs closure commit `7b33184`. Browser-MCP smoke 8/8 green. pytest 171 → 187 (+16 new `test_idlaser_*` cases including `test_pipeline_bare_export_completed_is_suppressed` which pins fix `8ed66d6`). One parked follow-up: `S004-followup-1` (DraftGenerator React.StrictMode double-fire) — **CLOSED by S005 commit 0** `229011b`. Full closure entry + smoke evidence + per-commit narrative in `implementation_plan.md` (search "S004-mcp-wrapper" in that file).
 
 ---
 
-## S005-submodule-migrate — Migrate idlaser from docker bind-mount to git submodule
+## ✅ S005-submodule-migrate — DONE (2026-05-21)
+
+Sprint closed. 5 commits `229011b` / `59e5663` / `9284919` / `02fb379` / `c0e5900` on branch `s005-submodule-migrate`, merged to main 2026-05-21. pytest 187 → 187 unchanged (pure infra refactor, no new backend code). vitest +1 new assertion for StrictMode useEffect guard. Backend pipeline verified end-to-end at DB level (single INSERT per click confirms commit 0 fix; full lifecycle MOCKUP `3f132461` created at 14:24:27). Frontend UI verification partial — bare-metal Vite proxy SSE chunking blocker filed as `S005-followup-2` (suspected pre-S005 environmental drift, NOT S005-introduced). `S004-followup-1` resolved; two new follow-ups parked (`S005-followup-1` config.py paths, `S005-followup-2` Vite SSE). Full closure entry + per-commit + smoke evidence + idlaser-side coordination notes in `implementation_plan.md` (search "S005-submodule-migrate" in that file).
+
+---
+
+## S005-submodule-migrate — Migrate idlaser from docker bind-mount to git submodule [ARCHIVED SPEC]
 
 ### Goal
 
