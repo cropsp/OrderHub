@@ -82,8 +82,36 @@ Sprints 1–10 + UI Modernization are complete. This includes: core architecture
 
 ## What's Pending
 
-Sprint 11 (Production & Deployment): SSL/nginx, DB backup jobs, Prometheus/Grafana monitoring.
+Sprint 11 (Production & Deployment): DB backup jobs, Prometheus/Grafana monitoring.
+(SSL/remote access is DONE via Cloudflare Tunnel — see below.)
 Performance: route-level chunk splitting (frontend). Testing: smoke tests with Vitest + Playwright.
+
+## Server Deployment (LAN + Cloudflare Tunnel)
+
+The app runs on a single hardened Ubuntu box, `prorder@192.168.31.71` (`ssh orderhub`),
+as a Docker Compose stack. **Canonical reference: `SERVER_DEPLOY_PLAN.md` (§1–§10).** Key facts:
+
+- **Server-only overlay files** (NOT in the repo — they live at `/home/prorder/OrderHub/`
+  and travel by `scp`, never committed): `docker-compose.prod.yml`, `backend/Dockerfile.deploy`
+  + `frontend/Dockerfile.deploy` (idlaser-less builds), and the secret `.env` (`chmod 600`,
+  git-ignored). idlaser is **deferred** on the server — Generate Draft is unavailable there; the
+  rest of the app is unaffected.
+- **Public URL: `https://orderhub.orderapp.uk`** via a **Cloudflare Tunnel** (`cloudflared`
+  service in `docker-compose.prod.yml`). **Zero inbound ports** — cloudflared is outbound-only,
+  joins the `orderhub_default` network, and reaches the app at `http://frontend:80` (nginx serves
+  the SPA + proxies `/api/` → `backend:8000`). The `TUNNEL_TOKEN` lives in the server `.env`.
+  Public hostname routing + Cloudflare Access policy are managed in the **Cloudflare dashboard**,
+  not in this repo — there is no local ingress/config file.
+- **`FRONTEND_URL=https://orderhub.orderapp.uk`** in the server `.env` is the app's **sole CORS
+  allow-origin** (`main.py:71`). There is deliberately no `TrustedHostMiddleware`/`ALLOWED_HOSTS`/
+  CSRF list — if you add one, also allow the tunnel hostname.
+- **Nothing is published to the LAN.** The frontend `80:80` publish was removed; only postgres
+  is bound, and only to `127.0.0.1`. **ufw stays SSH-only** — do not open app ports. To reach the
+  app, use the HTTPS hostname (not the LAN IP: the prod refresh cookie is `secure=True`, so
+  login/refresh won't work over plain `http://192.168.31.71`).
+- **Apply config/env changes** with `docker compose -f docker-compose.prod.yml up -d <svc>`
+  (recreate to reload `.env`, no rebuild). Timestamped `.bak.*` copies of `.env` /
+  `docker-compose.prod.yml` are kept on the server before each change.
 
 ## Behavioral Guidelines
 
