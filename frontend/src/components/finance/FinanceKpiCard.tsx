@@ -51,7 +51,7 @@ export default function FinanceKpiCard({
             'flex items-center gap-1.5 text-xs font-medium',
             pct > 0 && 'text-emerald-400',
             pct < 0 && 'text-red-400',
-            pct === 0 && 'text-zinc-500',
+            pct === 0 && 'text-zinc-400',
           )}
         >
           <span>
@@ -60,7 +60,7 @@ export default function FinanceKpiCard({
             {pct === 0 && '→'}
           </span>
           <span>{Math.abs(pct).toFixed(1)}%</span>
-          <span className="text-zinc-500 font-normal">vs previous period</span>
+          <span className="text-zinc-400 font-normal">vs previous period</span>
         </div>
       )}
 

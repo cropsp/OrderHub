@@ -201,7 +201,7 @@ export default function BomEditor({ productId }: BomEditorProps) {
         <div className="px-8 py-6 border-b border-white/[0.03] flex items-center justify-between">
           <div>
             <h2 className="text-base font-semibold text-zinc-200">Recipe (BOM)</h2>
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-zinc-400 mt-1">
               Materials per finished product unit. Used for cost preview now; consumption decrements stock on shipment (coming in MAT-4).
             </p>
           </div>
@@ -251,7 +251,7 @@ export default function BomEditor({ productId }: BomEditorProps) {
 
         {draft.length === 0 ? (
           <div className="px-8 py-16 text-center">
-            <p className="text-sm text-zinc-500 italic mb-4">
+            <p className="text-sm text-zinc-400 italic mb-4">
               No recipe defined yet. Add materials to compute a production cost preview.
             </p>
             <Button
@@ -268,13 +268,13 @@ export default function BomEditor({ productId }: BomEditorProps) {
             <Table>
               <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                 <TableRow className="border-none hover:bg-transparent">
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Material</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Qty / unit</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Unit</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Current cost</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Line cost</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Notes</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5 px-8 w-12"></TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Material</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Qty / unit</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Unit</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Current cost</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Line cost</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Notes</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5 px-8 w-12"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -378,7 +378,7 @@ export default function BomEditor({ productId }: BomEditorProps) {
                 Add Material
               </Button>
               <div className="text-right text-sm text-zinc-300">
-                <span className="text-zinc-500 mr-2">Recipe unit cost:</span>
+                <span className="text-zinc-400 mr-2">Recipe unit cost:</span>
                 {liveCost.length === 0 ? (
                   <span className="font-mono">—</span>
                 ) : (

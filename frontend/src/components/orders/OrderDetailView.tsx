@@ -136,12 +136,12 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
                   <DropdownMenuTrigger asChild>
                     <div className="flex items-center justify-between bg-zinc-950/40 p-3 rounded-lg border border-zinc-800/50 cursor-pointer hover:bg-zinc-900/60 transition-all group">
                       <div className="flex flex-col gap-1">
-                        <span className="text-[11px] text-zinc-500 font-medium leading-none">Current status</span>
+                        <span className="text-[11px] text-zinc-400 font-medium leading-none">Current status</span>
                         <div className="mt-1">
                           <StatusBadge status={order.status} size="sm" />
                         </div>
                       </div>
-                      <ChevronDown size={14} className="text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+                      <ChevronDown size={14} className="text-zinc-400 group-hover:text-zinc-300 transition-colors" />
                     </div>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" sideOffset={4} className="bg-zinc-900 border-zinc-800 text-zinc-300 w-[240px] p-1.5 rounded-xl shadow-2xl">

@@ -60,7 +60,7 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex flex-1 items-center gap-3 max-w-2xl">
             <div className="relative flex-1 group">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 group-focus-within:text-teal-400 transition-colors" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-400 group-focus-within:text-teal-400 transition-colors" />
               <Input 
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -72,7 +72,7 @@ export default function OrdersLayout({ isArchive = false, fixedShopId }: OrdersL
             {!fixedShopId && (
               <Select value={selectedShopId || 'all'} onValueChange={(val) => setSelectedShopId(val === 'all' ? undefined : val)}>
                 <SelectTrigger className="w-[180px] h-10 rounded-xl border-zinc-800 bg-zinc-900 text-zinc-300 gap-2">
-                  <Filter className="size-3.5 text-zinc-500" />
+                  <Filter className="size-3.5 text-zinc-400" />
                   <SelectValue placeholder="All Shops" />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-300">

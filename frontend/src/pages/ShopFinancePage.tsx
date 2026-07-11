@@ -16,18 +16,13 @@ import FinanceRevenueChart from '@/components/finance/FinanceRevenueChart';
 import DiagnosticBadge from '@/components/finance/DiagnosticBadge';
 import PartnerPayoutsSection from '@/components/finance/PartnerPayoutsSection';
 import { Skeleton } from '@/components/ui/skeleton';
+import { formatMoney } from '@/lib/format';
 import type { CurrencyAmount } from '@/types/finance';
 
 function formatCurrencyList(amounts: CurrencyAmount[]): string {
   if (!amounts || amounts.length === 0) return '—';
   return amounts
-    .map(
-      (a) =>
-        `${a.amount.toLocaleString('en-US', {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })} ${a.currency}`,
-    )
+    .map((a) => `${formatMoney(a.amount)} ${a.currency}`)
     .join('\n');
 }
 

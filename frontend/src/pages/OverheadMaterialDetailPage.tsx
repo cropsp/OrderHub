@@ -21,20 +21,7 @@ import {
   useOverheadMaterial,
   useOverheadMaterialReceipts,
 } from '@/hooks/useOverheadMaterials'
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString('uk-UA', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
+import { formatDateTime, formatMoney } from '@/lib/format'
 
 export default function OverheadMaterialDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -66,7 +53,7 @@ export default function OverheadMaterialDetailPage() {
       <div className="space-y-6">
         <Link
           to="/inventory/overhead-materials"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-300 transition-colors"
         >
           <ArrowLeft className="size-3" />
           Back to Overhead
@@ -80,7 +67,7 @@ export default function OverheadMaterialDetailPage() {
               <h2 className="text-lg font-bold tracking-tight text-zinc-100">
                 {overhead.name}
               </h2>
-              <span className="text-xs font-mono text-zinc-500">
+              <span className="text-xs font-mono text-zinc-400">
                 ({overhead.unit})
               </span>
               {overhead.is_active ? (
@@ -105,32 +92,32 @@ export default function OverheadMaterialDetailPage() {
         <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md rounded-2xl overflow-hidden">
           <CardContent className="p-0">
             <div className="px-8 py-5 border-b border-zinc-800/50">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Receipts
               </h3>
             </div>
             <Table>
               <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                 <TableRow className="border-none hover:bg-transparent">
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-4">
                     Date
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Qty
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Total cost
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Currency
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Allocated to
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Supplier
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-4">
                     Notes
                   </TableHead>
                 </TableRow>
@@ -140,7 +127,7 @@ export default function OverheadMaterialDetailPage() {
                   <TableRow>
                     <TableCell
                       colSpan={7}
-                      className="h-24 text-center text-xs text-zinc-500 italic"
+                      className="h-24 text-center text-xs text-zinc-400 italic"
                     >
                       No receipts yet.
                     </TableCell>
@@ -152,13 +139,13 @@ export default function OverheadMaterialDetailPage() {
                       className="border-b border-white/[0.02] hover:bg-white/[0.02]"
                     >
                       <TableCell className="px-8 py-4 text-xs text-zinc-300">
-                        {formatDate(r.received_at)}
+                        {formatDateTime(r.received_at)}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-zinc-300">
                         {r.qty ? `${r.qty} ${overhead?.unit ?? ''}` : '—'}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-zinc-100">
-                        {Number(r.total_cost).toFixed(2)}
+                        {formatMoney(r.total_cost)}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-zinc-400">
                         {r.currency}
@@ -166,7 +153,7 @@ export default function OverheadMaterialDetailPage() {
                       <TableCell className="text-xs text-zinc-400">
                         {r.shop_name ? (
                           <span className="inline-flex items-center gap-1">
-                            <Store className="size-3 text-zinc-500" />
+                            <Store className="size-3 text-zinc-400" />
                             {r.shop_name}
                           </span>
                         ) : (
@@ -176,7 +163,7 @@ export default function OverheadMaterialDetailPage() {
                       <TableCell className="text-xs text-zinc-400">
                         {r.supplier || '—'}
                       </TableCell>
-                      <TableCell className="px-8 py-4 text-xs text-zinc-500 truncate max-w-xs">
+                      <TableCell className="px-8 py-4 text-xs text-zinc-400 truncate max-w-xs">
                         {r.notes || '—'}
                       </TableCell>
                     </TableRow>

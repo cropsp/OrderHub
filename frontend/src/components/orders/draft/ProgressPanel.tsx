@@ -61,7 +61,7 @@ export default function ProgressPanel({ events, state }: ProgressPanelProps) {
                     : 'text-zinc-700'
               }`}
             />
-            <span className={seen ? 'text-zinc-200' : 'text-zinc-500'}>
+            <span className={seen ? 'text-zinc-200' : 'text-zinc-400'}>
               {stage.label}
             </span>
           </div>

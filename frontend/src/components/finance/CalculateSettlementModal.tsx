@@ -142,7 +142,7 @@ export default function CalculateSettlementModal({
 
         <div className="p-6 space-y-5">
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Partner name
             </p>
             <PartnerNameInput
@@ -155,7 +155,7 @@ export default function CalculateSettlementModal({
           </div>
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Formula
             </p>
             <select
@@ -179,7 +179,7 @@ export default function CalculateSettlementModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Percent
               </p>
               <Input
@@ -193,7 +193,7 @@ export default function CalculateSettlementModal({
               />
             </div>
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Currency
               </p>
               <select
@@ -218,7 +218,7 @@ export default function CalculateSettlementModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Period start
               </p>
               <Input
@@ -229,7 +229,7 @@ export default function CalculateSettlementModal({
               />
             </div>
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Period end
               </p>
               <Input
@@ -242,7 +242,7 @@ export default function CalculateSettlementModal({
           </div>
 
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-sm">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Live preview
             </p>
             {previewMutation.isPending ? (
@@ -270,7 +270,7 @@ export default function CalculateSettlementModal({
                 </p>
               </div>
             ) : (
-              <p className="mt-2 text-zinc-500">
+              <p className="mt-2 text-zinc-400">
                 Enter percent + period to compute.
               </p>
             )}
@@ -287,7 +287,7 @@ export default function CalculateSettlementModal({
           </div>
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Notes (optional)
             </p>
             <textarea

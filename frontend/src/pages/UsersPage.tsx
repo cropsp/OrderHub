@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { format } from 'date-fns';
+import { formatMonthYear } from '@/lib/format';
 import { 
   UserPlus, 
   Shield, 
@@ -177,7 +177,7 @@ export default function UsersPage() {
         <DialogContent className="max-w-md border-zinc-800 bg-zinc-950 text-zinc-100 rounded-2xl overflow-hidden shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]">
           <DialogHeader className="p-1 px-1">
             <DialogTitle className="text-xl font-bold tracking-tight">Add Team Member</DialogTitle>
-            <DialogDescription className="text-xs text-zinc-500 font-medium">
+            <DialogDescription className="text-xs text-zinc-400 font-medium">
               Initialize a new user account and assign structural permissions.
             </DialogDescription>
           </DialogHeader>
@@ -234,7 +234,7 @@ export default function UsersPage() {
                 <div className="bg-zinc-950 border border-teal-500/10 rounded-lg p-3 font-mono text-sm text-teal-100 text-center select-all cursor-copy">
                   {temporaryPassword}
                 </div>
-                <p className="mt-3 text-[10px] text-zinc-500 text-center italic">
+                <p className="mt-3 text-[10px] text-zinc-400 text-center italic">
                   Note: This credential will never be shown again.
                 </p>
               </div>
@@ -279,7 +279,7 @@ export default function UsersPage() {
         <DialogContent className="max-w-md border-zinc-800 bg-zinc-950 text-zinc-100 rounded-2xl overflow-hidden shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)]">
           <DialogHeader className="p-1 px-1">
             <DialogTitle className="text-xl font-bold tracking-tight">Modify Permissions</DialogTitle>
-            <DialogDescription className="text-xs text-zinc-500 font-medium">
+            <DialogDescription className="text-xs text-zinc-400 font-medium">
               Update roles and status for {editingUser?.full_name}.
             </DialogDescription>
           </DialogHeader>
@@ -349,11 +349,11 @@ export default function UsersPage() {
         <div className="flex items-center justify-between bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800/40">
           <div className="flex items-center gap-3">
              <div className="size-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center shadow-inner">
-                <UserGroup className="size-5 text-zinc-500" />
+                <UserGroup className="size-5 text-zinc-400" />
              </div>
              <div>
                 <h2 className="text-sm font-bold text-zinc-100 tracking-tight">Active Team</h2>
-                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
                   {isLoading ? 'Scanning...' : `${users?.length ?? 0} Accounts Registered`}
                 </p>
              </div>
@@ -390,11 +390,11 @@ export default function UsersPage() {
               <Table>
                 <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                   <TableRow className="border-none hover:bg-transparent">
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-6 py-4">User identity</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">Role & Access</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">Current Status</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">Engagement</TableHead>
-                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-6 py-4">Control</TableHead>}
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-6 py-4">User identity</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">Role & Access</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">Current Status</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">Engagement</TableHead>
+                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-6 py-4">Control</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -410,9 +410,9 @@ export default function UsersPage() {
                           </div>
                           <div className="flex flex-col min-w-0">
                              <span className="text-sm font-bold text-zinc-100 tracking-tight">
-                                {u.full_name} {u.id === currentUser?.id && <span className="text-[10px] text-zinc-500 italic ml-1 font-normal">(You)</span>}
+                                {u.full_name} {u.id === currentUser?.id && <span className="text-[10px] text-zinc-400 italic ml-1 font-normal">(You)</span>}
                              </span>
-                             <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 font-medium">
+                             <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-medium">
                                 <Mail size={10} className="text-zinc-700" />
                                 {u.email}
                              </div>
@@ -432,7 +432,7 @@ export default function UsersPage() {
                             Active Member
                           </div>
                         ) : (
-                          <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-500 border border-zinc-800 text-[10px] font-bold tracking-tight">
+                          <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-zinc-900 text-zinc-400 border border-zinc-800 text-[10px] font-bold tracking-tight">
                             <UserX className="h-3.5 w-3.5" />
                             Access Revoked
                           </div>
@@ -442,7 +442,7 @@ export default function UsersPage() {
                         <div className="flex items-center gap-1.5 text-zinc-400">
                            <Clock size={11} className="text-zinc-600" />
                            <span className="text-[11px] font-semibold tracking-tight">
-                              Joined {format(new Date(u.created_at), 'MMM yyyy')}
+                              Joined {formatMonthYear(u.created_at)}
                            </span>
                         </div>
                       </TableCell>
@@ -450,7 +450,7 @@ export default function UsersPage() {
                         <TableCell className="px-6 py-5 text-right">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon-sm" className="size-8 rounded-lg text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-all">
+                              <Button variant="ghost" size="icon-sm" className="size-8 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all">
                                 <MoreVertical className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>

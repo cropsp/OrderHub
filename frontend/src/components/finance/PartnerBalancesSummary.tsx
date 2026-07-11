@@ -36,7 +36,7 @@ export default function PartnerBalancesSummary({
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
-      <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+      <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
         Per-partner balances
       </p>
       <div className="space-y-2">

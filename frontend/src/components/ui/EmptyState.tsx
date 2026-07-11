@@ -28,7 +28,7 @@ export function EmptyState({
         <Icon className="size-8 text-zinc-700" />
       </div>
       <h3 className="text-sm font-bold text-zinc-200 uppercase tracking-widest mb-1">{title}</h3>
-      <p className="text-xs text-zinc-500 max-w-[240px] leading-relaxed mb-6">
+      <p className="text-xs text-zinc-400 max-w-[240px] leading-relaxed mb-6">
         {description}
       </p>
       {actionLabel && onAction && (

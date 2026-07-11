@@ -4,6 +4,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { MetricCard } from './MetricCard';
+import { formatMoney } from '@/lib/format';
 import type { DashboardResponse } from '@/types/dashboard';
 
 type StatCardsProps = {
@@ -15,7 +16,7 @@ export default function StatCards({ data }: StatCardsProps) {
   
   // Show all currencies in profit card
   const profitDisplay = revenue_by_currency.length > 0 
-    ? revenue_by_currency.map(r => `${r.net_profit.toLocaleString()} ${r.currency}`).join(' / ')
+    ? revenue_by_currency.map(r => `${formatMoney(r.net_profit)} ${r.currency}`).join(' / ')
     : '0 USD';
 
   return (

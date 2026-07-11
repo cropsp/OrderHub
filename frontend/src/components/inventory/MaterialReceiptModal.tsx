@@ -130,7 +130,7 @@ export default function MaterialReceiptModal({
           <div className="p-8 space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Quantity ({unit})
                 </p>
                 <Input
@@ -145,7 +145,7 @@ export default function MaterialReceiptModal({
                 />
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Currency <span className="text-zinc-600">(locked)</span>
                 </p>
                 <Input
@@ -159,7 +159,7 @@ export default function MaterialReceiptModal({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Unit cost ({material?.currency || ''}/{unit})
                 </p>
                 <Input
@@ -173,7 +173,7 @@ export default function MaterialReceiptModal({
                 />
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Shipping cost (optional)
                 </p>
                 <Input
@@ -193,7 +193,7 @@ export default function MaterialReceiptModal({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500">
+                <div className="flex items-center gap-1.5 text-zinc-400">
                   <Truck className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">
                     Supplier
@@ -207,7 +207,7 @@ export default function MaterialReceiptModal({
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500">
+                <div className="flex items-center gap-1.5 text-zinc-400">
                   <Hash className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">
                     Invoice #
@@ -223,7 +223,7 @@ export default function MaterialReceiptModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <Calendar className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">
                   Received at (optional — defaults to now)
@@ -238,7 +238,7 @@ export default function MaterialReceiptModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <FileText className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">
                   Notes (optional)

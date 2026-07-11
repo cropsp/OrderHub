@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { format } from 'date-fns';
+import { formatDate } from '@/lib/format';
 import { Search, Users as UserGroup, Globe, ShoppingBag, Mail, History } from 'lucide-react';
 
 import ShellPage from './ShellPage';
@@ -90,11 +90,11 @@ export default function CustomersPage() {
               <Table>
                 <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                   <TableRow className="border-none hover:bg-transparent">
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-6 py-4">Customer identity</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">Contact info</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">Geographic context</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4 text-center">Volume</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-6 py-4 text-right">Relationship</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-6 py-4">Customer identity</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">Contact info</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">Geographic context</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4 text-center">Volume</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-6 py-4 text-right">Relationship</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -133,7 +133,7 @@ export default function CustomersPage() {
                                <span className="text-sm font-bold text-zinc-100 tracking-tight truncate max-w-[200px]">
                                   {customer.full_name}
                                </span>
-                               <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-tighter">
+                               <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-tighter">
                                   UUID: {customer.id.slice(0, 8)}
                                </span>
                             </div>
@@ -166,7 +166,7 @@ export default function CustomersPage() {
                            <div className="flex flex-col items-end gap-1">
                               <div className="flex items-center gap-1.5 text-zinc-400">
                                  <History size={11} className="text-zinc-600" />
-                                 <span className="text-xs font-semibold">{format(new Date(customer.created_at), 'MMM dd, yyyy')}</span>
+                                 <span className="text-xs font-semibold">{formatDate(customer.created_at)}</span>
                               </div>
                               <span className="text-[9px] font-bold text-zinc-600 uppercase tracking-tighter italic">First seen</span>
                            </div>
@@ -183,7 +183,7 @@ export default function CustomersPage() {
         {/* Pagination Logic */}
         {!isLoading && !error && items.length > 0 && (
           <div className="flex items-center justify-between px-2">
-            <p className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">
+            <p className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest">
               Directory page {data?.page ?? 1} of {data?.pages ?? 1}
             </p>
             <div className="flex gap-2">

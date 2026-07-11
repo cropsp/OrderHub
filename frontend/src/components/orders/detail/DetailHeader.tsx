@@ -1,6 +1,6 @@
-import { format } from 'date-fns';
-import { 
-  Tag, 
+import { formatDateTime } from '@/lib/format';
+import {
+  Tag,
   Calendar, 
   Hash, 
   Check, 
@@ -46,15 +46,15 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
             
             <div className="flex items-center gap-1.5 text-zinc-600">
               <Hash size={12} className="text-zinc-800" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 ID: {order.external_id}
               </span>
             </div>
             
             <div className="flex items-center gap-1.5 text-zinc-600">
               <Calendar size={12} className="text-zinc-800" />
-              <span className="text-[10px] font-medium text-zinc-500">
-                {format(new Date(order.ordered_at), 'MMM dd, yyyy - HH:mm')}
+              <span className="text-[10px] font-medium text-zinc-400">
+                {formatDateTime(order.ordered_at)}
               </span>
             </div>
 
@@ -65,13 +65,13 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
             )}>
               {saveStatus === 'saving' ? (
                 <>
-                  <Loader2 className="size-3 text-zinc-500 animate-spin" />
-                  <span className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider">Saving...</span>
+                  <Loader2 className="size-3 text-zinc-400 animate-spin" />
+                  <span className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Saving...</span>
                 </>
               ) : saveStatus === 'saved' ? (
                 <>
                   <Check className="size-3 text-teal-500" />
-                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Saved</span>
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Saved</span>
                 </>
               ) : null}
             </div>
@@ -85,7 +85,7 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
             variant="ghost" 
             size="icon" 
             onClick={onClose}
-            className="size-9 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl transition-all"
+            className="size-9 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl transition-all"
           >
             <X size={18} />
           </Button>

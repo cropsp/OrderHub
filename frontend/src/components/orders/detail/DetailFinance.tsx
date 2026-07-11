@@ -1,3 +1,4 @@
+import { formatMoney } from '@/lib/format';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailFinanceProps {
@@ -9,10 +10,6 @@ interface DetailFinanceProps {
 const VARIANCE_BADGE_THRESHOLD = 0.05;
 const VARIANCE_AMBER_THRESHOLD = 0.10;
 
-function formatMoney(value: number): string {
-  return value.toFixed(2);
-}
-
 export function DetailFinance({ order }: DetailFinanceProps) {
   const orderTotal = order.total_price || 0;
   // Single canonical subtotal — sum of line items, matching DetailItems.
@@ -20,16 +17,27 @@ export function DetailFinance({ order }: DetailFinanceProps) {
     (acc, it) => acc + it.quantity * it.unit_price,
     0,
   );
+  // OD-2: the order total is only authoritative when it's a positive number.
+  // A null/0 total (common on manual/NP orders that never captured a paid
+  // amount) is "not set" — deriving shipping = total − items from it invents a
+  // negative "Shipping / other" and presents 0.00 as fact. Guard against both.
+  const totalKnown = order.total_price != null && order.total_price > 0;
   // Shipping/other = the gap between what the customer paid and the line items.
+  // Only meaningful when the total is known and not below the items subtotal
+  // (a negative derived shipping cost is never rendered as fact).
   const shippingOther = orderTotal - itemsSubtotal;
+  const showShipping = totalKnown && shippingOther > 0;
+  const showNoFee = totalKnown && shippingOther === 0;
 
   const manualCost = order.production_cost;
   const computedCost = order.computed_production_cost;
 
-  // Net profit / margin are only honest when we actually know a cost.
+  // Net profit / margin are only honest when we actually know a cost AND an
+  // authoritative total (otherwise profit off a 0 total reads as a real loss).
   // computed (BOM-driven) takes precedence over the manual figure.
   const effectiveCost = computedCost ?? manualCost ?? null;
-  const netProfit = effectiveCost != null ? orderTotal - effectiveCost : null;
+  const netProfit =
+    totalKnown && effectiveCost != null ? orderTotal - effectiveCost : null;
   const marginPercent =
     netProfit != null && orderTotal > 0
       ? Math.round((netProfit / orderTotal) * 100)
@@ -54,33 +62,49 @@ export function DetailFinance({ order }: DetailFinanceProps) {
 
       <div className="space-y-3 px-1">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-zinc-500">Items subtotal</span>
+          <span className="text-[11px] font-medium text-zinc-400">Items subtotal</span>
           <span className="text-sm font-medium text-zinc-300">
-            {itemsSubtotal.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+            {formatMoney(itemsSubtotal)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
           </span>
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-zinc-500">Shipping / other</span>
-          {shippingOther === 0 ? (
-            <span className="text-sm text-zinc-500 italic">No fee</span>
-          ) : (
+          <span className="text-[11px] font-medium text-zinc-400">Shipping / other</span>
+          {showNoFee ? (
+            <span className="text-sm text-zinc-400 italic">No fee</span>
+          ) : showShipping ? (
             <span className="text-sm font-medium text-zinc-300">
-              {shippingOther.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+              {formatMoney(shippingOther)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+            </span>
+          ) : (
+            <span className="text-sm text-zinc-600" title="Order total not set — shipping cannot be derived">
+              —
             </span>
           )}
         </div>
 
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold text-zinc-400">Order total</span>
-          <span className="text-sm font-semibold text-zinc-200">
-            {orderTotal.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
-          </span>
+          {totalKnown ? (
+            <span className="text-sm font-semibold text-zinc-200">
+              {formatMoney(orderTotal)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+            </span>
+          ) : (
+            <span className="text-sm font-semibold text-zinc-600" title="Order total not set">
+              —
+            </span>
+          )}
         </div>
+
+        {!totalKnown && (
+          <p className="text-[10px] italic text-zinc-600 -mt-1">
+            ⓘ Order total not set for this order.
+          </p>
+        )}
 
         {manualCost != null && (
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium text-zinc-500">
+            <span className="text-[11px] font-medium text-zinc-400">
               Production cost
             </span>
             <span className="text-sm font-medium text-zinc-300">
@@ -135,7 +159,7 @@ export function DetailFinance({ order }: DetailFinanceProps) {
             {netProfit != null ? (
               <>
                 <span className="text-base text-emerald-500 font-semibold">
-                  {netProfit.toFixed(2)}
+                  {formatMoney(netProfit)}
                 </span>
                 {marginPercent != null && (
                   <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded">

@@ -65,7 +65,7 @@ export default function MaterialsPage() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-zinc-900/20 p-6 rounded-3xl border border-zinc-800/50 backdrop-blur-sm">
           <div className="flex items-center gap-3 flex-1 max-w-md">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500 pointer-events-none" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-400 pointer-events-none" />
               <Input
                 placeholder="Search materials..."
                 value={search}
@@ -100,25 +100,25 @@ export default function MaterialsPage() {
             <Table>
               <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                 <TableRow className="border-none hover:bg-transparent">
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">
                     Name
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
                     Unit
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
                     Currency
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
                     Stock
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
                     Supplier
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
                     Status
                   </TableHead>
-                  <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">
+                  <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">
                     Actions
                   </TableHead>
                 </TableRow>
@@ -155,7 +155,7 @@ export default function MaterialsPage() {
                     <TableCell colSpan={7} className="h-60 text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <Layers className="size-10 text-zinc-800" />
-                        <p className="text-sm text-zinc-500 italic">
+                        <p className="text-sm text-zinc-400 italic">
                           No materials registered yet.
                         </p>
                         <Button
@@ -189,7 +189,7 @@ export default function MaterialsPage() {
                             {item.name}
                           </p>
                           {item.notes && (
-                            <span className="text-[10px] text-zinc-500 truncate max-w-md">
+                            <span className="text-[10px] text-zinc-400 truncate max-w-md">
                               {item.notes}
                             </span>
                           )}

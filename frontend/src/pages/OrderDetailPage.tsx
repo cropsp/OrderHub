@@ -15,7 +15,7 @@ export default function OrderDetailPage() {
         <div className="max-w-5xl mx-auto px-6 py-3">
           <button 
             onClick={() => navigate(-1)}
-            className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 hover:text-teal-400 transition-colors group cursor-pointer"
+            className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 hover:text-teal-400 transition-colors group cursor-pointer"
           >
             <ArrowLeft size={12} className="group-hover:-translate-x-1 transition-transform" />
             Back to Orders

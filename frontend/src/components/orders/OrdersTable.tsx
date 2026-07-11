@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
-import { 
+import { formatDate, formatMoney } from '@/lib/format';
+import {
   Table, 
   TableBody, 
   TableCell, 
@@ -56,12 +56,12 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
       <Table className="min-w-[760px]">
         <TableHeader className="bg-zinc-900 sticky top-0 z-10">
           <TableRow className="border-zinc-800 hover:bg-transparent">
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 py-4">Order</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Customer</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Product</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Total</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Date</TableHead>
-            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Status</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 py-4">Order</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Customer</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Product</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Total</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Date</TableHead>
+            <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Status</TableHead>
             <TableHead className="w-10"></TableHead>
           </TableRow>
         </TableHeader>
@@ -79,7 +79,7 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
               >
                 <TableCell>
                   <div className="flex flex-col gap-1">
-                    <span className="font-mono text-xs text-zinc-500">#{order.external_id}</span>
+                    <span className="font-mono text-xs text-zinc-400">#{order.external_id}</span>
                     <div className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider w-fit", shopTheme.bg, shopTheme.text)}>
                       {order.shop_name}
                     </div>
@@ -92,7 +92,7 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
                     </div>
                     <div className="flex flex-col min-w-0">
                       <span className="text-sm font-medium text-zinc-100 truncate">{order.customer_name}</span>
-                      <span className="text-[10px] text-zinc-500 truncate">ID: {order.customer_id.substring(0, 8)}</span>
+                      <span className="text-[10px] text-zinc-400 truncate">ID: {order.customer_id.substring(0, 8)}</span>
                     </div>
                   </div>
                 </TableCell>
@@ -103,13 +103,13 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-sm font-bold text-zinc-100">{order.total_price}</span>
-                    <span className="text-[10px] font-medium text-zinc-500 uppercase">{order.currency}</span>
+                    <span className="text-sm font-bold text-zinc-100">{formatMoney(order.total_price)}</span>
+                    <span className="text-[10px] font-medium text-zinc-400 uppercase">{order.currency}</span>
                   </div>
                 </TableCell>
                 <TableCell>
                   <span className="text-sm text-zinc-400">
-                    {format(new Date(order.ordered_at), 'MMM dd')}
+                    {formatDate(order.ordered_at)}
                   </span>
                 </TableCell>
                 <TableCell>
@@ -118,7 +118,7 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-100 transition-colors">
+                      <button className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-zinc-100 transition-colors">
                         <MoreHorizontal className="size-4" />
                       </button>
                     </DropdownMenuTrigger>
@@ -127,7 +127,7 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
                         onClick={() => navigate(`/orders/${order.id}`)}
                         className="text-[10px] font-bold uppercase tracking-widest gap-3 px-3 py-2 rounded-lg focus:bg-zinc-800 focus:text-white cursor-pointer"
                       >
-                        <Eye size={14} className="text-zinc-500" /> View Details
+                        <Eye size={14} className="text-zinc-400" /> View Details
                       </DropdownMenuItem>
                       <DropdownMenuItem className="gap-2 focus:bg-zinc-800 focus:text-zinc-100">
                         <RefreshCw className="size-3.5" /> Change Status

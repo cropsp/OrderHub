@@ -3,9 +3,15 @@ import { useCreateOrder } from '@/hooks/useOrders';
 
 const INITIAL_ITEM = { title: '', quantity: 1, unit_price: 0 };
 
+// C-1: field-level validation. Keys are checked in this priority order so the
+// view can scroll/focus the first offending field.
+export type OrderFieldError = 'shop_id' | 'email' | 'items';
+export type OrderFieldErrors = Partial<Record<OrderFieldError, string>>;
+
 export function useOrderForm(onSuccess: () => void) {
   const createOrder = useCreateOrder();
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<OrderFieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [orderData, setOrderData] = useState({
@@ -58,13 +64,35 @@ export function useOrderForm(onSuccess: () => void) {
     });
     setItems([{ ...INITIAL_ITEM }]);
     setError(null);
+    setFieldErrors({});
+  };
+
+  // Clear a single field's error as soon as the user edits that field.
+  const clearFieldError = (field: OrderFieldError) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!orderData.shop_id) return setError('Please select a shop.');
-    if (!orderData.email) return setError('Customer email is required.');
-    if (items.length === 0 || !items[0].title) return setError('At least one item is required.');
+
+    const nextErrors: OrderFieldErrors = {};
+    if (!orderData.shop_id) nextErrors.shop_id = 'Please select a shop.';
+    if (!orderData.email) nextErrors.email = 'Customer email is required.';
+    if (items.length === 0 || !items[0].title)
+      nextErrors.items = 'At least one item is required.';
+
+    // Always set a fresh object so the view's effect re-runs (scroll-to-error)
+    // even when the same fields fail on a repeated submit.
+    setFieldErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      setError(null);
+      return;
+    }
 
     setIsSubmitting(true);
     setError(null);
@@ -98,6 +126,8 @@ export function useOrderForm(onSuccess: () => void) {
     updateItem,
     totalPrice,
     error,
+    fieldErrors,
+    clearFieldError,
     isSubmitting,
     handleSubmit,
     resetForm

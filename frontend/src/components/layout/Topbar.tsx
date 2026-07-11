@@ -26,7 +26,7 @@ function roleClass(role: UserRoleType | undefined): string {
   if (role === UserRole.OWNER) return 'border-teal-500/20 bg-teal-500/5 text-teal-400'
   if (role === UserRole.MANAGER) return 'border-zinc-700 bg-zinc-800 text-zinc-300'
   if (role === UserRole.DESIGNER) return 'border-zinc-700 bg-zinc-800 text-zinc-300'
-  return 'border-zinc-800 bg-zinc-900 text-zinc-500'
+  return 'border-zinc-800 bg-zinc-900 text-zinc-400'
 }
 
 export default function Topbar({ title, description, user, onLogout, actions }: TopbarProps) {
@@ -38,11 +38,11 @@ export default function Topbar({ title, description, user, onLogout, actions }: 
       <div className="flex items-center justify-between gap-6">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 mb-1">
-             <Layout className="size-3.5 text-zinc-500" />
-             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">OrderHub Console</span>
+             <Layout className="size-3.5 text-zinc-400" />
+             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">OrderHub Console</span>
           </div>
           <h1 className="truncate text-2xl font-bold text-zinc-50 tracking-tight">{title}</h1>
-          {description ? <p className="mt-1 truncate text-xs text-zinc-500 font-medium">{description}</p> : null}
+          {description ? <p className="mt-1 truncate text-xs text-zinc-400 font-medium">{description}</p> : null}
         </div>
 
         <div className="flex items-center gap-6">
@@ -65,7 +65,7 @@ export default function Topbar({ title, description, user, onLogout, actions }: 
               onClick={() => onLogout?.()}
               size="icon"
               variant="ghost"
-              className="size-10 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-zinc-500"
+              className="size-10 rounded-xl hover:bg-red-500/10 hover:text-red-400 text-zinc-400"
             >
               <LogOut className="size-4" />
             </Button>

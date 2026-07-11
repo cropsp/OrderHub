@@ -30,7 +30,7 @@ export default function ShopOrdersPage() {
       <ShellPage title="Shop Orders" description="Manage orders for a specific store.">
         <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-8 text-center">
           <p className="text-sm font-medium text-zinc-200">Shop not found</p>
-          <p className="mt-1 text-xs text-zinc-500">
+          <p className="mt-1 text-xs text-zinc-400">
             This shop might have been deleted or you may not have access to it.
           </p>
         </div>

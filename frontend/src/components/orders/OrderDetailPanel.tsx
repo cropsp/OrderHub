@@ -91,7 +91,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
 
                   {/* 3. PRODUCTION ASSETS */}
                   <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-5">
-                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4 px-1">
+                    <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4 px-1">
                       Production Assets
                     </h3>
                     <AttachmentManager orderId={order.id} />

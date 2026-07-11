@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { format } from 'date-fns';
+import { formatDate, formatMoney } from '@/lib/format';
 import { Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { getShopTheme } from '@/utils/shopTheme';
@@ -25,7 +25,7 @@ export default function PipelineCard({ order }: PipelineCardProps) {
     >
       <CardHeader className="space-y-2 p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] font-bold tracking-wider text-zinc-500">
+          <span className="font-mono text-[10px] font-bold tracking-wider text-zinc-400">
             #{order.external_id}
           </span>
           <div className={cn("px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider", shopTheme.bg, shopTheme.text)}>
@@ -47,12 +47,12 @@ export default function PipelineCard({ order }: PipelineCardProps) {
         
         <div className="flex items-center justify-between mt-auto pt-2 border-t border-zinc-800/60">
           <div className="flex items-baseline gap-1">
-            <span className="text-sm font-bold text-zinc-100">{order.total_price}</span>
-            <span className="text-[10px] font-medium text-zinc-500 uppercase">{order.currency}</span>
+            <span className="text-sm font-bold text-zinc-100">{formatMoney(order.total_price)}</span>
+            <span className="text-[10px] font-medium text-zinc-400 uppercase">{order.currency}</span>
           </div>
-          <div className="flex items-center gap-1 text-[10px] text-zinc-500">
+          <div className="flex items-center gap-1 text-[10px] text-zinc-400">
             <Clock className="size-3" />
-            {format(new Date(order.ordered_at), 'MMM dd')}
+            {formatDate(order.ordered_at)}
           </div>
         </div>
       </CardContent>

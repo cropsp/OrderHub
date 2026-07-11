@@ -115,7 +115,7 @@ export default function PackagingForm({
           <div className="p-8 space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Internal Name</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Internal Name</p>
                 <Input 
                   className="border-zinc-800 bg-zinc-900/50" 
                   placeholder="e.g. Standard Box M" 
@@ -124,7 +124,7 @@ export default function PackagingForm({
                 />
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Packaging Type</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Packaging Type</p>
                 <Select value={type} onValueChange={(v: any) => setType(v)}>
                   <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
                     <SelectValue />
@@ -139,7 +139,7 @@ export default function PackagingForm({
 
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Maximize2 className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Length (mm)</p>
                 </div>
@@ -151,7 +151,7 @@ export default function PackagingForm({
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Maximize2 className="size-3 rotate-90" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Width (mm)</p>
                 </div>
@@ -163,7 +163,7 @@ export default function PackagingForm({
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Maximize2 className="size-3 -rotate-45" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Height (mm)</p>
                 </div>
@@ -178,7 +178,7 @@ export default function PackagingForm({
 
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Scale className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Max Weight (g)</p>
                 </div>
@@ -190,7 +190,7 @@ export default function PackagingForm({
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Layers className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Tare Weight (g)</p>
                 </div>
@@ -202,7 +202,7 @@ export default function PackagingForm({
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Maximize2 className="size-3 text-teal-500" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Sort Order</p>
                 </div>
@@ -218,7 +218,7 @@ export default function PackagingForm({
             <div className="grid grid-cols-2 gap-4">
               {!initialData && (
                 <div className="space-y-2">
-                  <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                  <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                     <Layers className="size-3 text-amber-500" />
                     <p className="text-[10px] font-bold uppercase tracking-widest">Initial Quantity</p>
                   </div>
@@ -233,7 +233,7 @@ export default function PackagingForm({
                 </div>
               )}
               <div className={!initialData ? "space-y-2" : "space-y-2 col-span-2"}>
-                <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                   <Scale className="size-3 text-amber-500" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">Low-Stock Threshold</p>
                 </div>
@@ -254,7 +254,7 @@ export default function PackagingForm({
                 <div className="flex items-center gap-4">
                   <div className="flex-1 space-y-1">
                     <p className="text-xs text-zinc-300 font-medium">Max Thickness (mm)</p>
-                    <p className="text-[10px] text-zinc-500">Sum of item heights cannot exceed this limit. Leave empty for no limit.</p>
+                    <p className="text-[10px] text-zinc-400">Sum of item heights cannot exceed this limit. Leave empty for no limit.</p>
                   </div>
                   <Input 
                     type="number"

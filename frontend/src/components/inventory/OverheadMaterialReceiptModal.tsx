@@ -137,7 +137,7 @@ export default function OverheadMaterialReceiptModal({
 
           <div className="p-8 space-y-6">
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <Store className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">
                   Allocate to shop
@@ -166,7 +166,7 @@ export default function OverheadMaterialReceiptModal({
 
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Quantity (optional)
                 </p>
                 <Input
@@ -180,7 +180,7 @@ export default function OverheadMaterialReceiptModal({
                 />
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Total cost
                 </p>
                 <Input
@@ -194,7 +194,7 @@ export default function OverheadMaterialReceiptModal({
                 />
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Currency
                 </p>
                 <Select value={currency} onValueChange={setCurrency}>
@@ -214,7 +214,7 @@ export default function OverheadMaterialReceiptModal({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500">
+                <div className="flex items-center gap-1.5 text-zinc-400">
                   <Truck className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">
                     Supplier
@@ -228,7 +228,7 @@ export default function OverheadMaterialReceiptModal({
                 />
               </div>
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5 text-zinc-500">
+                <div className="flex items-center gap-1.5 text-zinc-400">
                   <Hash className="size-3" />
                   <p className="text-[10px] font-bold uppercase tracking-widest">
                     Invoice #
@@ -244,7 +244,7 @@ export default function OverheadMaterialReceiptModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <Calendar className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">
                   Received at (optional)
@@ -259,7 +259,7 @@ export default function OverheadMaterialReceiptModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <FileText className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">
                   Notes (optional)

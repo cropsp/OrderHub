@@ -35,6 +35,7 @@ import MaterialFormModal from '@/components/inventory/MaterialFormModal'
 import MaterialReceiptModal from '@/components/inventory/MaterialReceiptModal'
 import MaterialAdjustModal from '@/components/inventory/MaterialAdjustModal'
 import { cn } from '@/lib/utils'
+import { formatDateTime, formatMoney } from '@/lib/format'
 import {
   useAdjustMaterialStock,
   useCreateMaterialReceipt,
@@ -57,21 +58,6 @@ const REASON_FILTER_VALUES = [
 ] as const
 
 type ReasonFilter = (typeof REASON_FILTER_VALUES)[number]
-
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString('uk-UA', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return iso
-  }
-}
 
 function reasonBadgeClass(reason: MaterialMovementReason): string {
   switch (reason) {
@@ -158,7 +144,7 @@ export default function MaterialDetailPage() {
       <div className="space-y-6">
         <Link
           to="/inventory/materials"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-300 transition-colors"
         >
           <ArrowLeft className="size-3" />
           Back to Materials
@@ -215,7 +201,7 @@ export default function MaterialDetailPage() {
                 <SummaryCell
                   icon={<Coins className="size-3" />}
                   label="Avg unit cost"
-                  value={`${Number(material.current_unit_cost).toFixed(2)} ${material.currency}/${material.unit}`}
+                  value={`${formatMoney(material.current_unit_cost)} ${material.currency}/${material.unit}`}
                 />
                 <SummaryCell
                   icon={<Layers className="size-3" />}
@@ -236,14 +222,14 @@ export default function MaterialDetailPage() {
               {material.supplier_name && (
                 <div className="mt-6 pt-6 border-t border-zinc-800/50 flex items-center gap-2 text-xs text-zinc-400">
                   <Truck className="size-3" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                     Supplier
                   </span>
                   <span>{material.supplier_name}</span>
                 </div>
               )}
               {material.notes && (
-                <div className="mt-3 text-xs text-zinc-500 whitespace-pre-wrap">
+                <div className="mt-3 text-xs text-zinc-400 whitespace-pre-wrap">
                   {material.notes}
                 </div>
               )}
@@ -254,32 +240,32 @@ export default function MaterialDetailPage() {
         <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md rounded-2xl overflow-hidden">
           <CardContent className="p-0">
             <div className="px-8 py-5 border-b border-zinc-800/50">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Recent receipts
               </h3>
             </div>
             <Table>
               <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                 <TableRow className="border-none hover:bg-transparent">
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-4">
                     Date
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Qty
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Unit cost
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Shipping
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Supplier
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Invoice
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-4">
                     Notes
                   </TableHead>
                 </TableRow>
@@ -289,7 +275,7 @@ export default function MaterialDetailPage() {
                   <TableRow>
                     <TableCell
                       colSpan={7}
-                      className="h-24 text-center text-xs text-zinc-500 italic"
+                      className="h-24 text-center text-xs text-zinc-400 italic"
                     >
                       No receipts yet.
                     </TableCell>
@@ -301,17 +287,17 @@ export default function MaterialDetailPage() {
                       className="border-b border-white/[0.02] hover:bg-white/[0.02]"
                     >
                       <TableCell className="px-8 py-4 text-xs text-zinc-300">
-                        {formatDate(r.received_at)}
+                        {formatDateTime(r.received_at)}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-zinc-100">
                         +{r.qty} {material?.unit ?? ''}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-zinc-300">
-                        {Number(r.unit_cost).toFixed(2)} {r.currency}
+                        {formatMoney(r.unit_cost)} {r.currency}
                       </TableCell>
                       <TableCell className="text-xs font-mono text-zinc-400">
                         {r.shipping_cost
-                          ? `${Number(r.shipping_cost).toFixed(2)}`
+                          ? formatMoney(r.shipping_cost)
                           : '—'}
                       </TableCell>
                       <TableCell className="text-xs text-zinc-400">
@@ -320,7 +306,7 @@ export default function MaterialDetailPage() {
                       <TableCell className="text-xs text-zinc-400">
                         {r.invoice_no || '—'}
                       </TableCell>
-                      <TableCell className="px-8 py-4 text-xs text-zinc-500 truncate max-w-xs">
+                      <TableCell className="px-8 py-4 text-xs text-zinc-400 truncate max-w-xs">
                         {r.notes || '—'}
                       </TableCell>
                     </TableRow>
@@ -334,7 +320,7 @@ export default function MaterialDetailPage() {
         <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md rounded-2xl overflow-hidden">
           <CardContent className="p-0">
             <div className="px-8 py-5 border-b border-zinc-800/50 flex items-center justify-between">
-              <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Movements ledger
               </h3>
               <div className="w-48">
@@ -358,19 +344,19 @@ export default function MaterialDetailPage() {
             <Table>
               <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                 <TableRow className="border-none hover:bg-transparent">
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-4">
                     Date
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Reason
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Delta
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-4">
                     Linked
                   </TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-4">
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-4">
                     Notes
                   </TableHead>
                 </TableRow>
@@ -380,7 +366,7 @@ export default function MaterialDetailPage() {
                   <TableRow>
                     <TableCell
                       colSpan={5}
-                      className="h-24 text-center text-xs text-zinc-500 italic"
+                      className="h-24 text-center text-xs text-zinc-400 italic"
                     >
                       No movements yet.
                     </TableCell>
@@ -394,7 +380,7 @@ export default function MaterialDetailPage() {
                         className="border-b border-white/[0.02] hover:bg-white/[0.02]"
                       >
                         <TableCell className="px-8 py-4 text-xs text-zinc-300">
-                          {formatDate(m.created_at)}
+                          {formatDateTime(m.created_at)}
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -420,7 +406,7 @@ export default function MaterialDetailPage() {
                           {deltaNum > 0 ? '+' : ''}
                           {m.delta} {material?.unit ?? ''}
                         </TableCell>
-                        <TableCell className="text-xs text-zinc-500 font-mono">
+                        <TableCell className="text-xs text-zinc-400 font-mono">
                           {m.receipt_id
                             ? `Receipt ${m.receipt_id.slice(0, 8)}`
                             : m.order_id && m.order_code
@@ -434,7 +420,7 @@ export default function MaterialDetailPage() {
                               )
                               : '—'}
                         </TableCell>
-                        <TableCell className="px-8 py-4 text-xs text-zinc-500 truncate max-w-xs">
+                        <TableCell className="px-8 py-4 text-xs text-zinc-400 truncate max-w-xs">
                           {m.notes || '—'}
                         </TableCell>
                       </TableRow>
@@ -485,7 +471,7 @@ function SummaryCell({
 }) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 text-zinc-500">
+      <div className="flex items-center gap-1.5 text-zinc-400">
         {icon}
         <p className="text-[10px] font-bold uppercase tracking-widest">{label}</p>
       </div>

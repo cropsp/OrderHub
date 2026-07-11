@@ -32,7 +32,7 @@ export default function PipelineBoard({ orders, columnStatuses, isLoading }: Pip
           return (
             <div key={status} className="flex h-full w-[300px] flex-col shrink-0">
               <div className="mb-4 flex items-center justify-between px-1">
-                <h3 className="text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-400">
                   {getStatusLabel(status)}
                   <span className="ml-2 text-[10px] tabular-nums text-zinc-600 bg-zinc-800/50 px-1.5 py-0.5 rounded-full">
                     {columnOrders.length}

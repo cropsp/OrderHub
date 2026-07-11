@@ -69,7 +69,7 @@ export default function ImportsPage() {
                   <h2 className="text-sm font-black uppercase tracking-widest text-zinc-100">Target context</h2>
                 </div>
                 
-                <p className="text-xs text-zinc-500 font-medium leading-relaxed">
+                <p className="text-xs text-zinc-400 font-medium leading-relaxed">
                   Select the designated Etsy instance for this batch synchronization. Credentials will be verified on-the-fly.
                 </p>
 
@@ -129,7 +129,7 @@ export default function ImportsPage() {
                   
                   <div className={cn(
                     "h-20 w-20 rounded-2xl flex items-center justify-center mb-2 shadow-2xl transition-transform duration-500",
-                    file ? "bg-teal-500 shadow-teal-500/20 text-white scale-110" : "bg-zinc-900 border border-zinc-800 text-zinc-500 group-hover:scale-105"
+                    file ? "bg-teal-500 shadow-teal-500/20 text-white scale-110" : "bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:scale-105"
                   )}>
                     {file ? <CheckCircle2 className="h-10 w-10 animate-in zoom-in-50 duration-300" /> : <Upload className="h-10 w-10" />}
                   </div>
@@ -138,7 +138,7 @@ export default function ImportsPage() {
                     <p className="text-sm font-black text-zinc-100 tracking-tight">
                       {file ? file.name : "Select Etsy source"}
                     </p>
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-2">
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-2">
                       {file ? `${(file.size / 1024).toFixed(1)} KB` : "CSV format required"}
                     </p>
                   </div>
@@ -147,7 +147,7 @@ export default function ImportsPage() {
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="text-[10px] font-black uppercase tracking-widest text-zinc-500 hover:text-red-400 hover:bg-red-400/5 rounded-lg"
+                      className="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-red-400 hover:bg-red-400/5 rounded-lg"
                       onClick={(e) => {
                         e.stopPropagation();
                         setFile(null);
@@ -188,7 +188,7 @@ export default function ImportsPage() {
               </div>
               
               <h2 className="text-3xl font-black text-zinc-100 tracking-tight mb-3">Sync finalized.</h2>
-              <p className="text-sm text-zinc-500 max-w-sm mb-12 font-medium">
+              <p className="text-sm text-zinc-400 max-w-sm mb-12 font-medium">
                 The extraction pipeline has completed. Data for <span className="text-zinc-200 font-bold">{selectedShop?.name}</span> is now consistent.
               </p>
 
@@ -200,7 +200,7 @@ export default function ImportsPage() {
                 </div>
                 <div className="bg-zinc-950 border border-zinc-800 p-8 rounded-3xl relative group overflow-hidden">
                   <div className="absolute inset-0 bg-zinc-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  <p className="text-5xl font-black text-zinc-500 tracking-tighter relative z-10">{importMutation.data?.skipped || 0}</p>
+                  <p className="text-5xl font-black text-zinc-400 tracking-tighter relative z-10">{importMutation.data?.skipped || 0}</p>
                   <p className="text-[10px] uppercase tracking-[0.2em] font-black text-zinc-600 mt-3 relative z-10">Cached matches</p>
                 </div>
               </div>
@@ -212,7 +212,7 @@ export default function ImportsPage() {
                     </p>
                     <div className="space-y-2 max-h-40 overflow-auto pr-4 scrollbar-thin scrollbar-thumb-zinc-800">
                         {importMutation.data.errors.map((err, idx) => (
-                           <div key={idx} className="text-[11px] text-zinc-500 font-medium py-1.5 border-b border-white/5 last:border-0">• {err.detail || "Data integrity mismatch"}</div>
+                           <div key={idx} className="text-[11px] text-zinc-400 font-medium py-1.5 border-b border-white/5 last:border-0">• {err.detail || "Data integrity mismatch"}</div>
                         ))}
                     </div>
                  </div>
@@ -241,8 +241,8 @@ export default function ImportsPage() {
           <div className="flex items-center gap-4 mb-8">
             <div className="h-px flex-1 bg-zinc-800/60" />
             <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900/50 border border-zinc-800">
-               <Database className="h-3.5 w-3.5 text-zinc-500" />
-               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500">Related infrastructure</span>
+               <Database className="h-3.5 w-3.5 text-zinc-400" />
+               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400">Related infrastructure</span>
             </div>
             <div className="h-px flex-1 bg-zinc-800/60" />
           </div>
@@ -251,7 +251,7 @@ export default function ImportsPage() {
             <a href="/shops" className="p-6 rounded-2xl border border-zinc-800/40 bg-zinc-900/20 backdrop-blur-sm flex items-center justify-between group transition-all hover:bg-zinc-900/60 hover:border-zinc-700 hover:shadow-2xl hover:shadow-black/20">
               <div className="flex items-center gap-4">
                  <div className="size-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center transition-colors group-hover:border-teal-500/40">
-                    <StoreIcon className="h-5 w-5 text-zinc-500 group-hover:text-teal-400 transition-colors" />
+                    <StoreIcon className="h-5 w-5 text-zinc-400 group-hover:text-teal-400 transition-colors" />
                  </div>
                  <div className="flex flex-col">
                     <span className="text-sm font-bold text-zinc-200 tracking-tight">Shop configurations</span>
@@ -264,7 +264,7 @@ export default function ImportsPage() {
             <div className="p-6 rounded-2xl border border-zinc-800/40 bg-zinc-900/20 backdrop-blur-sm flex items-center justify-between group transition-all hover:bg-zinc-900/60 hover:border-zinc-700 hover:shadow-2xl hover:shadow-black/20 cursor-pointer">
               <div className="flex items-center gap-4">
                  <div className="size-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center transition-colors group-hover:border-blue-500/40">
-                    <FileText className="h-5 w-5 text-zinc-500 group-hover:text-blue-400 transition-colors" />
+                    <FileText className="h-5 w-5 text-zinc-400 group-hover:text-blue-400 transition-colors" />
                  </div>
                  <div className="flex flex-col">
                     <span className="text-sm font-bold text-zinc-200 tracking-tight">Audit logs</span>

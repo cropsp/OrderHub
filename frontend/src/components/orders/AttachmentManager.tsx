@@ -16,7 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { useAttachments, useUploadAttachment, useDeleteAttachment } from '@/hooks/useAttachments';
 import { attachmentsApi } from '@/api/attachments';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/format';
 import { useToastStore } from '@/components/ui/Toast';
 import DraftGenerator from './draft/DraftGenerator';
 
@@ -150,7 +150,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
                 'px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors',
                 uploadType === t
                   ? 'bg-teal-500/20 text-teal-300'
-                  : 'text-zinc-500 hover:text-zinc-300',
+                  : 'text-zinc-400 hover:text-zinc-300',
               )}
             >
               {t}
@@ -174,14 +174,14 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
             {isUploading ? (
               <Loader2 className="size-4 text-teal-400 animate-spin" />
             ) : (
-              <Upload size={16} className="text-zinc-500 group-hover:text-teal-400" />
+              <Upload size={16} className="text-zinc-400 group-hover:text-teal-400" />
             )}
           </div>
           <div className="flex flex-col">
             <span className="text-sm text-zinc-300 font-medium leading-none mb-1">
               {isDragActive ? 'Drop to upload' : 'Upload Production Files'}
             </span>
-            <span className="text-xs text-zinc-500 leading-none">
+            <span className="text-xs text-zinc-400 leading-none">
               SVG, DXF, PNG or PDF
             </span>
           </div>
@@ -217,14 +217,14 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
                         {file.file_name}
                       </p>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-zinc-500 font-mono">
+                        <span className="text-[10px] text-zinc-400 font-mono">
                           {(file.file_size / 1024).toFixed(1)} KB
                         </span>
                         <span className="text-zinc-700">•</span>
-                        <span className="text-[10px] text-zinc-500">
-                          {format(new Date(file.created_at), 'MMM dd, HH:mm')}
+                        <span className="text-[10px] text-zinc-400">
+                          {formatDateTime(file.created_at)}
                         </span>
-                        <Badge variant="outline" className="h-4 px-1 text-[8px] bg-zinc-800/40 text-zinc-500 border-none uppercase">
+                        <Badge variant="outline" className="h-4 px-1 text-[8px] bg-zinc-800/40 text-zinc-400 border-none uppercase">
                           {file.attachment_type}
                         </Badge>
                       </div>

@@ -98,12 +98,12 @@ export default function SettingsPage() {
             </div>
 
             <div className="flex items-center gap-3 text-zinc-300">
-              <Mail className="h-5 w-5 text-zinc-500" />
+              <Mail className="h-5 w-5 text-zinc-400" />
               <span>{user?.email ?? 'No email'}</span>
             </div>
 
             <div className="flex items-center gap-3">
-              <Shield className="h-5 w-5 text-zinc-500" />
+              <Shield className="h-5 w-5 text-zinc-400" />
               <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-200">
                 {roleLabel(user?.role ?? 'unknown')}
               </Badge>
@@ -199,7 +199,7 @@ export default function SettingsPage() {
             </div>
 
             <div className="flex items-center justify-between">
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-zinc-400">
                 These preferences are synced across all your devices.
               </p>
               <Button 

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ProductVariantSelector } from '@/components/orders/ProductVariantSelector';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { formatMoney } from '@/lib/format';
 import type { OrderItem } from '@/types/common';
 import type { OrderDetail } from '@/types/order';
 
@@ -170,7 +171,7 @@ export function DetailItems({
             variant="ghost"
             size="icon-xs"
             onClick={enterEditMode}
-            className="text-zinc-500 hover:text-teal-400 hover:bg-teal-500/10"
+            className="text-zinc-400 hover:text-teal-400 hover:bg-teal-500/10"
             aria-label="Edit items"
           >
             <Pencil className="size-3.5" />
@@ -209,9 +210,9 @@ export function DetailItems({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-zinc-800/30 bg-zinc-900/40">
-                  <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500">Item details</th>
-                  <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 text-right">Qty</th>
-                  <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 text-right">Unit price</th>
+                  <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-400">Item details</th>
+                  <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-400 text-right">Qty</th>
+                  <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-400 text-right">Unit price</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800/20">
@@ -228,7 +229,7 @@ export function DetailItems({
                           )}
                         </span>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[11px] font-mono text-zinc-500 uppercase tracking-tight">
+                          <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-tight">
                             SKU: {item.sku || 'N/A'}
                           </span>
                           {item.snapshot_title && item.snapshot_title !== item.title && (
@@ -242,7 +243,7 @@ export function DetailItems({
                           {item.variations && (
                             <>
                               <span className="text-zinc-800">·</span>
-                              <span className="text-[11px] text-zinc-500 italic">
+                              <span className="text-[11px] text-zinc-400 italic">
                                 {item.variations}
                               </span>
                             </>
@@ -257,18 +258,18 @@ export function DetailItems({
                     </td>
                     <td className="px-4 py-4 text-right align-top">
                       <span className="text-sm font-medium text-zinc-300">
-                        {item.unit_price.toFixed(2)} <span className="text-[11px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+                        {formatMoney(item.unit_price)} <span className="text-[11px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
                       </span>
                     </td>
                   </tr>
                 ))}
                 <tr className="bg-zinc-950/30 border-t border-zinc-800/50">
                   <td colSpan={2} className="px-4 py-3.5 text-right">
-                    <span className="text-sm font-medium text-zinc-500">Subtotal</span>
+                    <span className="text-sm font-medium text-zinc-400">Subtotal</span>
                   </td>
                   <td className="px-4 py-3.5 text-right">
                     <span className="text-sm font-bold text-zinc-100">
-                      {(order.items?.reduce((acc, it) => acc + it.quantity * it.unit_price, 0) ?? 0).toFixed(2)} <span className="text-[11px] text-zinc-500 uppercase ml-0.5">{order.currency}</span>
+                      {formatMoney(order.items?.reduce((acc, it) => acc + it.quantity * it.unit_price, 0) ?? 0)} <span className="text-[11px] text-zinc-400 uppercase ml-0.5">{order.currency}</span>
                     </span>
                   </td>
                 </tr>
@@ -410,10 +411,10 @@ export function DetailItems({
           </div>
 
           <div className="px-4 py-3 bg-zinc-950/30 border-t border-zinc-800/50 flex justify-between items-center">
-            <span className="text-sm font-medium text-zinc-500">Subtotal</span>
+            <span className="text-sm font-medium text-zinc-400">Subtotal</span>
             <span className="text-sm font-bold text-zinc-100">
-              {editingSubtotal.toFixed(2)}{' '}
-              <span className="text-[11px] text-zinc-500 uppercase ml-0.5">{order.currency}</span>
+              {formatMoney(editingSubtotal)}{' '}
+              <span className="text-[11px] text-zinc-400 uppercase ml-0.5">{order.currency}</span>
             </span>
           </div>
           <div className="px-4 py-2 bg-zinc-950/50 border-t border-zinc-800/30 flex justify-end">

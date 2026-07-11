@@ -395,7 +395,7 @@ export default function ProductDetailPage() {
         <div className="max-w-6xl mx-auto px-6 py-3">
           <button
             onClick={() => navigate('/products')}
-            className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 hover:text-teal-400 transition-colors group cursor-pointer"
+            className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 hover:text-teal-400 transition-colors group cursor-pointer"
           >
             <ArrowLeft size={12} className="group-hover:-translate-x-1 transition-transform" />
             Back to Products
@@ -413,7 +413,7 @@ export default function ProductDetailPage() {
           ) : isError || !product ? (
             <div className="flex flex-col items-center justify-center p-20 border-2 border-dashed border-zinc-800 rounded-3xl bg-zinc-900/5">
               <h3 className="text-lg font-bold text-zinc-300">Product not found</h3>
-              <p className="text-sm text-zinc-500 mt-1 mb-4">
+              <p className="text-sm text-zinc-400 mt-1 mb-4">
                 This product may have been deleted or you may not have access.
               </p>
               <Link
@@ -477,7 +477,7 @@ export default function ProductDetailPage() {
                           disabled={updateProduct.isPending}
                           className="border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300"
                         >
-                          <X className="size-4 mr-2 text-zinc-500" />
+                          <X className="size-4 mr-2 text-zinc-400" />
                           Cancel
                         </Button>
                         <Button
@@ -528,23 +528,23 @@ export default function ProductDetailPage() {
                   <Table>
                     <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                       <TableRow className="border-none hover:bg-transparent">
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">SKU</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Name</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Dimensions (mm)</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Volume</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Price</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Cost</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Margin %</TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5 px-8 w-12"></TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">SKU</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Name</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Weight</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Dimensions (mm)</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Volume</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Price</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Cost</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Stock</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Margin %</TableHead>
+                        <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5 px-8 w-12"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {draft.variants.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={10} className="h-40 text-center">
-                            <p className="text-sm text-zinc-500 italic">No variants yet. Click "Add Variant" to create one.</p>
+                            <p className="text-sm text-zinc-400 italic">No variants yet. Click "Add Variant" to create one.</p>
                           </TableCell>
                         </TableRow>
                       ) : (

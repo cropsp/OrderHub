@@ -79,7 +79,7 @@ export default function FinancePeriodSelector({ value, onChange }: FinancePeriod
             {p.label}
           </Button>
         ))}
-        <span className="ml-2 text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
+        <span className="ml-2 text-[11px] uppercase tracking-wider text-zinc-400 font-medium">
           {summary}
         </span>
       </div>
@@ -87,7 +87,7 @@ export default function FinancePeriodSelector({ value, onChange }: FinancePeriod
       {preset === 'custom' && (
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
               From
             </label>
             <Input
@@ -98,7 +98,7 @@ export default function FinancePeriodSelector({ value, onChange }: FinancePeriod
             />
           </div>
           <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
               To
             </label>
             <Input

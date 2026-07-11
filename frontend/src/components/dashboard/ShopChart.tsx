@@ -30,7 +30,7 @@ const CustomTooltip = ({ active, payload }: any) => {
         </div>
         <div className="flex items-baseline gap-1">
           <p className="text-lg font-black text-zinc-100">{item.value}</p>
-          <p className="text-[10px] text-zinc-500 font-medium lowercase">orders</p>
+          <p className="text-[10px] text-zinc-400 font-medium lowercase">orders</p>
         </div>
       </div>
     );
@@ -72,7 +72,7 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
     <Card className="col-span-4 lg:col-span-2 border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm shadow-md flex flex-col">
       <CardHeader>
         <CardTitle className="text-sm font-bold uppercase tracking-widest text-zinc-400">Order Distribution</CardTitle>
-        <CardDescription className="text-xs text-zinc-500">Volume breakdown by shop</CardDescription>
+        <CardDescription className="text-xs text-zinc-400">Volume breakdown by shop</CardDescription>
       </CardHeader>
       <CardContent className="flex-1 flex flex-col justify-center min-h-[300px]">
         {isEmpty ? (
@@ -80,7 +80,7 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
              <div className="size-20 rounded-full border-2 border-dashed border-zinc-700 flex items-center justify-center">
                 <PackageOpen className="size-8 text-zinc-600" />
              </div>
-             <p className="text-xs font-bold uppercase tracking-widest text-zinc-500">No data yet</p>
+             <p className="text-xs font-bold uppercase tracking-widest text-zinc-400">No data yet</p>
           </div>
         ) : (
           <div className="h-[300px] min-h-[300px] w-full">
@@ -134,7 +134,7 @@ export default function ShopDistributionChart({ data }: ShopChartProps) {
                     textTransform: 'uppercase',
                     letterSpacing: '0.05em'
                   }}
-                  formatter={(value) => <span className="text-zinc-500 font-bold">{value}</span>}
+                  formatter={(value) => <span className="text-zinc-400 font-bold">{value}</span>}
                 />
               </PieChart>
             </ResponsiveContainer>

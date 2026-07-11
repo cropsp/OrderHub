@@ -123,7 +123,7 @@ export default function RecordPaymentModal({
 
         <div className="p-6 space-y-5">
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Partner name
             </p>
             <PartnerNameInput
@@ -138,7 +138,7 @@ export default function RecordPaymentModal({
           </div>
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Linked settlement (optional)
             </p>
             <select
@@ -171,7 +171,7 @@ export default function RecordPaymentModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Amount
               </p>
               <Input
@@ -184,7 +184,7 @@ export default function RecordPaymentModal({
               />
             </div>
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Currency
               </p>
               <select
@@ -212,7 +212,7 @@ export default function RecordPaymentModal({
           )}
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Paid on
             </p>
             <Input
@@ -224,7 +224,7 @@ export default function RecordPaymentModal({
           </div>
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Notes (optional)
             </p>
             <textarea

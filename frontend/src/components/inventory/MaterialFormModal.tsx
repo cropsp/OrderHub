@@ -138,7 +138,7 @@ export default function MaterialFormModal({
 
           <div className="p-8 space-y-6">
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+              <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <Package className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Name</p>
               </div>
@@ -153,7 +153,7 @@ export default function MaterialFormModal({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Unit</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Unit</p>
                 <Select value={unit} onValueChange={setUnit}>
                   <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
                     <SelectValue />
@@ -168,7 +168,7 @@ export default function MaterialFormModal({
                 </Select>
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Currency {isEdit && <span className="text-zinc-600">(locked)</span>}
                 </p>
                 <Select value={currency} onValueChange={setCurrency} disabled={isEdit}>
@@ -187,7 +187,7 @@ export default function MaterialFormModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+              <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <Truck className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Supplier (optional)</p>
               </div>
@@ -201,12 +201,12 @@ export default function MaterialFormModal({
 
             {isEdit && (
               <div className="space-y-3 p-4 rounded-2xl border border-zinc-800/50 bg-zinc-900/30">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                   Stock policy
                 </p>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <div className="flex items-center gap-1.5 text-zinc-500">
+                    <div className="flex items-center gap-1.5 text-zinc-400">
                       <Layers className="size-3" />
                       <p className="text-[10px] font-bold uppercase tracking-widest">
                         Low-stock threshold
@@ -226,7 +226,7 @@ export default function MaterialFormModal({
                     </p>
                   </div>
                   <div className="space-y-2">
-                    <div className="flex items-center gap-1.5 text-zinc-500">
+                    <div className="flex items-center gap-1.5 text-zinc-400">
                       <Percent className="size-3" />
                       <p className="text-[10px] font-bold uppercase tracking-widest">
                         Waste percent
@@ -251,7 +251,7 @@ export default function MaterialFormModal({
             )}
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+              <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <FileText className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Notes (optional)</p>
               </div>

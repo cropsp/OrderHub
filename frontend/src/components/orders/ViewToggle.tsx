@@ -16,7 +16,7 @@ export default function ViewToggle({ view, onViewChange, className }: ViewToggle
           "h-8 gap-2 px-3 text-xs font-medium transition-all",
           view === 'table' 
             ? "bg-teal-500/10 text-teal-300 hover:bg-teal-500/20" 
-            : "bg-transparent text-zinc-500 hover:text-zinc-300"
+            : "bg-transparent text-zinc-400 hover:text-zinc-300"
         )}
         onClick={() => onViewChange('table')}
         size="sm"
@@ -30,7 +30,7 @@ export default function ViewToggle({ view, onViewChange, className }: ViewToggle
           "h-8 gap-2 px-3 text-xs font-medium transition-all",
           view === 'board' 
             ? "bg-teal-500/10 text-teal-300 hover:bg-teal-500/20" 
-            : "bg-transparent text-zinc-500 hover:text-zinc-300"
+            : "bg-transparent text-zinc-400 hover:text-zinc-300"
         )}
         onClick={() => onViewChange('board')}
         size="sm"

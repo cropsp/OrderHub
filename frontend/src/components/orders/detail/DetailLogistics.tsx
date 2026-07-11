@@ -207,7 +207,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
             <Button 
               variant="ghost" 
               size="icon" 
-              className="h-6 w-6 text-zinc-500 hover:text-zinc-200"
+              className="h-6 w-6 text-zinc-400 hover:text-zinc-200"
               onClick={() => {
                 setIsEditing(true);
                 setWarehouseQuery(formData.shipping_street_1);
@@ -223,7 +223,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
             <div className="space-y-4">
               <div className="space-y-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] text-zinc-500 font-medium px-1 uppercase tracking-wider">Recipient Name</label>
+                  <label className="text-[10px] text-zinc-400 font-medium px-1 uppercase tracking-wider">Recipient Name</label>
                   <Input 
                     className="h-8 text-[11px] bg-zinc-950 border-zinc-800 focus:border-teal-500/50 focus:ring-teal-500/20"
                     placeholder="Full Name"
@@ -232,7 +232,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] text-zinc-500 font-medium px-1 uppercase tracking-wider">Recipient Phone</label>
+                  <label className="text-[10px] text-zinc-400 font-medium px-1 uppercase tracking-wider">Recipient Phone</label>
                   <Input 
                     className="h-8 text-[11px] bg-zinc-950 border-zinc-800 focus:border-teal-500/50 focus:ring-teal-500/20"
                     placeholder="+380XXXXXXXXX"
@@ -245,7 +245,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               {formData.shipping_country === 'UA' ? (
                 <div ref={containerRef} className="space-y-3 p-3 rounded-lg bg-zinc-950/40 border border-zinc-800/50">
                   <div className="space-y-1">
-                    <label className="text-[10px] text-zinc-500 font-medium px-1 uppercase tracking-wider">City Search</label>
+                    <label className="text-[10px] text-zinc-400 font-medium px-1 uppercase tracking-wider">City Search</label>
                     <div className="relative">
                       <Input 
                         className="h-8 text-[11px] bg-zinc-900 border-zinc-800 pl-8 focus:ring-teal-500/20"
@@ -285,7 +285,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
 
                   {formData.shipping_city_ref && (
                     <div className="space-y-1 relative">
-                      <label className="text-[10px] text-zinc-500 font-medium px-1 uppercase tracking-wider">Warehouse / Branch</label>
+                      <label className="text-[10px] text-zinc-400 font-medium px-1 uppercase tracking-wider">Warehouse / Branch</label>
                       <div className="relative">
                         <Input 
                           className="h-8 text-[11px] bg-zinc-900 border-zinc-800 focus:ring-teal-500/20 pr-8"
@@ -303,7 +303,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                         />
                         {warehouseQuery && (
                           <button 
-                            className="absolute right-2.5 top-2.5 text-zinc-500 hover:text-zinc-300"
+                            className="absolute right-2.5 top-2.5 text-zinc-400 hover:text-zinc-300"
                             onClick={() => {
                               setWarehouseQuery('');
                               setFormData(p => ({ ...p, shipping_warehouse_ref: '', shipping_street_1: '' }));
@@ -333,7 +333,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                                 </div>
                               ))
                             ) : (
-                              <div className="p-4 text-[10px] text-zinc-500 text-center">No branches found</div>
+                              <div className="p-4 text-[10px] text-zinc-400 text-center">No branches found</div>
                             )}
                           </ScrollArea>
                         </div>
@@ -380,7 +380,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  className="h-8 text-zinc-500 hover:text-zinc-300 text-[10px] uppercase font-semibold"
+                  className="h-8 text-zinc-400 hover:text-zinc-300 text-[10px] uppercase font-semibold"
                   onClick={() => {
                     setIsEditing(false);
                     setIsWarehouseOpen(false);
@@ -399,9 +399,9 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                   <MapPin size={12} className="text-zinc-600 shrink-0" />
                   <p className="line-clamp-2 text-[12px]">{order.shipping_street_1 || 'No address provided'}</p>
                 </div>
-                <p className="text-zinc-500 text-[11px] ml-4.5">{order.shipping_city}{order.shipping_state ? `, ${order.shipping_state}` : ''} {order.shipping_zip}</p>
+                <p className="text-zinc-400 text-[11px] ml-4.5">{order.shipping_city}{order.shipping_state ? `, ${order.shipping_state}` : ''} {order.shipping_zip}</p>
                 <div className="flex items-center gap-2 mt-3">
-                   <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 text-[9px] font-bold uppercase tracking-widest border border-zinc-700/50">
+                   <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[9px] font-bold uppercase tracking-widest border border-zinc-700/50">
                     {order.shipping_country || '??'}
                    </span>
                    {order.shipping_warehouse_ref && (
@@ -418,7 +418,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
             <div className="flex items-center gap-2 text-[11px] font-medium pt-3 border-t border-zinc-800/30">
               <Phone className="size-3.5 text-zinc-700" />
               {order.shipping_phone ? (
-                <span className="text-zinc-500">{order.shipping_phone}</span>
+                <span className="text-zinc-400">{order.shipping_phone}</span>
               ) : (
                 <span className="text-amber-500/70 italic flex items-center gap-1">
                   Missing phone number
@@ -430,7 +430,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
           {!isEditing && ttnExists && (order.packaging ?? selectedBox) && (
             <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 pt-2 border-t border-zinc-800/30">
               <Package size={11} className="text-zinc-600" />
-              <span className="text-zinc-500">Packaged in:</span>
+              <span className="text-zinc-400">Packaged in:</span>
               <span className="font-semibold text-zinc-300">
                 {(order.packaging ?? selectedBox)!.name}
               </span>
@@ -455,7 +455,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                     <ClipboardList className="size-3.5 text-teal-500/40 group-hover:text-teal-500 transition-colors" />
                     {canManageShipping && onRemoveTTN && (
                       <button 
-                        className="p-1 rounded-md hover:bg-red-500/10 text-zinc-500 hover:text-red-500 transition-all z-20"
+                        className="p-1 rounded-md hover:bg-red-500/10 text-zinc-400 hover:text-red-500 transition-all z-20"
                         onClick={(e) => {
                           e.stopPropagation();
                           if (window.confirm('Are you sure you want to delete this TTN?')) {
@@ -478,11 +478,11 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
       {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
         <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
           <div className="space-y-1">
-            <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1 flex items-center gap-1">
+            <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider px-1 flex items-center gap-1">
               <Package size={10} /> Packaging
             </label>
             {packagingList.length === 0 ? (
-              <div className="text-[10px] text-zinc-500 italic px-2 py-1.5 rounded bg-zinc-900/50 border border-zinc-800">
+              <div className="text-[10px] text-zinc-400 italic px-2 py-1.5 rounded bg-zinc-900/50 border border-zinc-800">
                 No packaging configured —{' '}
                 <Link
                   to="/inventory/packaging"
@@ -530,7 +530,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                     {isManual ? 'Manual Override' : 'Auto-Calculated'}
                   </Badge>
                   {!isManual && estimate.selected_packaging && (
-                    <span className="text-[9px] text-zinc-500 font-medium flex items-center gap-1">
+                    <span className="text-[9px] text-zinc-400 font-medium flex items-center gap-1">
                       <ClipboardList size={10} />
                       {estimate.selected_packaging.name} ({estimate.packaging_type})
                     </span>
@@ -567,18 +567,18 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <div className="flex items-center justify-between px-1">
-                <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Weight (kg)</label>
+                <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider">Weight (kg)</label>
                 {estimate && (
                   <div className="group relative">
                     <Info size={10} className="text-zinc-700" />
                     <div className="absolute bottom-full right-0 mb-2 w-48 p-2 rounded-lg bg-zinc-900 border border-zinc-800 shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-[100]">
                       <div className="space-y-1 text-[10px]">
                         <div className="flex justify-between">
-                          <span className="text-zinc-500">Actual:</span>
+                          <span className="text-zinc-400">Actual:</span>
                           <span className="text-zinc-300">{(estimate.total_weight_g / 1000).toFixed(3)} kg</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-zinc-500">Volumetric:</span>
+                          <span className="text-zinc-400">Volumetric:</span>
                           <span className="text-zinc-300">{(estimate.volumetric_weight_g / 1000).toFixed(3)} kg</span>
                         </div>
                         <div className="border-t border-zinc-800 my-1" />
@@ -603,7 +603,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Volume (m³)</label>
+              <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider px-1">Volume (m³)</label>
               <Input 
                 type="number"
                 step="0.0001"
@@ -619,7 +619,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
 
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1">
-              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Length (mm)</label>
+              <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider px-1">Length (mm)</label>
               <Input 
                 type="number"
                 className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
@@ -631,7 +631,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Width (mm)</label>
+              <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider px-1">Width (mm)</label>
               <Input 
                 type="number"
                 className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
@@ -643,7 +643,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               />
             </div>
             <div className="space-y-1">
-              <label className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider px-1">Height (mm)</label>
+              <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider px-1">Height (mm)</label>
               <Input
                 type="number"
                 className="h-8 text-[11px] bg-zinc-900 border-zinc-800"
@@ -677,7 +677,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               "w-full h-9 rounded-lg font-black text-[10px] uppercase tracking-widest transition-all gap-2 shadow-lg",
               order.shipping_warehouse_ref 
                 ? "bg-teal-600 hover:bg-teal-500 text-white shadow-teal-900/20" 
-                : "bg-zinc-800 text-zinc-500 cursor-not-allowed opacity-50"
+                : "bg-zinc-800 text-zinc-400 cursor-not-allowed opacity-50"
             )}
             disabled={isPending || isEstimating || !order.shipping_warehouse_ref}
             onClick={() => onGenerateTTN({ 

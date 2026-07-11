@@ -339,7 +339,7 @@ export default function ShopsPage() {
                   ) : (
                     <div className="flex flex-col items-center justify-center p-8 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/10">
                       <Package2 className="size-12 text-zinc-700 mb-2" />
-                      <p className="text-sm text-zinc-500">No API configuration needed for {editingShop.platform.toUpperCase()}.</p>
+                      <p className="text-sm text-zinc-400">No API configuration needed for {editingShop.platform.toUpperCase()}.</p>
                     </div>
                   )}
                 </TabsContent>
@@ -475,7 +475,7 @@ export default function ShopsPage() {
         <div className="flex items-center justify-between">
           <div className="space-y-1">
              <h2 className="text-2xl font-bold text-zinc-50 tracking-tight">Integrated Stores</h2>
-             <p className="text-sm text-zinc-500">Manage API connections and brand aesthetics.</p>
+             <p className="text-sm text-zinc-400">Manage API connections and brand aesthetics.</p>
           </div>
           {isOwner && (
             <Button
@@ -499,11 +499,11 @@ export default function ShopsPage() {
               <Table className="min-w-[720px]">
                 <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                   <TableRow className="border-none hover:bg-transparent">
-                    <TableHead className="w-[300px] text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Store Identity</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Platform</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5 text-center">Status</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Connectivity</TableHead>
-                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Management</TableHead>}
+                    <TableHead className="w-[300px] text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Store Identity</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Platform</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5 text-center">Status</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Connectivity</TableHead>
+                    {isOwner && <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Management</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -523,7 +523,7 @@ export default function ShopsPage() {
                           </div>
                            <div className="space-y-1">
                               <p className="text-sm font-bold text-zinc-100 tracking-tight">{shop?.name || 'Unnamed Store'}</p>
-                              <p className="text-[10px] text-zinc-500 font-mono">ID: {shop?.id?.slice(0, 8) || 'unknown'}...</p>
+                              <p className="text-[10px] text-zinc-400 font-mono">ID: {shop?.id?.slice(0, 8) || 'unknown'}...</p>
                            </div>
                         </div>
                       </TableCell>
@@ -547,7 +547,7 @@ export default function ShopsPage() {
                             <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[9px] uppercase tracking-tighter">Webhooks Active</Badge>
                           )}
                           {shop.has_np_token && (
-                            <Badge className="bg-red-500/10 text-red-400 border-red-500/20 text-[9px] uppercase tracking-tighter">NovaPoshta Live</Badge>
+                            <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[9px] uppercase tracking-tighter">NovaPoshta Live</Badge>
                           )}
                           {!shop.has_shopify_token && !shop.has_np_token && (
                             <span className="text-[10px] text-zinc-600 font-medium">No active connections</span>
@@ -611,7 +611,7 @@ export default function ShopsPage() {
                       <TableCell colSpan={5} className="h-32 text-center">
                         <div className="flex flex-col items-center justify-center gap-2">
                            <Store className="size-8 text-zinc-800" />
-                           <p className="text-sm text-zinc-500 italic">No stores initialized in this workspace.</p>
+                           <p className="text-sm text-zinc-400 italic">No stores initialized in this workspace.</p>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -629,7 +629,7 @@ export default function ShopsPage() {
             </div>
             <div className="space-y-1.5 pt-1">
               <h4 className="text-sm font-bold text-amber-500 uppercase tracking-widest">Security Audit Context</h4>
-              <p className="text-xs text-zinc-500 leading-relaxed font-medium">
+              <p className="text-xs text-zinc-400 leading-relaxed font-medium">
                 Cryptographic tokens and NP secret keys are processed through AES-256 server-side encryption. 
                 Managers and Designers can trigger sync actions but are strictly barred from retrieving raw API credentials.
               </p>

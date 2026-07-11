@@ -19,7 +19,7 @@ export default function RevenueChart({ data }: RevenueChartProps) {
   return (
     <Card className="col-span-4 bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl overflow-hidden">
       <CardHeader className="pb-2">
-        <CardTitle className="text-xs font-bold uppercase tracking-wide text-zinc-500">Revenue Trend</CardTitle>
+        <CardTitle className="text-xs font-bold uppercase tracking-wide text-zinc-400">Revenue Trend</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="h-[240px] w-full mt-4">
@@ -59,7 +59,7 @@ export default function RevenueChart({ data }: RevenueChartProps) {
                     if (active && payload && payload.length) {
                       return (
                         <div className="bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded-lg p-3 shadow-xl">
-                          <p className="text-[10px] text-zinc-500 uppercase font-bold mb-1">
+                          <p className="text-[10px] text-zinc-400 uppercase font-bold mb-1">
                             {new Date(label).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                           </p>
                           <div className="flex items-center gap-2">
@@ -89,7 +89,7 @@ export default function RevenueChart({ data }: RevenueChartProps) {
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center space-y-2 opacity-50">
               <DollarSign className="size-8 text-zinc-700" />
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">No revenue data</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">No revenue data</p>
             </div>
           )}
         </div>

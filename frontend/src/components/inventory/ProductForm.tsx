@@ -136,7 +136,7 @@ export default function ProductForm({
             {/* Base Info */}
             <div className="grid grid-cols-1 gap-6">
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Product Title</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Product Title</p>
                 <Input 
                   className="border-zinc-800 bg-zinc-900/50" 
                   placeholder="e.g. Handmade Leather Wallet" 
@@ -145,7 +145,7 @@ export default function ProductForm({
                 />
               </div>
               <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Internal Description (Optional)</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Internal Description (Optional)</p>
                 <Textarea 
                   className="border-zinc-800 bg-zinc-900/50 resize-none" 
                   placeholder="Internal notes about the product..."
@@ -162,7 +162,7 @@ export default function ProductForm({
               <div className="flex items-center justify-between px-1">
                 <div className="space-y-1">
                   <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-tight">Product Variants</h4>
-                  <p className="text-[10px] text-zinc-500 font-medium">Physical specs used for parcel estimation</p>
+                  <p className="text-[10px] text-zinc-400 font-medium">Physical specs used for parcel estimation</p>
                 </div>
                 <Button 
                   type="button" 
@@ -192,7 +192,7 @@ export default function ProductForm({
 
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">SKU / Reference</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">SKU / Reference</p>
                         <Input 
                           className="border-zinc-800 bg-zinc-900/50 font-mono text-xs" 
                           placeholder="LHW-BRN-M"
@@ -201,7 +201,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Variant Name (e.g. Brown / M)</p>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Variant Name (e.g. Brown / M)</p>
                         <Input 
                           className="border-zinc-800 bg-zinc-900/50" 
                           placeholder="Brown Leather, Medium Size"
@@ -213,7 +213,7 @@ export default function ProductForm({
 
                     <div className="grid grid-cols-4 gap-4">
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <Scale className="size-3" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Weight (g)</p>
                         </div>
@@ -225,7 +225,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <Maximize2 className="size-3" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Length (mm)</p>
                         </div>
@@ -237,7 +237,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <Maximize2 className="size-3 rotate-90" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Width (mm)</p>
                         </div>
@@ -249,7 +249,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <Maximize2 className="size-3 -rotate-45" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Height (mm)</p>
                         </div>
@@ -264,7 +264,7 @@ export default function ProductForm({
 
                     <div className="grid grid-cols-3 gap-4">
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <DollarSign className="size-3" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Price</p>
                         </div>
@@ -279,7 +279,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <DollarSign className="size-3" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Cost Price</p>
                         </div>
@@ -294,7 +294,7 @@ export default function ProductForm({
                         />
                       </div>
                       <div className="space-y-2">
-                        <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+                        <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                           <Package className="size-3" />
                           <p className="text-[10px] font-bold uppercase tracking-widest">Stock Qty</p>
                         </div>

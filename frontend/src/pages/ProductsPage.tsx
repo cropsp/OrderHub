@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, FileSpreadsheet, Search, Filter, Edit2, Trash2, Package, Layers, Archive, CheckCircle2, Columns3 } from 'lucide-react'
 import ShellPage from './ShellPage'
+import { formatMoney } from '@/lib/format'
 import ShopSelector from '@/components/inventory/ShopSelector'
 import ProductForm from '@/components/inventory/ProductForm'
 import CSVImportModal from '@/components/inventory/CSVImportModal'
@@ -148,7 +149,7 @@ export default function ProductsPage() {
     if (!prices.length) return '—'
     const min = Math.min(...prices)
     const max = Math.max(...prices)
-    const fmt = (n: number) => `$${n.toFixed(2)}`
+    const fmt = (n: number) => formatMoney(n)
     return min === max ? fmt(min) : `${fmt(min)} – ${fmt(max)}`
   }
 
@@ -207,7 +208,7 @@ export default function ProductsPage() {
                 <Filter className="size-8 text-zinc-700" />
              </div>
              <h3 className="text-lg font-bold text-zinc-300">No shop selected</h3>
-             <p className="text-sm text-zinc-500 mt-1">Please select a shop to view its product catalog.</p>
+             <p className="text-sm text-zinc-400 mt-1">Please select a shop to view its product catalog.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -219,7 +220,7 @@ export default function ProductsPage() {
                 className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-widest border-b-2 transition-colors ${
                   viewMode === 'active'
                     ? 'border-teal-500 text-zinc-100'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                    : 'border-transparent text-zinc-400 hover:text-zinc-300'
                 }`}
               >
                 <CheckCircle2 className="size-3.5" />
@@ -231,7 +232,7 @@ export default function ProductsPage() {
                 className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-widest border-b-2 transition-colors ${
                   viewMode === 'archived'
                     ? 'border-teal-500 text-zinc-100'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                    : 'border-transparent text-zinc-400 hover:text-zinc-300'
                 }`}
               >
                 <Archive className="size-3.5" />
@@ -242,7 +243,7 @@ export default function ProductsPage() {
             {/* Search & Stats */}
             <div className="flex items-center justify-between gap-4">
                <div className="relative flex-1 max-w-md">
-                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-500" />
+                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
                  <Input 
                    placeholder="Search products or SKUs..." 
                    className="pl-10 border-zinc-800 bg-zinc-900/30"
@@ -278,7 +279,7 @@ export default function ProductsPage() {
                      ))}
                    </DropdownMenuContent>
                  </DropdownMenu>
-                 <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                 <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                     <div className="flex items-center gap-1.5">
                       <Package className="size-3" />
                       <span>{filteredProducts.length} Products</span>
@@ -297,14 +298,14 @@ export default function ProductsPage() {
                 <Table>
                   <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                     <TableRow className="border-none hover:bg-transparent">
-                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Product Title</TableHead>
-                      {visibility.variants && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Variants</TableHead>}
-                      {visibility.skus && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">SKUs</TableHead>}
-                      {visibility.weightRange && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight Range</TableHead>}
-                      {visibility.priceRange && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Price Range</TableHead>}
-                      {visibility.stock && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>}
-                      {visibility.status && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Status</TableHead>}
-                      <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Actions</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Product Title</TableHead>
+                      {visibility.variants && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Variants</TableHead>}
+                      {visibility.skus && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">SKUs</TableHead>}
+                      {visibility.weightRange && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Weight Range</TableHead>}
+                      {visibility.priceRange && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Price Range</TableHead>}
+                      {visibility.stock && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Stock</TableHead>}
+                      {visibility.status && <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Status</TableHead>}
+                      <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -326,7 +327,7 @@ export default function ProductsPage() {
                         <TableCell colSpan={visibleColumnCount} className="h-60 text-center">
                           <div className="flex flex-col items-center justify-center gap-3">
                             <Package className="size-10 text-zinc-800" />
-                            <p className="text-sm text-zinc-500 italic">No products found matching your search.</p>
+                            <p className="text-sm text-zinc-400 italic">No products found matching your search.</p>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -341,7 +342,7 @@ export default function ProductsPage() {
                             <div className="flex flex-col gap-1">
                                <p className="text-sm font-bold text-zinc-100 tracking-tight">{product.title}</p>
                                {product.description && (
-                                 <p className="text-[10px] text-zinc-500 line-clamp-1">{product.description}</p>
+                                 <p className="text-[10px] text-zinc-400 line-clamp-1">{product.description}</p>
                                )}
                             </div>
                           </TableCell>

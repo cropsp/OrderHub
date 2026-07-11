@@ -31,7 +31,7 @@ export default function DiagnosticBadge({ shopId, diagnostic }: DiagnosticBadgeP
       )}
       {showComputedInfo && (
         <div
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-zinc-500"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] text-zinc-400"
           data-testid="diagnostic-computed-info"
         >
           <Info className="size-3" />

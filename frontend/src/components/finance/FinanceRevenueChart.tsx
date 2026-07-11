@@ -70,7 +70,7 @@ export default function FinanceRevenueChart({ data, granularity }: FinanceRevenu
   return (
     <Card className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-xl overflow-hidden">
       <CardHeader className="pb-2 flex flex-row items-baseline justify-between">
-        <CardTitle className="text-xs font-bold uppercase tracking-wide text-zinc-500">
+        <CardTitle className="text-xs font-bold uppercase tracking-wide text-zinc-400">
           Revenue & Net Profit
         </CardTitle>
         {primary && (
@@ -122,7 +122,7 @@ export default function FinanceRevenueChart({ data, granularity }: FinanceRevenu
                     const npVal = payload.find((p) => p.dataKey === 'net_profit')?.value;
                     return (
                       <div className="bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded-lg p-3 shadow-xl">
-                        <p className="text-[10px] text-zinc-500 uppercase font-bold mb-2">
+                        <p className="text-[10px] text-zinc-400 uppercase font-bold mb-2">
                           {formatTick(String(label), granularity)}
                         </p>
                         <div className="space-y-1">
@@ -178,14 +178,14 @@ export default function FinanceRevenueChart({ data, granularity }: FinanceRevenu
           ) : (
             <div className="flex h-full w-full flex-col items-center justify-center space-y-2 opacity-50">
               <DollarSign className="size-8 text-zinc-700" />
-              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                 No revenue data
               </p>
             </div>
           )}
         </div>
         {otherCurrencies.length > 0 && (
-          <p className="mt-2 text-[10px] text-zinc-500 italic">
+          <p className="mt-2 text-[10px] text-zinc-400 italic">
             Showing {primary} only — {otherCurrencies.join(', ')} shown in KPI cards.
           </p>
         )}

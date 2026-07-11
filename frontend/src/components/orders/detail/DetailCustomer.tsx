@@ -23,13 +23,13 @@ export function DetailCustomer({ order }: DetailCustomerProps) {
         </div>
         <div className="flex flex-col min-w-0">
           <p className="text-sm font-semibold text-zinc-100 truncate leading-none">{order.customer_name}</p>
-          <p className="text-[11px] font-medium text-zinc-500 mt-1.5 uppercase tracking-tighter">ID: {order.external_id || 'N/A'}</p>
+          <p className="text-[11px] font-medium text-zinc-400 mt-1.5 uppercase tracking-tighter">ID: {order.external_id || 'N/A'}</p>
         </div>
       </div>
 
       <div className="space-y-4 border-t border-zinc-800/50 pt-4 px-0.5">
         <div className="flex items-center justify-between group">
-          <span className="text-[11px] font-medium text-zinc-500">Email</span>
+          <span className="text-[11px] font-medium text-zinc-400">Email</span>
           {order.customer?.email ? (
             <span className="text-sm text-zinc-300 font-medium truncate max-w-[150px] text-right">{order.customer.email}</span>
           ) : (
@@ -40,7 +40,7 @@ export function DetailCustomer({ order }: DetailCustomerProps) {
         </div>
         
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-zinc-500">Country</span>
+          <span className="text-[11px] font-medium text-zinc-400">Country</span>
           <span className="text-sm text-zinc-300 font-semibold">{order.shipping_country || 'N/A'}</span>
         </div>
       </div>
@@ -48,7 +48,7 @@ export function DetailCustomer({ order }: DetailCustomerProps) {
       {order.customer_note && (
         <div className="mt-4 pt-4 border-t border-zinc-800/50">
           <blockquote className="relative pl-3 border-l-2 border-teal-500/30 py-0.5">
-            <p className="text-[11px] text-zinc-500 italic leading-snug">
+            <p className="text-[11px] text-zinc-400 italic leading-snug">
               "{order.customer_note}"
             </p>
           </blockquote>

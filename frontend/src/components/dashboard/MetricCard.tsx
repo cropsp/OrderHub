@@ -32,7 +32,7 @@ export function MetricCard({
     )}>
       <div className="flex items-center gap-2">
         <Icon className={cn("size-4", accentColor)} />
-        <span className="text-zinc-500 text-xs font-bold uppercase tracking-wide">{label}</span>
+        <span className="text-zinc-400 text-xs font-bold uppercase tracking-wide">{label}</span>
       </div>
       
       <div className="text-3xl font-bold text-zinc-100 tracking-tight">
@@ -44,7 +44,7 @@ export function MetricCard({
           "flex items-center gap-1.5 text-xs font-medium",
           isPositive && "text-green-400",
           isNegative && "text-red-400",
-          isNeutral && "text-zinc-500"
+          isNeutral && "text-zinc-400"
         )}>
           <span>
             {isPositive && "↑"}
@@ -52,7 +52,7 @@ export function MetricCard({
             {isNeutral && "→"}
           </span>
           <span>{Math.abs(trend.value)}%</span>
-          <span className="text-zinc-500 font-normal">{trend.label}</span>
+          <span className="text-zinc-400 font-normal">{trend.label}</span>
         </div>
       )}
     </div>

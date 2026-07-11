@@ -108,7 +108,7 @@ export default function PartnerPayoutsSection({
           <h2 className="text-base font-bold tracking-tight text-zinc-100">
             Partner Payouts
           </h2>
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-zinc-400">
             Settlements log, payments ledger, and per-partner balances.
           </p>
         </div>
@@ -148,7 +148,7 @@ export default function PartnerPayoutsSection({
           )}
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Settlements
             </p>
             <PartnerSettlementsTable
@@ -159,7 +159,7 @@ export default function PartnerPayoutsSection({
           </div>
 
           <div className="space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Payments
             </p>
             <PartnerPaymentsTable

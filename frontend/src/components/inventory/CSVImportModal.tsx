@@ -119,10 +119,10 @@ export default function CSVImportModal({
                 onChange={handleFileSelect}
               />
               <div className="size-16 rounded-2xl bg-zinc-900 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                {isLoading ? <Loader2 className="size-8 text-teal-400 animate-spin" /> : <Upload className="size-8 text-zinc-500 group-hover:text-teal-400" />}
+                {isLoading ? <Loader2 className="size-8 text-teal-400 animate-spin" /> : <Upload className="size-8 text-zinc-400 group-hover:text-teal-400" />}
               </div>
               <p className="text-sm font-medium text-zinc-300">Click to upload or drag & drop</p>
-              <p className="text-xs text-zinc-500 mt-2">Required columns: {templateColumns.join(', ')}</p>
+              <p className="text-xs text-zinc-400 mt-2">Required columns: {templateColumns.join(', ')}</p>
             </div>
           ) : (
             <div className="space-y-6">
@@ -139,9 +139,9 @@ export default function CSVImportModal({
                   "p-4 rounded-xl border flex items-center gap-3",
                   previewData.invalid_count > 0 ? "border-red-500/20 bg-red-500/5" : "border-zinc-800 bg-zinc-900/20"
                 )}>
-                  <AlertCircle className={cn("size-5", previewData.invalid_count > 0 ? "text-red-400" : "text-zinc-500")} />
+                  <AlertCircle className={cn("size-5", previewData.invalid_count > 0 ? "text-red-400" : "text-zinc-400")} />
                   <div>
-                    <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Errors found</p>
+                    <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Errors found</p>
                     <p className={cn("text-xl font-bold", previewData.invalid_count > 0 ? "text-red-400" : "text-zinc-400")}>
                       {previewData.invalid_count}
                     </p>
@@ -152,13 +152,13 @@ export default function CSVImportModal({
               {/* Preview Table */}
               <div className="rounded-xl border border-zinc-800 overflow-hidden">
                 <div className="bg-zinc-900/50 px-4 py-2 border-b border-zinc-800">
-                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Sample (First 5 Rows)</span>
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Sample (First 5 Rows)</span>
                 </div>
                 <Table>
                   <TableHeader className="bg-white/[0.01]">
                     <TableRow className="border-zinc-800 hover:bg-transparent">
                       {Object.keys(previewData.preview[0] || {}).filter(k => k !== 'variants' && k !== 'id' && k !== 'created_at' && k !== 'updated_at').map(key => (
-                        <TableHead key={key} className="text-[10px] font-bold uppercase text-zinc-500 py-3">{key}</TableHead>
+                        <TableHead key={key} className="text-[10px] font-bold uppercase text-zinc-400 py-3">{key}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>

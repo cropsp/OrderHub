@@ -92,7 +92,7 @@ export default function OverheadMaterialFormModal({
 
           <div className="p-8 space-y-6">
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+              <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <Package className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Name</p>
               </div>
@@ -106,7 +106,7 @@ export default function OverheadMaterialFormModal({
             </div>
 
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Unit</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Unit</p>
               <Input
                 className="border-zinc-800 bg-zinc-900/50"
                 placeholder="e.g. spool, liter, pack, kg"
@@ -122,7 +122,7 @@ export default function OverheadMaterialFormModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500 mb-1">
+              <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <FileText className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Notes (optional)</p>
               </div>

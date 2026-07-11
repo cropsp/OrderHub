@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { format } from 'date-fns';
+import { formatDateTime, formatMoney } from '@/lib/format';
 import { AlertTriangle, Clock, PackagePlus, Receipt, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -167,13 +167,7 @@ export default function DashboardPage() {
                     </p>
                     <p className="text-xs text-zinc-400 mt-1">
                       {data.unallocated_overhead
-                        .map(
-                          (a) =>
-                            `${a.amount.toLocaleString('en-US', {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })} ${a.currency}`,
-                        )
+                        .map((a) => `${formatMoney(a.amount)} ${a.currency}`)
                         .join(' · ')}{' '}
                       — workshop-wide spend not tied to any shop.
                     </p>
@@ -206,7 +200,7 @@ export default function DashboardPage() {
                     <div className="size-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
                        <AlertTriangle className="h-4 w-4 text-amber-500" />
                     </div>
-                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
                       Priority triage
                     </h3>
                   </div>
@@ -247,10 +241,10 @@ export default function DashboardPage() {
                                </p>
                             </div>
                             <div className="flex items-center gap-2 mt-1.5">
-                               <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">{order.shop_name}</p>
+                               <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{order.shop_name}</p>
                                <span className="text-zinc-800 font-black">•</span>
                                <p className="text-[10px] font-bold text-zinc-600">
-                                 Stalled {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
+                                 Stalled {formatDateTime(order.ordered_at)}
                                </p>
                             </div>
                           </div>
@@ -269,7 +263,7 @@ export default function DashboardPage() {
                     <div className="size-8 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center">
                        <TrendingUp className="h-4 w-4 text-teal-500" />
                     </div>
-                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-500">
+                    <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">
                       Telemetry feed
                     </h3>
                   </div>
@@ -310,7 +304,7 @@ export default function DashboardPage() {
                                     {order.shop_name}
                                  </div>
                                  <span className="text-zinc-600 text-[10px] font-bold">
-                                   {format(new Date(order.ordered_at), 'MMM dd, HH:mm')}
+                                   {formatDateTime(order.ordered_at)}
                                  </span>
                               </div>
                             </div>
@@ -321,7 +315,7 @@ export default function DashboardPage() {
                     </div>
                     
                     <Link 
-                      className="mt-6 flex items-center justify-center py-4 bg-zinc-950/50 hover:bg-zinc-950 border border-zinc-800/40 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 hover:text-zinc-100 transition-all shadow-sm hover:shadow-xl" 
+                      className="mt-6 flex items-center justify-center py-4 bg-zinc-950/50 hover:bg-zinc-950 border border-zinc-800/40 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 hover:text-zinc-100 transition-all shadow-sm hover:shadow-xl" 
                       to="/orders"
                     >
                       Access historical logs

@@ -86,12 +86,12 @@ export default function PackagingPage() {
             <Table>
               <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                 <TableRow className="border-none hover:bg-transparent">
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Name & Type</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Dimensions (LxWxH)</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Weight Limits</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Stock</TableHead>
-                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 py-5">Sort Order</TableHead>
-                  <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Actions</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Name & Type</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Dimensions (LxWxH)</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Weight Limits</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Stock</TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">Sort Order</TableHead>
+                  <TableHead className="text-right text-[10px] font-bold uppercase tracking-widest text-zinc-400 px-8 py-5">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -111,7 +111,7 @@ export default function PackagingPage() {
                     <TableCell colSpan={6} className="h-60 text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <Box className="size-10 text-zinc-800" />
-                        <p className="text-sm text-zinc-500 italic">No packaging types registered yet.</p>
+                        <p className="text-sm text-zinc-400 italic">No packaging types registered yet.</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -128,7 +128,7 @@ export default function PackagingPage() {
                           </div>
                           <div className="flex flex-col">
                              <p className="text-sm font-bold text-zinc-100 tracking-tight">{item.name}</p>
-                             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{item.packaging_type}</span>
+                             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">{item.packaging_type}</span>
                           </div>
                         </div>
                       </TableCell>
@@ -150,7 +150,7 @@ export default function PackagingPage() {
                       <TableCell>
                         <div className="flex flex-col gap-1">
                            <div className="flex items-center gap-1.5 text-xs text-zinc-300">
-                             <Scale className="size-3 text-zinc-500" />
+                             <Scale className="size-3 text-zinc-400" />
                              <span>Max: {item.max_weight_g}g</span>
                            </div>
                            <p className="text-[10px] text-zinc-600">Tare: {item.tare_weight_g}g</p>
@@ -175,7 +175,7 @@ export default function PackagingPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="text-xs font-mono text-zinc-500">#{item.sort_order}</span>
+                        <span className="text-xs font-mono text-zinc-400">#{item.sort_order}</span>
                       </TableCell>
                       <TableCell className="px-8 py-6 text-right">
                         <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

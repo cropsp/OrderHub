@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { OrderDetail } from '@/types/order';
 
@@ -32,11 +32,11 @@ export function DetailTimeline({ order }: DetailTimelineProps) {
                   )}>
                     {entry.to_status.replace(/_/g, ' ')}
                   </span>
-                  <span className="text-[11px] font-medium text-zinc-500">
-                    {format(new Date(entry.changed_at), 'MMM dd, HH:mm')}
+                  <span className="text-[11px] font-medium text-zinc-400">
+                    {formatDateTime(entry.changed_at)}
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-500 mt-0.5">
+                <p className="text-[11px] text-zinc-400 mt-0.5">
                   {entry.changed_by_name || 'System'}
                 </p>
               </div>
@@ -51,7 +51,7 @@ export function DetailTimeline({ order }: DetailTimelineProps) {
             </div>
           ))
         ) : (
-          <p className="text-sm text-zinc-500 italic px-4 text-center">No history recorded</p>
+          <p className="text-sm text-zinc-400 italic px-4 text-center">No history recorded</p>
         )}
       </div>
     </div>

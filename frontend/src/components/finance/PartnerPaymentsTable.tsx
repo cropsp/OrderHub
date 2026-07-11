@@ -23,13 +23,13 @@ export default function PartnerPaymentsTable({
 }: PartnerPaymentsTableProps) {
   if (items.length === 0) {
     return (
-      <p className="text-xs text-zinc-500">No payments recorded yet.</p>
+      <p className="text-xs text-zinc-400">No payments recorded yet.</p>
     )
   }
   return (
     <div className="overflow-x-auto rounded-2xl border border-zinc-800">
       <table className="w-full text-sm">
-        <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-widest text-zinc-500">
+        <thead className="bg-zinc-900/60 text-[10px] uppercase tracking-widest text-zinc-400">
           <tr>
             <th className="px-3 py-2 text-left">Paid at</th>
             <th className="px-3 py-2 text-left">Partner</th>

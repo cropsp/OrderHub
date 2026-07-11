@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Loader2, 
@@ -42,6 +42,8 @@ export default function CreateOrderView() {
     updateItem,
     totalPrice,
     error,
+    fieldErrors,
+    clearFieldError,
     isSubmitting,
     handleSubmit
   } = useOrderForm(() => navigate('/orders'));
@@ -50,6 +52,25 @@ export default function CreateOrderView() {
   const [warehouseQuery, setWarehouseQuery] = useState('');
   const [isWarehouseOpen, setIsWarehouseOpen] = useState(false);
   const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
+
+  // C-1: on a failed submit, scroll the first offending field into view and
+  // focus its control so desktop users see feedback where they clicked.
+  const shopFieldRef = useRef<HTMLDivElement>(null);
+  const emailFieldRef = useRef<HTMLDivElement>(null);
+  const itemsFieldRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const firstErrorRef =
+      (fieldErrors.shop_id && shopFieldRef) ||
+      (fieldErrors.email && emailFieldRef) ||
+      (fieldErrors.items && itemsFieldRef) ||
+      null;
+    if (!firstErrorRef?.current) return;
+    firstErrorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    firstErrorRef.current
+      .querySelector<HTMLElement>('input, button, [tabindex]')
+      ?.focus({ preventScroll: true });
+  }, [fieldErrors]);
 
   const { data: cities, isLoading: isCitiesLoading } = useSearchCities(cityQuery);
   const { data: warehouses, isLoading: isWarehousesLoading } = useGetWarehouses(orderData.shipping_city_ref);
@@ -121,7 +142,7 @@ export default function CreateOrderView() {
               variant="ghost" 
               size="icon" 
               onClick={() => navigate('/orders')}
-              className="h-8 w-8 text-zinc-500 hover:text-zinc-100 transition-colors"
+              className="h-8 w-8 text-zinc-400 hover:text-zinc-100 transition-colors"
             >
               <ChevronLeft size={20} />
             </Button>
@@ -129,7 +150,7 @@ export default function CreateOrderView() {
               <h1 className="text-xl font-bold text-zinc-100 tracking-tight leading-none">
                 Create Manual Order
               </h1>
-              <p className="text-xs text-zinc-500 mt-1">Manual entry for custom sales and marketplaces</p>
+              <p className="text-xs text-zinc-400 mt-1">Manual entry for custom sales and marketplaces</p>
             </div>
           </div>
         </div>
@@ -145,18 +166,27 @@ export default function CreateOrderView() {
             {/* ORIGIN & IDENTITY */}
             <Card className="bg-zinc-900/80 border-zinc-800 shadow-sm rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-zinc-800/50 bg-zinc-900/20 flex items-center gap-2">
-                <Globe className="size-4 text-zinc-500" />
+                <Globe className="size-4 text-zinc-400" />
                 <h3 className="text-sm font-semibold text-zinc-100">Origin & Identity</h3>
               </div>
               <CardContent className="p-6 space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Target Shop</label>
+                  <div className="space-y-2" ref={shopFieldRef}>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Target Shop</label>
                     <Select
                       value={orderData.shop_id}
-                      onValueChange={(val) => setOrderData(p => ({ ...p, shop_id: val }))}
+                      onValueChange={(val) => {
+                        setOrderData(p => ({ ...p, shop_id: val }));
+                        clearFieldError('shop_id');
+                      }}
                     >
-                      <SelectTrigger className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20">
+                      <SelectTrigger
+                        aria-invalid={!!fieldErrors.shop_id}
+                        className={cn(
+                          "border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20",
+                          fieldErrors.shop_id && "border-red-500/60"
+                        )}
+                      >
                         <SelectValue placeholder="Select destination store" />
                       </SelectTrigger>
                       <SelectContent className="bg-zinc-950 border-zinc-800 text-zinc-100">
@@ -165,9 +195,12 @@ export default function CreateOrderView() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {fieldErrors.shop_id && (
+                      <p className="text-xs text-red-400 px-1">{fieldErrors.shop_id}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Order # (External ID)</label>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Order # (External ID)</label>
                     <Input 
                       className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                       placeholder="e.g. WH-2024-001"
@@ -179,7 +212,7 @@ export default function CreateOrderView() {
                 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   <div className="sm:col-span-2 space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Brief Description / Title</label>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Brief Description / Title</label>
                     <Input 
                       className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                       placeholder="Custom leather wallet order"
@@ -188,7 +221,7 @@ export default function CreateOrderView() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Currency</label>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Currency</label>
                     <Select
                       value={orderData.currency}
                       onValueChange={(val) => setOrderData(p => ({ ...p, currency: val }))}
@@ -210,25 +243,35 @@ export default function CreateOrderView() {
             {/* CUSTOMER INFORMATION */}
             <Card className="bg-zinc-900/80 border-zinc-800 shadow-sm rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-zinc-800/50 bg-zinc-900/20 flex items-center gap-2">
-                <User className="size-4 text-zinc-500" />
+                <User className="size-4 text-zinc-400" />
                 <h3 className="text-sm font-semibold text-zinc-100">Customer Information</h3>
               </div>
               <CardContent className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-medium text-zinc-500 px-1">Contact Email</label>
+                <div className="space-y-2" ref={emailFieldRef}>
+                  <label className="text-[11px] font-medium text-zinc-400 px-1">Contact Email</label>
                   <div className="relative">
-                    <Input 
-                      className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
+                    <Input
+                      aria-invalid={!!fieldErrors.email}
+                      className={cn(
+                        "border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20",
+                        fieldErrors.email && "border-red-500/60"
+                      )}
                       placeholder="customer@example.com"
                       value={orderData.email}
-                      onChange={e => setOrderData(p => ({ ...p, email: e.target.value }))}
+                      onChange={e => {
+                        setOrderData(p => ({ ...p, email: e.target.value }));
+                        clearFieldError('email');
+                      }}
                       onBlur={handleEmailBlur}
                     />
                     {isSearchingCustomer && <Loader2 className="absolute right-3 top-2.5 size-4 animate-spin text-teal-500" />}
                   </div>
+                  {fieldErrors.email && (
+                    <p className="text-xs text-red-400 px-1">{fieldErrors.email}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[11px] font-medium text-zinc-500 px-1">Full Name</label>
+                  <label className="text-[11px] font-medium text-zinc-400 px-1">Full Name</label>
                   <Input 
                     className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                     placeholder="Serhii Kovalenko"
@@ -242,13 +285,13 @@ export default function CreateOrderView() {
             {/* SHIPPING ADDRESS */}
             <Card className="bg-zinc-900/80 border-zinc-800 shadow-sm rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-zinc-800/50 bg-zinc-900/20 flex items-center gap-2">
-                <Globe className="size-4 text-zinc-500" />
+                <Globe className="size-4 text-zinc-400" />
                 <h3 className="text-sm font-semibold text-zinc-100">Shipping Address</h3>
               </div>
               <CardContent className="p-6 space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Recipient Name</label>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Recipient Name</label>
                     <Input 
                       className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                       placeholder="Same as customer if empty"
@@ -257,7 +300,7 @@ export default function CreateOrderView() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Recipient Phone</label>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Recipient Phone</label>
                     <Input 
                       className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                       placeholder="+380..."
@@ -270,7 +313,7 @@ export default function CreateOrderView() {
                 {orderData.shipping_country === 'UA' ? (
                   <div className="space-y-4 p-4 rounded-xl bg-zinc-950 border border-zinc-800">
                     <div className="space-y-2">
-                      <label className="text-[11px] font-medium text-zinc-500 px-1 uppercase tracking-wider">Nova Poshta City</label>
+                      <label className="text-[11px] font-medium text-zinc-400 px-1 uppercase tracking-wider">Nova Poshta City</label>
                       <div className="relative">
                         <Input 
                           className="border-zinc-800 bg-zinc-900 pl-9 focus:ring-teal-500/20"
@@ -298,7 +341,7 @@ export default function CreateOrderView() {
 
                     {orderData.shipping_city_ref && (
                       <div className="space-y-2 relative">
-                        <label className="text-[11px] font-medium text-zinc-500 px-1 uppercase tracking-wider">Warehouse / Branch</label>
+                        <label className="text-[11px] font-medium text-zinc-400 px-1 uppercase tracking-wider">Warehouse / Branch</label>
                         <div className="relative">
                           <Input 
                             className="border-zinc-800 bg-zinc-900 pl-9 focus:ring-teal-500/20 pr-10"
@@ -314,7 +357,7 @@ export default function CreateOrderView() {
                           <Search className="absolute left-3 top-2.5 size-4 text-zinc-600" />
                           {warehouseQuery && (
                             <button 
-                              className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-300"
+                              className="absolute right-3 top-2.5 text-zinc-400 hover:text-zinc-300"
                               onClick={() => {
                                 setWarehouseQuery('');
                                 setOrderData(p => ({ ...p, shipping_warehouse_ref: '', shipping_street_1: '' }));
@@ -344,7 +387,7 @@ export default function CreateOrderView() {
                                   </div>
                                 ))
                               ) : (
-                                <div className="p-4 text-sm text-zinc-500 text-center">No branches found</div>
+                                <div className="p-4 text-sm text-zinc-400 text-center">No branches found</div>
                               )}
                             </ScrollArea>
                           </div>
@@ -356,7 +399,7 @@ export default function CreateOrderView() {
                   <>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                       <div className="sm:col-span-2 space-y-2">
-                        <label className="text-[11px] font-medium text-zinc-500 px-1">Street Address</label>
+                        <label className="text-[11px] font-medium text-zinc-400 px-1">Street Address</label>
                         <Input 
                           className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                           placeholder="Main St. 123"
@@ -365,7 +408,7 @@ export default function CreateOrderView() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[11px] font-medium text-zinc-500 px-1">City</label>
+                        <label className="text-[11px] font-medium text-zinc-400 px-1">City</label>
                         <Input 
                           className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                           placeholder="Kyiv"
@@ -377,7 +420,7 @@ export default function CreateOrderView() {
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                       <div className="space-y-2">
-                        <label className="text-[11px] font-medium text-zinc-500 px-1">State / Province</label>
+                        <label className="text-[11px] font-medium text-zinc-400 px-1">State / Province</label>
                         <Input 
                           className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                           placeholder="Kyiv Oblast"
@@ -386,7 +429,7 @@ export default function CreateOrderView() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[11px] font-medium text-zinc-500 px-1">ZIP / Postal Code</label>
+                        <label className="text-[11px] font-medium text-zinc-400 px-1">ZIP / Postal Code</label>
                         <Input 
                           className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20"
                           placeholder="01001"
@@ -400,7 +443,7 @@ export default function CreateOrderView() {
                 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[11px] font-medium text-zinc-500 px-1">Country (ISO 2)</label>
+                    <label className="text-[11px] font-medium text-zinc-400 px-1">Country (ISO 2)</label>
                     <Input 
                       className="border-zinc-800 bg-zinc-950 rounded-xl text-zinc-100 focus:ring-teal-500/20 uppercase"
                       placeholder="UA"
@@ -414,13 +457,19 @@ export default function CreateOrderView() {
             </Card>
 
             {/* ORDER ITEMS */}
-            <div className="bg-zinc-900/80 border border-zinc-800 shadow-sm rounded-xl overflow-hidden">
+            <div
+              ref={itemsFieldRef}
+              className={cn(
+                "bg-zinc-900/80 border shadow-sm rounded-xl overflow-hidden",
+                fieldErrors.items ? "border-red-500/60" : "border-zinc-800"
+              )}
+            >
                <div className="px-5 py-4 border-b border-zinc-800/50 bg-zinc-900/20 flex items-center gap-2">
-                  <ShoppingCart className="size-4 text-zinc-500" />
+                  <ShoppingCart className="size-4 text-zinc-400" />
                   <h3 className="text-sm font-semibold text-zinc-100">Order Composition</h3>
                </div>
                <div className="p-6">
-                  <OrderItemsEditor 
+                  <OrderItemsEditor
                     items={items}
                     currency={orderData.currency}
                     onAddItem={addItem}
@@ -428,6 +477,9 @@ export default function CreateOrderView() {
                     onUpdateItem={updateItem}
                     shopId={orderData.shop_id}
                   />
+                  {fieldErrors.items && (
+                    <p className="text-xs text-red-400 px-1 mt-3">{fieldErrors.items}</p>
+                  )}
                </div>
             </div>
 
@@ -449,7 +501,7 @@ export default function CreateOrderView() {
                </div>
                <CardContent className="p-6 space-y-6">
                   <div className="flex flex-col items-center py-4 bg-zinc-950/40 rounded-2xl border border-zinc-800/50">
-                    <p className="text-[11px] font-medium text-zinc-500 uppercase tracking-widest mb-1">Total Revenue</p>
+                    <p className="text-[11px] font-medium text-zinc-400 uppercase tracking-widest mb-1">Total Revenue</p>
                     <div className="flex items-baseline gap-2">
                       <span className="text-4xl font-black text-zinc-100 tracking-tighter">
                         {totalPrice.toFixed(2)}
@@ -459,6 +511,12 @@ export default function CreateOrderView() {
                   </div>
 
                   <div className="space-y-3">
+                    {Object.keys(fieldErrors).length > 0 && (
+                      <div className="flex items-center gap-2 text-xs text-red-400 px-1">
+                        <AlertCircle className="size-4 shrink-0" />
+                        Please fix the highlighted fields.
+                      </div>
+                    )}
                     <Button
                       type="submit"
                       disabled={isSubmitting}
@@ -471,7 +529,7 @@ export default function CreateOrderView() {
                       type="button"
                       variant="ghost"
                       onClick={() => navigate('/orders')}
-                      className="w-full text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/50 h-11 rounded-xl transition-all"
+                      className="w-full text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50 h-11 rounded-xl transition-all"
                     >
                       Discard changes
                     </Button>

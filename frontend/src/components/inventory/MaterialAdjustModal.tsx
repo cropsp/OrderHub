@@ -103,7 +103,7 @@ export default function MaterialAdjustModal({
 
           <div className="p-8 space-y-6">
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Adjust by ({unit})
               </p>
               <Input
@@ -118,7 +118,7 @@ export default function MaterialAdjustModal({
             </div>
 
             <div className="space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
                 Reason
               </p>
               <Select
@@ -138,7 +138,7 @@ export default function MaterialAdjustModal({
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <FileText className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">
                   Notes (optional)

@@ -197,7 +197,7 @@ export default function Sidebar({ user, shops = [], compact = false }: SidebarPr
           {allowedItems.map((item) => (
             <div key={item.key}>
               {item.groupLabel ? (
-                <p className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-500">
+                <p className="px-3 pt-4 pb-1 text-[10px] font-bold uppercase tracking-[0.1em] text-zinc-400">
                   {item.groupLabel}
                 </p>
               ) : null}
@@ -210,7 +210,7 @@ export default function Sidebar({ user, shops = [], compact = false }: SidebarPr
           <div className="space-y-1">
             <div className="px-5 py-2">
                <div className="h-px bg-zinc-800 mb-4" />
-               <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.1em]">SHOPS</p>
+               <p className="text-zinc-400 text-[10px] font-bold uppercase tracking-[0.1em]">SHOPS</p>
             </div>
             <div className="flex flex-col">
               {shops.map((shop) => {
@@ -240,7 +240,7 @@ export default function Sidebar({ user, shops = [], compact = false }: SidebarPr
 
       <div className="mt-auto border-t border-zinc-800 px-5 py-4">
         <p className="text-sm font-medium text-zinc-100">{user?.full_name ?? 'Guest user'}</p>
-        <p className="text-[10px] text-zinc-500 uppercase tracking-wide font-medium">{roleLabel(role)}</p>
+        <p className="text-[10px] text-zinc-400 uppercase tracking-wide font-medium">{roleLabel(role)}</p>
       </div>
     </aside>
   )

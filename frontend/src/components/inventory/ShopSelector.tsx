@@ -36,7 +36,7 @@ export default function ShopSelector({
 
   return (
     <div className={cn("flex items-center gap-3", className)}>
-      <div className="flex items-center gap-2 text-zinc-500 whitespace-nowrap">
+      <div className="flex items-center gap-2 text-zinc-400 whitespace-nowrap">
         <Store className="size-4" />
         <span className="text-xs font-bold uppercase tracking-wider">Active Shop:</span>
       </div>
@@ -60,7 +60,7 @@ export default function ShopSelector({
             </SelectItem>
           ))}
           {filteredShops.length === 0 && !isLoading && (
-            <div className="p-2 text-xs text-zinc-500 text-center">
+            <div className="p-2 text-xs text-zinc-400 text-center">
               {emptyText}
             </div>
           )}

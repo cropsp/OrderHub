@@ -87,7 +87,7 @@ export function ProductVariantSelector({
           }}
           onFocus={() => setIsOpen(true)}
         />
-        <div className="absolute right-3 top-2.5 text-zinc-500">
+        <div className="absolute right-3 top-2.5 text-zinc-400">
           {loading ? (
             <Loader2 className="size-4 animate-spin text-teal-500" />
           ) : (
@@ -99,7 +99,7 @@ export function ProductVariantSelector({
       {isOpen && (value.length > 0 || loading) && (
         <div className="absolute z-50 mt-1 w-full max-h-60 overflow-auto rounded-xl border border-zinc-800 bg-zinc-950/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
           {loading ? (
-            <div className="flex items-center justify-center py-6 text-xs text-zinc-500">
+            <div className="flex items-center justify-center py-6 text-xs text-zinc-400">
                <Loader2 className="mr-2 size-3 animate-spin" />
                Searching Catalog...
             </div>
@@ -132,7 +132,7 @@ export function ProductVariantSelector({
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
                        {v.variant_name && (
-                         <span className="text-[10px] text-zinc-500 group-hover:text-zinc-400">
+                         <span className="text-[10px] text-zinc-400 group-hover:text-zinc-400">
                            {v.variant_name}
                          </span>
                        )}
