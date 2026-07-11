@@ -496,7 +496,7 @@ export default function ShopsPage() {
         ) : (
           <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md shadow-2xl overflow-hidden rounded-2xl">
             <CardContent className="p-0">
-              <Table>
+              <Table className="min-w-[720px]">
                 <TableHeader className="bg-white/[0.02] border-b border-white/[0.03]">
                   <TableRow className="border-none hover:bg-transparent">
                     <TableHead className="w-[300px] text-[10px] font-bold uppercase tracking-widest text-zinc-500 px-8 py-5">Store Identity</TableHead>

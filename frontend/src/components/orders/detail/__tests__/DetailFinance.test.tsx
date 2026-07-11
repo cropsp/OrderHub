@@ -55,16 +55,17 @@ function makeOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
 
 describe('DetailFinance — MAT-4 cost display', () => {
   it('renders manual production cost when only production_cost is set', () => {
+    // total_price 1000 − cost 300 = net profit 700, so 300.00 is unambiguous.
     render(
       <DetailFinance
         order={makeOrder({
-          production_cost: 500,
+          production_cost: 300,
           computed_production_cost: null,
         })}
       />,
     )
     expect(screen.getByText('Production cost')).toBeInTheDocument()
-    expect(screen.getByText('500.00')).toBeInTheDocument()
+    expect(screen.getByText('300.00')).toBeInTheDocument()
     expect(screen.queryByText('Computed cost (from BOM)')).toBeNull()
     expect(screen.queryByTestId('variance-badge')).toBeNull()
   })

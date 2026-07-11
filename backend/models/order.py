@@ -182,7 +182,7 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "OrderStatusHistory",
         back_populates="order",
         cascade="all, delete-orphan",
-        order_by="OrderStatusHistory.changed_at",
+        order_by="OrderStatusHistory.changed_at, OrderStatusHistory.id",
         lazy="selectin",
     )
     attachments = relationship(

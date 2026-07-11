@@ -14,14 +14,26 @@ function formatMoney(value: number): string {
 }
 
 export function DetailFinance({ order }: DetailFinanceProps) {
-  // Margin calculation helper
-  const revenue = order.total_price || 0;
-  // Fallback to total price if net_profit isn't directly available or calculate it
-  const netProfit = order.total_price; // Simplification for now, adjust based on real data
-  const marginPercent = revenue > 0 ? Math.round((netProfit / revenue) * 100) : 0;
+  const orderTotal = order.total_price || 0;
+  // Single canonical subtotal — sum of line items, matching DetailItems.
+  const itemsSubtotal = (order.items ?? []).reduce(
+    (acc, it) => acc + it.quantity * it.unit_price,
+    0,
+  );
+  // Shipping/other = the gap between what the customer paid and the line items.
+  const shippingOther = orderTotal - itemsSubtotal;
 
   const manualCost = order.production_cost;
   const computedCost = order.computed_production_cost;
+
+  // Net profit / margin are only honest when we actually know a cost.
+  // computed (BOM-driven) takes precedence over the manual figure.
+  const effectiveCost = computedCost ?? manualCost ?? null;
+  const netProfit = effectiveCost != null ? orderTotal - effectiveCost : null;
+  const marginPercent =
+    netProfit != null && orderTotal > 0
+      ? Math.round((netProfit / orderTotal) * 100)
+      : null;
 
   const variance =
     manualCost != null && computedCost != null && manualCost !== 0
@@ -42,15 +54,28 @@ export function DetailFinance({ order }: DetailFinanceProps) {
 
       <div className="space-y-3 px-1">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-zinc-500">Subtotal</span>
+          <span className="text-[11px] font-medium text-zinc-500">Items subtotal</span>
           <span className="text-sm font-medium text-zinc-300">
-            {revenue.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+            {itemsSubtotal.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
           </span>
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-zinc-500">Shipping</span>
-          <span className="text-sm text-zinc-500 italic">No fee</span>
+          <span className="text-[11px] font-medium text-zinc-500">Shipping / other</span>
+          {shippingOther === 0 ? (
+            <span className="text-sm text-zinc-500 italic">No fee</span>
+          ) : (
+            <span className="text-sm font-medium text-zinc-300">
+              {shippingOther.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-zinc-400">Order total</span>
+          <span className="text-sm font-semibold text-zinc-200">
+            {orderTotal.toFixed(2)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+          </span>
         </div>
 
         {manualCost != null && (
@@ -107,12 +132,22 @@ export function DetailFinance({ order }: DetailFinanceProps) {
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold text-zinc-400">Net Profit</span>
           <div className="flex items-center gap-2">
-            <span className="text-base text-emerald-500 font-semibold">
-              {netProfit.toFixed(2)}
-            </span>
-            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-              {marginPercent}%
-            </span>
+            {netProfit != null ? (
+              <>
+                <span className="text-base text-emerald-500 font-semibold">
+                  {netProfit.toFixed(2)}
+                </span>
+                {marginPercent != null && (
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                    {marginPercent}%
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-base text-zinc-600 font-semibold" title="No production cost recorded">
+                —
+              </span>
+            )}
           </div>
         </div>
       </div>

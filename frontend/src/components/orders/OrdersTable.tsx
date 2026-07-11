@@ -53,7 +53,7 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
-      <Table>
+      <Table className="min-w-[760px]">
         <TableHeader className="bg-zinc-900 sticky top-0 z-10">
           <TableRow className="border-zinc-800 hover:bg-transparent">
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 py-4">Order</TableHead>

@@ -1,7 +1,6 @@
-import { 
-  Layers, 
-  AlertTriangle, 
-  CheckCircle,
+import {
+  Layers,
+  AlertTriangle,
   DollarSign
 } from 'lucide-react';
 import { MetricCard } from './MetricCard';
@@ -20,34 +19,24 @@ export default function StatCards({ data }: StatCardsProps) {
     : '0 USD';
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-      <MetricCard 
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <MetricCard
         label="Net Profit"
         value={profitDisplay}
         icon={DollarSign}
         accentColor="text-emerald-400"
-        trend={{ value: 12, label: "vs last week" }}
       />
-      <MetricCard 
+      <MetricCard
         label="Active Orders"
         value={stats.total_orders}
         icon={Layers}
         accentColor="text-blue-400"
-        trend={{ value: 5, label: "vs last week" }}
       />
-      <MetricCard 
+      <MetricCard
         label="Attention Needed"
         value={stats.attention_needed_count}
         icon={AlertTriangle}
         accentColor="text-amber-400"
-        trend={{ value: -2, label: "vs last week" }}
-      />
-      <MetricCard 
-        label="Success Rate"
-        value="98.5%"
-        icon={CheckCircle}
-        accentColor="text-teal-400"
-        trend={{ value: 0, label: "vs last week" }}
       />
     </div>
   );

@@ -38,6 +38,9 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
   const [isUploading, setIsUploading] = useState(false);
   const { addToast } = useToastStore();
   const [draftPhotoId, setDraftPhotoId] = useState<string | null>(null);
+  // Attachment type applied to the next upload. REFERENCE classifies a customer
+  // photo (gates Generate Draft); MOCKUP is a production/design file.
+  const [uploadType, setUploadType] = useState<'mockup' | 'reference'>('mockup');
 
   // Generate Draft is gated on having ≥1 REFERENCE-typed attachment
   // (master rule 12). First REFERENCE wins; if there are several the
@@ -56,7 +59,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
     setIsUploading(true);
     try {
       for (const file of acceptedFiles) {
-        await uploadMutation.mutateAsync({ orderId, file, type: 'mockup' });
+        await uploadMutation.mutateAsync({ orderId, file, type: uploadType });
       }
       addToast('Files uploaded successfully', 'success');
       await refetch();
@@ -66,7 +69,7 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
     } finally {
       setIsUploading(false);
     }
-  }, [orderId, uploadMutation, refetch, addToast]);
+  }, [orderId, uploadMutation, refetch, addToast, uploadType]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
@@ -132,9 +135,33 @@ export default function AttachmentManager({ orderId }: AttachmentManagerProps) {
         />
       )}
 
+      {/* Upload type selector — applies to the next upload. */}
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-600">
+          Upload as
+        </span>
+        <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-900/40 p-0.5">
+          {(['mockup', 'reference'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setUploadType(t)}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-colors',
+                uploadType === t
+                  ? 'bg-teal-500/20 text-teal-300'
+                  : 'text-zinc-500 hover:text-zinc-300',
+              )}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Ultra-Compact Horizontal Upload Zone */}
-      <div 
-        {...getRootProps()} 
+      <div
+        {...getRootProps()}
         className={cn(
           "border border-dashed border-zinc-700 rounded-lg p-3 flex items-center justify-between gap-4 hover:border-teal-500/50 hover:bg-teal-500/5 transition-colors cursor-pointer group",
           isDragActive && "border-teal-500 bg-teal-500/5",
