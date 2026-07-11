@@ -404,7 +404,8 @@ async def _run_time_series(
             func.sum(Order.total_price).label("revenue"),
             func.sum(
                 Order.total_price
-                - func.coalesce(Order.production_cost, 0)
+                # MAT-5: COGS must match the KPI aggregate (computed-first, then manual).
+                - func.coalesce(Order.computed_production_cost, Order.production_cost, 0)
                 - func.coalesce(Order.platform_fee, 0)
                 - func.coalesce(Order.shipping_np_cost, 0)
             ).label("net_profit"),

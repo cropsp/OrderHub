@@ -17,7 +17,7 @@ from models.order import Order, OrderStatus
 from models.shop import Shop
 from models.stock_movement import StockMovementReason
 from models.user import User, UserRole
-from routers.dependencies import get_current_user, require_role
+from routers.dependencies import require_role
 from services import stock_service
 from services.order_service import get_order_detail, change_order_status
 from services.nova_poshta import NovaPoshtaClient, NovaPoshtaAPIError
@@ -53,7 +53,7 @@ class CreateTTNRequest(BaseModel):
 @router.get("/cities")
 async def search_cities(
     query: str = Query("", min_length=2),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Search for cities in Nova Poshta."""
@@ -78,7 +78,7 @@ async def search_cities(
 async def get_warehouses(
     city_ref: str,
     query: str = Query(""),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
     db: AsyncSession = Depends(get_db)
 ):
     """Get warehouses in a city."""

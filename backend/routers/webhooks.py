@@ -8,6 +8,7 @@ import hashlib
 import base64
 import json
 import logging
+import uuid
 from fastapi import APIRouter, Request, Header, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -34,7 +35,7 @@ def verify_shopify_webhook(data: bytes, hmac_header: str, secret: str) -> bool:
 
 @router.post("/shopify/{shop_id}")
 async def shopify_webhook(
-    shop_id: str,
+    shop_id: uuid.UUID,
     request: Request,
     x_shopify_topic: str = Header(None),
     x_shopify_hmac_sha256: str = Header(None),

@@ -138,10 +138,16 @@ async def apply_receipt(
     # Weighted-average recompute — uses OLD stock_quantity (still untouched).
     ship = shipping_cost if shipping_cost is not None else Decimal("0")
     effective_unit_cost = (qty * unit_cost + ship) / qty
-    new_avg = (
-        (material.stock_quantity * material.current_unit_cost)
-        + (qty * effective_unit_cost)
-    ) / (material.stock_quantity + qty)
+    # Negative stock is a permitted state (MAT-4). When stock <= 0 the weighted
+    # average is undefined (stock == -qty divides by zero; -qty < stock < 0 yields a
+    # nonsensical/negative cost), so treat the receipt as re-baselining the unit cost.
+    if material.stock_quantity <= 0:
+        new_avg = effective_unit_cost
+    else:
+        new_avg = (
+            (material.stock_quantity * material.current_unit_cost)
+            + (qty * effective_unit_cost)
+        ) / (material.stock_quantity + qty)
     material.current_unit_cost = new_avg
 
     # Ledger row + stock_quantity increment (apply_movement does the += qty).

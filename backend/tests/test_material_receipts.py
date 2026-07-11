@@ -177,6 +177,35 @@ async def test_create_receipt_updates_material_weighted_average():
 
 
 @pytest.mark.asyncio
+async def test_create_receipt_rebaselines_cost_when_restocking_negative_to_zero():
+    """B-3: negative stock is a permitted state (MAT-4). Restocking a material back
+    to exactly zero used to divide by (stock + qty) == 0 → ZeroDivisionError → 500.
+    The receipt must now succeed and re-baseline current_unit_cost to the receipt's
+    effective unit cost (weighted average is undefined for non-positive stock)."""
+    material = _make_material(
+        stock_quantity=Decimal("-5"), current_unit_cost=Decimal("100")
+    )
+    db, adds = _make_db_for_receipt(material)
+    user = _make_user()
+
+    body = MaterialReceiptCreate(
+        qty=Decimal("5"),
+        unit_cost=Decimal("580"),
+        currency="UAH",
+        shipping_cost=Decimal("200"),
+    )
+    # Must not raise ZeroDivisionError.
+    await create_material_receipt(
+        material_id=material.id, body=body, db=db, user=user
+    )
+
+    # Effective unit cost = (5*580 + 200) / 5 = 3100/5 = 620. Re-baselined, not blended
+    # with the stale current_unit_cost. Stock returns to 0 (-5 + 5).
+    assert material.current_unit_cost == Decimal("620")
+    assert material.stock_quantity == Decimal("0")
+
+
+@pytest.mark.asyncio
 async def test_adjust_endpoint_writes_adjustment_movement():
     """POST /adjust with reason='waste' and a negative delta stages exactly one
     MaterialMovement with reason=WASTE, the signed delta, and a NULL cost

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from models.order import OrderStatus
 from models.user import User, UserRole
 from schemas.order import (
     OrderFilters, OrderListResponse, OrderResponse, 
@@ -21,9 +22,10 @@ from schemas.common import PaginatedResponse
 from schemas.parcel import ParcelEstimate
 from routers.dependencies import get_current_user, require_role
 from services.order_service import (
-    get_orders_filtered, get_order_detail, 
+    get_orders_filtered, get_order_detail,
     create_order, update_order, change_order_status,
-    add_order_item, update_order_item, delete_order_item
+    add_order_item, update_order_item, delete_order_item,
+    redact_financial_comment
 )
 from services.parcel_calculator import calculate_parcel_estimate
 from logger import get_logger
@@ -39,7 +41,7 @@ async def list_orders(
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=100),
     # Filters
-    status: str | None = Query(None),
+    status: OrderStatus | None = Query(None),
     shop_id: uuid.UUID | None = Query(None),
     search: str | None = Query(None),
     # Dependency
@@ -99,12 +101,16 @@ async def get_order(
     data["platform"] = order.shop.platform.value if order.shop else None
     data["customer_name"] = order.customer.full_name if order.customer else None
     
-    # If the user is a manager, censor financial fields as per requirements
-    if current_user.role == UserRole.MANAGER:
+    # Owner-only financial data: censor the body fields AND redact the values that
+    # leak into audit-history comments for every non-owner role (managers + assigned
+    # designers). Only OWNER writes these fields, so only OWNER sees the raw values.
+    if current_user.role != UserRole.OWNER:
         data["production_cost"] = None
         data["shipping_np_cost"] = None
         data["platform_fee"] = None
-        
+        for entry in data.get("status_history", []):
+            entry["comment"] = redact_financial_comment(entry.get("comment"))
+
     return OrderResponse(**data)
 
 
@@ -260,7 +266,7 @@ async def remove_item_from_order(
 
 @router.get("/action/export")
 async def export_orders_csv(
-    status: str | None = Query(None),
+    status: OrderStatus | None = Query(None),
     shop_id: uuid.UUID | None = Query(None),
     search: str | None = Query(None),
     current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),

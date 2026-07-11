@@ -68,7 +68,10 @@ async def get_dashboard_stats(
             select(
                 Order.currency,
                 func.sum(Order.total_price).label("tot_rev"),
-                func.sum(Order.production_cost).label("tot_prod"),
+                # MAT-5: COGS must match the finance KPI aggregate (computed-first, then manual).
+                func.sum(
+                    func.coalesce(Order.computed_production_cost, Order.production_cost, 0)
+                ).label("tot_prod"),
                 func.sum(Order.platform_fee).label("tot_fee"),
                 func.sum(Order.shipping_np_cost).label("tot_ship"),
             )

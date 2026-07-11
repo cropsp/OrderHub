@@ -1,6 +1,11 @@
 # Environment
 .env
 
+# Env/secret backups (never commit)
+*.bak
+*.bak.*
+*.env.bak*
+
 # Python
 __pycache__/
 *.py[cod]

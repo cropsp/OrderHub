@@ -75,22 +75,24 @@ export function useDeleteTTN() {
   })
 }
 
-export function useSearchCities(query: string) {
+export function useSearchCities(query: string, enabled: boolean = true) {
   const debouncedQuery = useDebounce(query, 350)
-  
+
   return useQuery({
     queryKey: ['shipping', 'cities', debouncedQuery],
     queryFn: () => shippingApi.searchCities(debouncedQuery),
-    enabled: debouncedQuery.length >= 2,
+    // Cities/warehouses are OWNER/MANAGER-only on the backend; `enabled` lets callers
+    // (e.g. order detail for a designer) skip the request instead of hitting a 403.
+    enabled: enabled && debouncedQuery.length >= 2,
     staleTime: 1000 * 60 * 60, // 1 hour
   })
 }
 
-export function useGetWarehouses(cityRef: string, query: string = "") {
+export function useGetWarehouses(cityRef: string, query: string = "", enabled: boolean = true) {
   return useQuery({
     queryKey: ['shipping', 'warehouses', cityRef, query],
     queryFn: () => shippingApi.getWarehouses(cityRef, query),
-    enabled: !!cityRef,
+    enabled: enabled && !!cityRef,
     staleTime: 1000 * 60 * 30, // 30 mins
   })
 }

@@ -2,6 +2,7 @@
 OrderHub CRM — Order Service
 """
 
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -17,6 +18,25 @@ from models.product import Product, ProductVariant
 from models.packaging import PackagingBox
 from schemas.order import OrderCreate, OrderUpdate, OrderFilters, OrderItemCreate, OrderItemUpdate
 from services.customer_service import upsert_customer
+
+
+# Owner-only financial fields. Only OWNER may write these (see update_order), and
+# they are censored on the order response + redacted in audit-history comments for
+# every non-owner role (see routers/orders.get_order).
+FINANCIAL_FIELDS = ("production_cost", "shipping_np_cost", "platform_fee")
+_FINANCIAL_COMMENT_RE = re.compile(r"\b(" + "|".join(FINANCIAL_FIELDS) + r"): [^,]+")
+
+
+def redact_financial_comment(comment: str | None) -> str | None:
+    """Redact owner-only financial values inside an audit-history comment.
+
+    Comment format is ``"Fields updated: key: old -> new, ..."`` (see update_order);
+    financial values are numeric/None with no commas, so a per-field regex on the
+    ``key: value`` segment is safe. Non-financial fields are left untouched.
+    """
+    if not comment:
+        return comment
+    return _FINANCIAL_COMMENT_RE.sub(lambda m: f"{m.group(1)}: [redacted]", comment)
 
 
 # ─── Read ──────────────────────────────────────────────────
@@ -275,8 +295,7 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
     update_data = data.model_dump(exclude_unset=True)
     
     # Security: role check for financial fields
-    financial_fields = {"production_cost", "shipping_np_cost", "platform_fee"}
-    if any(k in update_data for k in financial_fields) and user.role != UserRole.OWNER:
+    if any(k in update_data for k in FINANCIAL_FIELDS) and user.role != UserRole.OWNER:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only owner can modify financial fields"

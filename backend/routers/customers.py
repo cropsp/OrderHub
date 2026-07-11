@@ -9,15 +9,21 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.user import User
+from models.user import User, UserRole
 from models.customer import Customer
 from models.order import Order
 from schemas.customer import CustomerResponse
 from schemas.common import PaginatedResponse
-from routers.dependencies import get_current_user
+from routers.dependencies import get_current_user, require_role
 from services.customer_service import get_customer_with_order_count
 
-router = APIRouter(prefix="/api/customers", tags=["customers"])
+# Customer directory holds cross-shop PII (email/phone/city). Gate the whole router
+# to OWNER/MANAGER — designers get customer data only through their assigned orders.
+router = APIRouter(
+    prefix="/api/customers",
+    tags=["customers"],
+    dependencies=[Depends(require_role(UserRole.OWNER, UserRole.MANAGER))],
+)
 
 
 @router.get("", response_model=PaginatedResponse[CustomerResponse])

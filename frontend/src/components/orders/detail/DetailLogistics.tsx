@@ -125,8 +125,6 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
   
-  const { data: cities, isLoading: isCitiesLoading } = useSearchCities(cityQuery);
-  
   const [formData, setFormData] = useState({
     shipping_name: order.shipping_name || '',
     shipping_phone: order.shipping_phone || '',
@@ -137,7 +135,15 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
     shipping_country: order.shipping_country || 'UA',
   });
 
-  const { data: warehouses, isLoading: isWarehousesLoading } = useGetWarehouses(formData.shipping_city_ref);
+  // NP city/warehouse lookups are OWNER/MANAGER-only (skip for designers → no 403)
+  // and Nova Poshta is Ukraine-only, so only fire while editing a UA order — otherwise
+  // a non-UA order (e.g. a US city) 400s on the NP directory API on every open.
+  const { data: cities, isLoading: isCitiesLoading } = useSearchCities(
+    cityQuery,
+    canManageShipping && isEditing && formData.shipping_country === 'UA'
+  );
+
+  const { data: warehouses, isLoading: isWarehousesLoading } = useGetWarehouses(formData.shipping_city_ref, "", canManageShipping);
 
   const filteredWarehouses = useMemo(() => {
     if (!warehouses) return [];
