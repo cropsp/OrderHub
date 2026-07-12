@@ -59,7 +59,7 @@ describe('CustomersPage smoke test', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByPlaceholderText('Search by customer name or email...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search by name, email or country...')).toBeInTheDocument();
     expect(screen.getByText('Jane Doe')).toBeInTheDocument();
     expect(screen.getByText('jane@example.com')).toBeInTheDocument();
   });

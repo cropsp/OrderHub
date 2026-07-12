@@ -122,11 +122,14 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
             <DetailTimeline order={order} />
           </div>
 
-          {/* RIGHT COLUMN: Management Sidebar (Sticky) */}
-          <aside className="sticky top-20 flex flex-col gap-4">
+          {/* RIGHT COLUMN: Management Sidebar (Sticky on desktop).
+              On mobile the whole aside rises above the left column, and within it the daily actions
+              lead: status → payment → customer → logistics. `lg:order-none` restores source order on
+              desktop, leaving the two-column layout untouched. */}
+          <aside className="order-first lg:order-none sticky top-20 flex flex-col gap-4">
 
             {/* 1. ORDER STATUS & ACTIONS */}
-            <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
+            <div className="order-1 lg:order-none bg-zinc-900/80 border border-zinc-800 rounded-xl p-4 shadow-sm">
               <h3 className="text-sm font-semibold text-zinc-100 mb-4 px-1">
                 Order status
               </h3>
@@ -173,16 +176,26 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
               </div>
             </div>
 
-            <DetailCustomer order={order} />
-            <DetailLogistics
-              order={order}
-              canManageShipping={canManageShipping}
-              isPending={isTTNPending}
-              onGenerateTTN={handleGenerateTTN}
-              onRemoveTTN={handleDeleteTTN}
-              onUpdate={handleUpdate}
-            />
-            {isOwner && <DetailFinance order={order} />}
+            {/* DOM order stays status → customer → logistics → finance (desktop, via lg:order-none).
+                Mobile order values lift payment to just under status: 1 status, 2 finance, 3 customer, 4 logistics. */}
+            <div className="order-3 lg:order-none">
+              <DetailCustomer order={order} />
+            </div>
+            <div className="order-4 lg:order-none">
+              <DetailLogistics
+                order={order}
+                canManageShipping={canManageShipping}
+                isPending={isTTNPending}
+                onGenerateTTN={handleGenerateTTN}
+                onRemoveTTN={handleDeleteTTN}
+                onUpdate={handleUpdate}
+              />
+            </div>
+            {isOwner && (
+              <div className="order-2 lg:order-none">
+                <DetailFinance order={order} />
+              </div>
+            )}
           </aside>
         </div>
       </div>

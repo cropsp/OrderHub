@@ -95,3 +95,8 @@ export const ARCHIVE_CATEGORIES: StatusCategory[] = []; // Unified into main tab
 export function getCategoryByStatus(status: OrderStatusValue): StatusCategory | undefined {
   return [...STATUS_CATEGORIES, ...ARCHIVE_CATEGORIES].find((cat) => cat.statuses.includes(status));
 }
+
+/** Readable label for a raw order-status enum value (e.g. `in_production` → "In Production"). */
+export function statusLabel(status: string): string {
+  return getCategoryByStatus(status as OrderStatusValue)?.label ?? status.replace(/_/g, ' ');
+}
