@@ -28,6 +28,31 @@ export const productsApi = {
     await client.delete(`/products/${id}`)
   },
 
+  uploadImage: async (id: string, file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await client.post<ProductRead>(`/products/${id}/image`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    return response.data
+  },
+
+  deleteImage: async (id: string) => {
+    await client.delete(`/products/${id}/image`)
+  },
+
+  // Blob, not a URL: the access token is an in-memory Authorization header, so
+  // only a client-issued request carries auth. Mirrors attachmentsApi.download.
+  getImage: async (id: string): Promise<Blob> => {
+    const { data } = await client.get(`/products/${id}/image`, { responseType: 'blob' })
+    return data
+  },
+
+  pullImageFromShopify: async (id: string) => {
+    const response = await client.post<ProductRead>(`/products/${id}/image/from-shopify`)
+    return response.data
+  },
+
   bulkImportPreview: async (shopId: string, file: File) => {
     const formData = new FormData()
     formData.append('file', file)

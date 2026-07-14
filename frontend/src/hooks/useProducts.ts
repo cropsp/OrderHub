@@ -72,6 +72,65 @@ export function useDeleteProduct() {
   })
 }
 
+/**
+ * Fetches the product image as a Blob. Gated on `hasImage` (from
+ * `product.image_url`) so products without one never issue a request.
+ */
+export function useProductImage(id: string | undefined, hasImage: boolean) {
+  return useQuery({
+    queryKey: ['product-image', id],
+    queryFn: () => productsApi.getImage(id as string),
+    enabled: !!id && hasImage,
+  })
+}
+
+function useProductImageMutation<TVars extends { id: string; shopId: string }>(
+  mutationFn: (variables: TVars) => Promise<unknown>,
+  successMessage: string,
+  errorMessage: string,
+) {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore(s => s.addToast)
+
+  return useMutation({
+    mutationFn,
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['products', variables.shopId] })
+      queryClient.invalidateQueries({ queryKey: ['product', variables.id] })
+      queryClient.invalidateQueries({ queryKey: ['product-image', variables.id] })
+      addToast(successMessage, 'success')
+    },
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, errorMessage), 'error')
+    }
+  })
+}
+
+export function useUploadProductImage() {
+  return useProductImageMutation(
+    ({ id, file }: { id: string; shopId: string; file: File }) =>
+      productsApi.uploadImage(id, file),
+    'Image updated successfully',
+    'Failed to upload image',
+  )
+}
+
+export function useDeleteProductImage() {
+  return useProductImageMutation(
+    ({ id }: { id: string; shopId: string }) => productsApi.deleteImage(id),
+    'Image removed successfully',
+    'Failed to remove image',
+  )
+}
+
+export function usePullProductImageFromShopify() {
+  return useProductImageMutation(
+    ({ id }: { id: string; shopId: string }) => productsApi.pullImageFromShopify(id),
+    'Image pulled from Shopify',
+    'Failed to pull image from Shopify',
+  )
+}
+
 export function useBulkImportProducts() {
   const queryClient = useQueryClient()
   const addToast = useToastStore(s => s.addToast)

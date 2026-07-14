@@ -88,8 +88,15 @@ export interface Product {
   shop_id: string;
   title: string;
   description: string | null;
+  external_ref?: string | null;
   is_active: boolean;
   variants: ProductVariant[];
+  /**
+   * Path to the authenticated image route when the product has an image, else
+   * null. Not usable as a bare <img src> — the JWT is an in-memory header, so
+   * the browser would send it unauthenticated. Fetch it as a blob instead.
+   */
+  image_url: string | null;
 }
 
 export type ProductRead = Product;
