@@ -2,9 +2,12 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from logger import get_logger
+from models.product import Product
 from models.shop import ShopPlatform
 from models.user import UserRole
 from routers.dependencies import get_current_user, get_shop_for_user, require_platform, require_role
@@ -13,10 +16,31 @@ from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVa
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
 from services import bom_service
 from services.catalog_service import CatalogService
+from services.file_storage import (
+    FileTooLargeError,
+    PRODUCT_IMAGE_MAX_BYTES,
+    PRODUCT_IMAGE_MIME,
+    delete_file,
+    get_absolute_path,
+    save_product_image,
+    sniff_image_mime,
+)
 from services.import_service import ImportService
 
+logger = get_logger("routers.products")
 
 router = APIRouter(prefix="/api", tags=["Products"])
+
+# Extension -> Content-Type for serving. Inverted from PRODUCT_IMAGE_MIME so the
+# served type always derives from the extension WE generated, never from client input.
+_EXT_TO_MIME = {ext: mime for mime, ext in PRODUCT_IMAGE_MIME.items()}
+
+
+def _project_product(product: Product) -> ProductRead:
+    """Serialize a Product, deriving image_url from image_path (PC-F-1)."""
+    data = ProductRead.model_validate(product)
+    data.image_url = f"/api/products/{product.id}/image" if product.image_path else None
+    return data
 
 
 @router.get("/shops/{shop_id}/products", response_model=List[ProductRead])
@@ -28,7 +52,8 @@ async def list_products(
 ):
     """List all products for a shop (any platform). Access is gated by get_shop_for_user."""
     service = CatalogService(db)
-    return await service.get_products(shop_id, is_active=is_active)
+    products = await service.get_products(shop_id, is_active=is_active)
+    return [_project_product(p) for p in products]
 
 
 @router.post("/shops/{shop_id}/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
@@ -48,8 +73,8 @@ async def create_product(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"SKU '{variant.sku}' is already taken in this shop"
             )
-            
-    return await service.create_product(shop_id, schema)
+
+    return _project_product(await service.create_product(shop_id, schema))
 
 
 @router.get("/products/{id}", response_model=ProductRead)
@@ -63,7 +88,7 @@ async def get_product(
     product = await service.get_product(id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return product
+    return _project_product(product)
 
 
 @router.patch("/products/{id}", response_model=ProductRead)
@@ -81,7 +106,7 @@ async def update_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return product
+    return _project_product(product)
 
 
 @router.delete("/products/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -93,6 +118,110 @@ async def delete_product(
     """Soft-delete a product."""
     service = CatalogService(db)
     await service.soft_delete_product(id)
+
+
+# --- PC-F-1: Product image (single, product-level) ---
+
+
+async def _load_product_or_404(db: AsyncSession, product_id: uuid.UUID) -> Product:
+    service = CatalogService(db)
+    product = await service.get_product(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+
+async def _set_product_image(db: AsyncSession, product: Product, relative_path: str) -> None:
+    """Point the product at a new image, removing the file it replaced so a
+    Replace never orphans bytes on the volume."""
+    old_path = product.image_path
+    product.image_path = relative_path
+    await db.commit()
+    await db.refresh(product)
+    if old_path and old_path != relative_path:
+        delete_file(old_path)
+
+
+@router.post("/products/{id}/image", response_model=ProductRead)
+async def upload_product_image(
+    id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    """Upload or replace a product's image.
+
+    The declared Content-Type is ignored — the type is sniffed from the leading
+    bytes, because this file is served back to the browser.
+    """
+    product = await _load_product_or_404(db, id)
+
+    head = await file.read(32)
+    mime = sniff_image_mime(head)
+    if mime is None:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported image type. Allowed: JPEG, PNG, WebP.",
+        )
+    await file.seek(0)
+
+    try:
+        relative_path, _size = await save_product_image(file, id, PRODUCT_IMAGE_MIME[mime])
+    except FileTooLargeError:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Image exceeds maximum size of {PRODUCT_IMAGE_MAX_BYTES // (1024 * 1024)} MB",
+        )
+    except Exception as e:
+        logger.error(f"[PRODUCTS] Failed to save image for product {id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to save product image")
+
+    await _set_product_image(db, product, relative_path)
+    return _project_product(product)
+
+
+@router.delete("/products/{id}/image", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_product_image(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+):
+    """Remove a product's image. Idempotent — 204 even if there is none."""
+    product = await _load_product_or_404(db, id)
+
+    old_path = product.image_path
+    if old_path:
+        product.image_path = None
+        await db.commit()
+        delete_file(old_path)
+
+
+@router.get("/products/{id}/image")
+async def get_product_image(
+    id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Serve a product's image bytes.
+
+    Authenticated: the frontend fetches this as a blob (the JWT is an in-memory
+    header, so a bare <img src> would 401). Content-Type derives from the
+    extension we generated at upload, never from stored client input.
+    """
+    product = await _load_product_or_404(db, id)
+    if not product.image_path:
+        raise HTTPException(status_code=404, detail="Product has no image")
+
+    abs_path = get_absolute_path(product.image_path)
+    if not abs_path:
+        raise HTTPException(status_code=404, detail="Image content not found on disk")
+
+    media_type = _EXT_TO_MIME.get(abs_path.suffix.lstrip("."), "application/octet-stream")
+    return FileResponse(
+        path=abs_path,
+        media_type=media_type,
+        content_disposition_type="inline",
+    )
 
 
 # --- Bulk CSV Import (Two-step) ---
