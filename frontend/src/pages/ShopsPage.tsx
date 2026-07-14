@@ -556,14 +556,16 @@ export default function ShopsPage() {
                       </TableCell>
                       {isOwner && (
                         <TableCell className="px-8 py-6 text-right">
-                          <div className="flex justify-end gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex justify-end items-center gap-1.5">
                             <Link
                               to={`/shops/${shop.id}/finance`}
                               title="Per-shop finance"
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05]"
+                              className="inline-flex h-9 items-center gap-1.5 px-3 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] transition-colors"
                             >
                               <LineChart className="h-4 w-4" />
+                              <span className="text-[11px] font-bold uppercase tracking-wider">Finance</span>
                             </Link>
+                            <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             {shop.platform?.toLowerCase() === 'shopify' && (
                               <Button
                                 variant="ghost"
@@ -601,6 +603,7 @@ export default function ShopsPage() {
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
+                            </div>
                           </div>
                         </TableCell>
                       )}

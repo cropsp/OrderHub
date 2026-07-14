@@ -8,11 +8,14 @@ import {
   TableHeader, 
   TableRow 
 } from '@/components/ui/table';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu';
 import { MoreHorizontal, Eye, Archive, RefreshCw } from 'lucide-react';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -20,6 +23,10 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { getShopTheme } from '@/utils/shopTheme';
 import { getInitials, getAvatarColor } from '@/utils/avatar';
 import { cn } from '@/lib/utils';
+import { useUpdateOrderStatus } from '@/hooks/useOrders';
+import { useToastStore } from '@/components/ui/Toast';
+import { ORDER_STATUS, statusLabel } from '@/lib/order-status';
+import { getApiErrorMessage } from '@/types/api';
 import type { OrderListItem } from '@/types/order';
 
 interface OrdersTableProps {
@@ -29,6 +36,8 @@ interface OrdersTableProps {
 
 export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
   const navigate = useNavigate();
+  const updateStatus = useUpdateOrderStatus();
+  const addToast = useToastStore((s) => s.addToast);
 
   if (isLoading) {
     return (
@@ -129,9 +138,35 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
                       >
                         <Eye size={14} className="text-zinc-400" /> View Details
                       </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2 focus:bg-zinc-800 focus:text-zinc-100">
-                        <RefreshCw className="size-3.5" /> Change Status
-                      </DropdownMenuItem>
+                      <DropdownMenuSub>
+                        <DropdownMenuSubTrigger className="gap-2 focus:bg-zinc-800 focus:text-zinc-100">
+                          <RefreshCw className="size-3.5" /> Change Status
+                        </DropdownMenuSubTrigger>
+                        <DropdownMenuSubContent className="bg-zinc-900 border-zinc-800 text-zinc-300 p-1 rounded-xl">
+                          {Object.values(ORDER_STATUS)
+                            .filter((status) => status !== order.status)
+                            .map((status) => (
+                              <DropdownMenuItem
+                                key={status}
+                                onClick={() =>
+                                  updateStatus.mutate(
+                                    { orderId: order.id, status },
+                                    {
+                                      onError: (err) =>
+                                        addToast(
+                                          getApiErrorMessage(err, 'Failed to change status'),
+                                          'error',
+                                        ),
+                                    },
+                                  )
+                                }
+                                className="gap-2 focus:bg-zinc-800 focus:text-zinc-100 cursor-pointer"
+                              >
+                                {statusLabel(status)}
+                              </DropdownMenuItem>
+                            ))}
+                        </DropdownMenuSubContent>
+                      </DropdownMenuSub>
                       <DropdownMenuItem className="gap-2 focus:bg-zinc-800 focus:text-zinc-100 text-red-400 focus:text-red-300">
                         <Archive className="size-3.5" /> Archive
                       </DropdownMenuItem>
