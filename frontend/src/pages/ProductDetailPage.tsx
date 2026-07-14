@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import BomEditor from '@/components/inventory/BomEditor'
+import ProductImageWidget from '@/components/inventory/ProductImageWidget'
 import {
   Table,
   TableBody,
@@ -257,7 +258,8 @@ export default function ProductDetailPage() {
 
   if (!id) return null
 
-  const shopName = shops?.find(s => s.id === product?.shop_id)?.name
+  const shop = shops?.find(s => s.id === product?.shop_id)
+  const shopName = shop?.name
   const isDirty = draft !== null && JSON.stringify(draft) !== original
 
   const handleArchiveToggle = () => {
@@ -511,6 +513,11 @@ export default function ProductDetailPage() {
                   </div>
                 </div>
               </div>
+
+              <ProductImageWidget
+                product={product}
+                isShopify={shop?.platform === 'shopify'}
+              />
 
               <div className="flex justify-end">
                 <Button

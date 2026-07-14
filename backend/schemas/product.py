@@ -83,3 +83,8 @@ class ProductRead(ProductBase):
     created_at: datetime
     updated_at: datetime
     variants: List[ProductVariantRead]
+
+    # PC-F-1 — path to the authenticated image route when the product has an
+    # image, else None. Deliberately not on ProductBase: it is file-backed and
+    # must not be settable through ProductCreate/ProductUpdate JSON.
+    image_url: Optional[str] = None
