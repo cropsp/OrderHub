@@ -30,7 +30,10 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     
     # RESERVED for etsy_listing_id / shopify_product_id
     external_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
+
+    # Path relative to UPLOADS_DIR: products/{product_id}/{uuid}.{ext}
+    image_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
