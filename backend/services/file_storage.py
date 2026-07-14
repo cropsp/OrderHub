@@ -132,6 +132,23 @@ async def save_product_image(
     return relative_path, file_size
 
 
+async def save_product_image_bytes(
+    content: bytes,
+    product_id: uuid.UUID,
+    ext: str,
+) -> tuple[str, int]:
+    """Same as ``save_product_image`` but for bytes already in memory (the
+    Shopify featured-image download). Caller must validate size + type first."""
+    product_dir = UPLOADS_DIR / PRODUCT_IMAGE_SUBDIR / str(product_id)
+    product_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_filename = f"{uuid.uuid4()}.{ext}"
+    relative_path = str(Path(PRODUCT_IMAGE_SUBDIR) / str(product_id) / safe_filename)
+
+    async with aiofiles.open(product_dir / safe_filename, 'wb') as out_file:
+        await out_file.write(content)
+
+    return relative_path, len(content)
 
 
 def get_absolute_path(relative_path: str) -> Path | None:

@@ -95,6 +95,19 @@ query GetRecentOrders($first: Int!) {
 }
 """
 
+# PC-F-1 — on-demand featured-image lookup for a single product. Deliberately
+# separate from ORDERS_QUERY: order sync must never pull images.
+PRODUCT_IMAGE_QUERY = """
+query GetProductFeaturedImage($id: ID!) {
+  product(id: $id) {
+    id
+    featuredImage {
+      url
+    }
+  }
+}
+"""
+
 
 def _parse_shopify_gid(gid: Optional[str]) -> str:
     """Extract numeric tail from a Shopify GID like 'gid://shopify/Product/12345'."""

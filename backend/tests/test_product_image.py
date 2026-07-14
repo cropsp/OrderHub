@@ -17,10 +17,12 @@ import pytest
 from fastapi import HTTPException, UploadFile
 
 from models.product import Product
+from models.shop import ShopPlatform
 from routers.products import (
     _project_product,
     delete_product_image,
     get_product_image,
+    pull_product_image_from_shopify,
     upload_product_image,
 )
 from services import file_storage
@@ -255,3 +257,146 @@ async def test_serve_returns_bytes_with_sniffed_content_type(monkeypatch, tmp_pa
 
     assert response.media_type == "image/webp"
     assert Path(response.path).read_bytes() == WEBP_BYTES
+
+
+# --- Shopify pull ---------------------------------------------------------
+
+
+class _FakeStreamResponse:
+    def __init__(self, content):
+        self._content = content
+
+    def raise_for_status(self):
+        return None
+
+    async def aiter_bytes(self, chunk_size=None):
+        yield self._content
+
+
+class _FakeAsyncClient:
+    """Minimal stand-in for httpx.AsyncClient supporting `async with .stream()`."""
+
+    content = PNG_BYTES
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def stream(self, method, url):
+        content = self.content
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _FakeStreamResponse(content)
+
+            async def __aexit__(self, *args):
+                return False
+
+        return _Ctx()
+
+
+def _shopify_shop():
+    shop = MagicMock()
+    shop.platform = ShopPlatform.SHOPIFY
+    shop.shopify_store_url = "https://lamamarka.myshopify.com"
+    shop.shopify_access_token_encrypted = "encrypted-token"
+    return shop
+
+
+@pytest.mark.asyncio
+async def test_pull_from_shopify_rewraps_gid_and_sets_image(monkeypatch, tmp_path):
+    uploads = _patch_uploads(monkeypatch, tmp_path)
+    product = _product(external_ref="12345")
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=_shopify_shop())
+    graphql = AsyncMock(return_value={"product": {"featuredImage": {"url": "https://cdn/x.png"}}})
+
+    with _mock_catalog(product), \
+            patch("routers.products.decrypt_value", return_value="tok"), \
+            patch("routers.products.call_shopify_graphql", graphql), \
+            patch("routers.products.httpx.AsyncClient", _FakeAsyncClient):
+        result = await pull_product_image_from_shopify(
+            id=product.id, db=db, user=MagicMock()
+        )
+
+    # external_ref stores the numeric id — it must be re-wrapped into a GID.
+    _args, kwargs = graphql.call_args
+    variables = _args[3] if len(_args) > 3 else kwargs["variables"]
+    assert variables == {"id": "gid://shopify/Product/12345"}
+
+    assert product.image_path.endswith(".png")
+    assert (uploads / product.image_path).read_bytes() == PNG_BYTES
+    assert result.image_url == f"/api/products/{product.id}/image"
+
+
+@pytest.mark.asyncio
+async def test_pull_from_shopify_409_on_non_shopify_shop():
+    product = _product(external_ref="12345")
+    etsy = MagicMock()
+    etsy.platform = ShopPlatform.ETSY
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=etsy)
+
+    with _mock_catalog(product):
+        with pytest.raises(HTTPException) as exc:
+            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_pull_from_shopify_409_without_external_ref():
+    product = _product(external_ref=None)
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=_shopify_shop())
+
+    with _mock_catalog(product):
+        with pytest.raises(HTTPException) as exc:
+            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_pull_from_shopify_404_when_listing_has_no_featured_image():
+    product = _product(external_ref="12345")
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=_shopify_shop())
+
+    with _mock_catalog(product), \
+            patch("routers.products.decrypt_value", return_value="tok"), \
+            patch("routers.products.call_shopify_graphql",
+                  AsyncMock(return_value={"product": {"featuredImage": None}})):
+        with pytest.raises(HTTPException) as exc:
+            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+
+    assert exc.value.status_code == 404
+    assert product.image_path is None
+
+
+@pytest.mark.asyncio
+async def test_pull_from_shopify_415_when_remote_bytes_are_not_an_image(monkeypatch, tmp_path):
+    """The remote URL is untrusted input — it gets the same sniff as an upload."""
+    _patch_uploads(monkeypatch, tmp_path)
+    product = _product(external_ref="12345")
+    db = AsyncMock()
+    db.get = AsyncMock(return_value=_shopify_shop())
+
+    class _HtmlClient(_FakeAsyncClient):
+        content = HTML_BYTES
+
+    with _mock_catalog(product), \
+            patch("routers.products.decrypt_value", return_value="tok"), \
+            patch("routers.products.call_shopify_graphql",
+                  AsyncMock(return_value={"product": {"featuredImage": {"url": "https://cdn/x"}}})), \
+            patch("routers.products.httpx.AsyncClient", _HtmlClient):
+        with pytest.raises(HTTPException) as exc:
+            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+
+    assert exc.value.status_code == 415
+    assert product.image_path is None
