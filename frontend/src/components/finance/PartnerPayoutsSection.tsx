@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Calculator, Plus, Users } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,6 @@ import {
 } from '@/hooks/usePartnerPayouts'
 import type { PartnerPayment, PartnerSettlement } from '@/api/partnerPayouts'
 
-import CalculateSettlementModal from './CalculateSettlementModal'
 import PartnerBalancesSummary from './PartnerBalancesSummary'
 import PartnerPaymentsTable from './PartnerPaymentsTable'
 import PartnerSettlementsTable from './PartnerSettlementsTable'
@@ -34,13 +34,13 @@ export default function PartnerPayoutsSection({
   periodStart,
   periodEnd,
 }: PartnerPayoutsSectionProps) {
+  const navigate = useNavigate()
   const settlements = useSettlements(shopId)
   const payments = usePayments(shopId)
   const balances = usePartnerBalances(shopId)
   const deleteSettlement = useDeleteSettlement(shopId)
   const deletePayment = useDeletePayment(shopId)
 
-  const [calcOpen, setCalcOpen] = useState(false)
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentPrefill, setPaymentPrefill] = useState<PartnerSettlement | null>(
     null,
@@ -60,6 +60,12 @@ export default function PartnerPayoutsSection({
     !payments.isLoading &&
     (settlements.data?.items.length ?? 0) === 0 &&
     (payments.data?.items.length ?? 0) === 0
+
+  const openCalculate = () => {
+    navigate(
+      `/shops/${shopId}/finance/settlement?start=${periodStart}&end=${periodEnd}`,
+    )
+  }
 
   const openRecordPayment = (s?: PartnerSettlement) => {
     setPaymentPrefill(s ?? null)
@@ -117,7 +123,7 @@ export default function PartnerPayoutsSection({
             size="sm"
             variant="outline"
             className="border-zinc-700 text-zinc-200 hover:bg-zinc-800"
-            onClick={() => setCalcOpen(true)}
+            onClick={openCalculate}
           >
             <Calculator className="size-3.5" />
             Calculate Settlement
@@ -139,7 +145,7 @@ export default function PartnerPayoutsSection({
           title="No partner activity yet"
           description="Calculate a settlement to start tracking partner shares for this shop."
           actionLabel="Calculate Settlement"
-          onAction={() => setCalcOpen(true)}
+          onAction={openCalculate}
         />
       ) : (
         <>
@@ -173,13 +179,6 @@ export default function PartnerPayoutsSection({
         </>
       )}
 
-      <CalculateSettlementModal
-        isOpen={calcOpen}
-        onClose={() => setCalcOpen(false)}
-        shopId={shopId}
-        defaultPeriodStart={periodStart}
-        defaultPeriodEnd={periodEnd}
-      />
       <RecordPaymentModal
         isOpen={paymentOpen}
         onClose={() => setPaymentOpen(false)}

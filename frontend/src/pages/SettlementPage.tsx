@@ -1,17 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Calculator } from 'lucide-react'
+import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { format } from 'date-fns'
+import { AlertCircle } from 'lucide-react'
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import ShellPage from './ShellPage'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import PartnerNameInput from './PartnerNameInput'
+import PartnerNameInput from '@/components/finance/PartnerNameInput'
+import { rangeForPreset } from '@/components/finance/periodPresets'
 import { useDebounce } from '@/hooks/useDebounce'
 import {
   useCreateSettlement,
@@ -20,55 +16,40 @@ import {
 } from '@/hooks/usePartnerPayouts'
 import type { FormulaType } from '@/api/partnerPayouts'
 
-interface CalculateSettlementModalProps {
-  isOpen: boolean
-  onClose: () => void
-  shopId: string
-  defaultPeriodStart: string
-  defaultPeriodEnd: string
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+// The finance page hands its period over as ?start=&end= — already yyyy-MM-dd.
+// Anything else (absent, hand-edited URL) falls back to the This Month preset
+// rather than seeding a date input with a value it cannot render.
+function seedPeriod(param: string | null, fallback: Date): string {
+  if (param && ISO_DATE.test(param)) return param
+  return format(fallback, 'yyyy-MM-dd')
 }
 
-export default function CalculateSettlementModal({
-  isOpen,
-  onClose,
-  shopId,
-  defaultPeriodStart,
-  defaultPeriodEnd,
-}: CalculateSettlementModalProps) {
+export default function SettlementPage() {
+  const { shopId } = useParams<{ shopId: string }>()
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+
   const [partner, setPartner] = useState('')
   const [formula, setFormula] = useState<FormulaType>('net_profit_product_only')
   const [percent, setPercent] = useState('25')
-  const [start, setStart] = useState(defaultPeriodStart)
-  const [end, setEnd] = useState(defaultPeriodEnd)
+  const [start, setStart] = useState(() => {
+    const thisMonth = rangeForPreset('this_month')
+    return seedPeriod(searchParams.get('start'), thisMonth.start)
+  })
+  const [end, setEnd] = useState(() => {
+    const thisMonth = rangeForPreset('this_month')
+    return seedPeriod(searchParams.get('end'), thisMonth.end)
+  })
   const [currency, setCurrency] = useState<string | undefined>(undefined)
   const [saveRecord, setSaveRecord] = useState(true)
   const [notes, setNotes] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  // Reset state on open via the resetKey pattern from MaterialReceiptModal —
-  // setState-during-render keyed off an isOpen change is React's documented
-  // way to derive state from props without triggering effect cascades. Seed
-  // with isOpen=false so the reset branch also runs on a first-render mount
-  // that happens to be already-open.
-  const [resetKey, setResetKey] = useState({ isOpen: false })
-  if (resetKey.isOpen !== isOpen) {
-    setResetKey({ isOpen })
-    if (isOpen) {
-      setPartner('')
-      setFormula('net_profit_product_only')
-      setPercent('25')
-      setStart(defaultPeriodStart)
-      setEnd(defaultPeriodEnd)
-      setCurrency(undefined)
-      setSaveRecord(true)
-      setNotes('')
-      setError(null)
-    }
-  }
-
-  const names = usePartnerNames(shopId)
-  const previewMutation = usePreviewSettlement(shopId)
-  const createMutation = useCreateSettlement(shopId)
+  const names = usePartnerNames(shopId ?? '')
+  const previewMutation = usePreviewSettlement(shopId ?? '')
+  const createMutation = useCreateSettlement(shopId ?? '')
 
   const debouncedPercent = useDebounce(percent, 200)
 
@@ -92,6 +73,12 @@ export default function CalculateSettlementModal({
     return Number(preview.base_amount) < 0
   }, [preview])
 
+  if (!shopId) {
+    return <Navigate replace to="/shops" />
+  }
+
+  const goBack = () => navigate(`/shops/${shopId}/finance`)
+
   const handleSave = async () => {
     setError(null)
     if (!partner.trim()) {
@@ -113,7 +100,7 @@ export default function CalculateSettlementModal({
         currency,
         notes: notes.trim() || null,
       })
-      onClose()
+      goBack()
     } catch (err) {
       const detail = (err as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail
@@ -122,25 +109,12 @@ export default function CalculateSettlementModal({
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl border-zinc-800 bg-zinc-950 text-zinc-100 p-0 overflow-hidden rounded-3xl">
-        <DialogHeader className="p-6 border-b border-zinc-800">
-          <div className="flex items-center gap-3">
-            <div className="size-10 rounded-xl flex items-center justify-center border border-teal-500/20 bg-teal-500/10 text-teal-400">
-              <Calculator className="size-5" />
-            </div>
-            <div>
-              <DialogTitle className="text-xl font-bold tracking-tight">
-                Calculate Partner Settlement
-              </DialogTitle>
-              <DialogDescription className="text-zinc-400">
-                Snapshot the partner's share for the selected period.
-              </DialogDescription>
-            </div>
-          </div>
-        </DialogHeader>
-
-        <div className="p-6 space-y-5">
+    <ShellPage
+      title="Calculate Partner Settlement"
+      description="Snapshot the partner's share for the selected period."
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <div className="lg:col-span-2 rounded-3xl border border-zinc-800 bg-zinc-900/40 p-6 space-y-5">
           <div className="space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Partner name
@@ -241,51 +215,6 @@ export default function CalculateSettlementModal({
             </div>
           </div>
 
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 text-sm">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-              Live preview
-            </p>
-            {previewMutation.isPending ? (
-              <p className="mt-2 text-zinc-400">Calculating…</p>
-            ) : preview?.base_amount && preview?.base_currency ? (
-              <div className="mt-2 space-y-1">
-                <p>
-                  Base:{' '}
-                  <span className="font-semibold text-zinc-100">
-                    {Number(preview.base_amount).toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                    })}{' '}
-                    {preview.base_currency}
-                  </span>
-                </p>
-                <p>
-                  Share:{' '}
-                  <span className="font-semibold text-teal-300">
-                    {Number(preview.computed_amount ?? 0).toLocaleString(
-                      'en-US',
-                      { minimumFractionDigits: 2 },
-                    )}{' '}
-                    {preview.base_currency}
-                  </span>
-                </p>
-              </div>
-            ) : (
-              <p className="mt-2 text-zinc-400">
-                Enter percent + period to compute.
-              </p>
-            )}
-            {isNegative && (
-              <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
-                <AlertCircle className="size-3 mt-0.5" />
-                <span>
-                  Base is negative (loss period). Saving will record a
-                  negative settlement. Sergii usually absorbs losses;
-                  consider skipping.
-                </span>
-              </div>
-            )}
-          </div>
-
           <div className="space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
               Notes (optional)
@@ -312,31 +241,72 @@ export default function CalculateSettlementModal({
               {error}
             </div>
           )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-zinc-800">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={goBack}
+              className="text-zinc-400 hover:text-zinc-100"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={saveRecord ? handleSave : goBack}
+              disabled={createMutation.isPending}
+              className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg"
+            >
+              {saveRecord
+                ? createMutation.isPending
+                  ? 'Saving…'
+                  : 'Save Settlement'
+                : 'Close'}
+            </Button>
+          </div>
         </div>
 
-        <DialogFooter className="bg-zinc-900/30 p-6 border-t border-zinc-800">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={onClose}
-            className="text-zinc-400 hover:text-zinc-100"
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={saveRecord ? handleSave : onClose}
-            disabled={createMutation.isPending}
-            className="bg-teal-600 hover:bg-teal-500 text-white shadow-lg"
-          >
-            {saveRecord
-              ? createMutation.isPending
-                ? 'Saving…'
-                : 'Save Settlement'
-              : 'Close'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div className="lg:sticky lg:top-6 rounded-3xl border border-zinc-800 bg-zinc-900/40 p-6 text-sm">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+            Live preview
+          </p>
+          {previewMutation.isPending ? (
+            <p className="mt-2 text-zinc-400">Calculating…</p>
+          ) : preview?.base_amount && preview?.base_currency ? (
+            <div className="mt-2 space-y-1">
+              <p>
+                Base:{' '}
+                <span className="font-semibold text-zinc-100">
+                  {Number(preview.base_amount).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                  })}{' '}
+                  {preview.base_currency}
+                </span>
+              </p>
+              <p>
+                Share:{' '}
+                <span className="font-semibold text-teal-300">
+                  {Number(preview.computed_amount ?? 0).toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                  })}{' '}
+                  {preview.base_currency}
+                </span>
+              </p>
+            </div>
+          ) : (
+            <p className="mt-2 text-zinc-400">Enter percent + period to compute.</p>
+          )}
+          {isNegative && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-300">
+              <AlertCircle className="size-3 mt-0.5" />
+              <span>
+                Base is negative (loss period). Saving will record a negative
+                settlement. Sergii usually absorbs losses; consider skipping.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+    </ShellPage>
   )
 }
