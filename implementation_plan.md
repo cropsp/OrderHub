@@ -21,6 +21,7 @@
 - Sprint ORD-BULK-1 status: `DONE` (Bulk order status change — current-page select + one-call batch + per-order summary — commits `9f9aa37` / `f90a174`)
 - Sprint DASH-PERIOD status: `DONE` (Dashboard period selector — financial widgets scoped, operational live — commits `4acefc8` / `42f081c`)
 - Sprint CTRY-1 status: `DONE` (Full country names in address displays via Intl.DisplayNames — commit `5350671`)
+- Sprint SETTLE-PAGE status: `DONE` (Calculate Settlement modal → dedicated page — commit `0349087`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3598,6 +3599,38 @@ Frontend-only, no backend, no migration.
 - **Two follow-ups parked** (`CTRY-FOLLOWUPS`, see Explicitly deferred): (a) `/customers` search placeholder advertises country search that the backend never implemented; (b) a searchable country picker to replace the two ISO-2 text inputs.
 - **Deploy:** frontend-only rebuild — no backend, no migration.
 - **Closes:** the "GB instead of United Kingdom" readability gap. Branch `feat/ctry-1` ready for merge + deploy.
+
+---
+
+**Sprint SETTLE-PAGE — Calculate Settlement: modal → dedicated page** (Status: `DONE` — commit `0349087` on branch `feat/settle-page`; frontend vitest 90 → 94, backend untouched at 219)
+
+Goal: the partner-settlement calculator was a cramped `max-w-xl` modal
+(`CalculateSettlementModal`) — partner picker, formula, percent, period, currency,
+notes, save toggle, and a live preview all in one dialog. Moved it onto a dedicated
+page so the form has room (form + live preview side by side). Same fields, same
+backend, same calculation — only the container changed. Frontend-only, no backend,
+no migration. Record Payment stays a modal.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| SETTLE-PAGE-1 | New route `/shops/:shopId/finance/settlement` (lazy `SettlementPage.tsx`) nested in the existing `RequireRole [OWNER, MANAGER]` block. The form + hooks + debounced preview + `isNegative` + `handleSave` moved over from the modal unchanged; the modal's `resetKey` block dropped (a page has no `isOpen`). Two-column layout on `lg+` (fields left, sticky live-preview card right; stacked below). Git recorded it as a 58%-similarity rename of the deleted modal. | `App.tsx`, new `pages/SettlementPage.tsx` | `0349087` |
+| SETTLE-PAGE-2 | `PartnerPayoutsSection` both triggers (button + empty-state CTA) now `navigate` to the new route with the finance period as `?start=&end=` query params; `calcOpen` state + the modal mount removed. Record Payment / ConfirmDialog / tables untouched. `CalculateSettlementModal.tsx` + its test deleted (grep-confirmed no remaining refs). | `PartnerPayoutsSection.tsx`, deleted modal + test | `0349087` |
+
+**OQ decisions:** OQ-1 → period handed over via `?start=&end=` query params (page seeds editable start/end from them, `periodPresets` This-Month fallback). OQ-2 → deleted the modal and rehomed its logic in the page (least churn, single-use). OQ-3 → relies on `useCreateSettlement`'s existing invalidation marking the finance queries stale → refetch on remount (see verification gap). OQ-4 → page behind the same `RequireRole [OWNER, MANAGER]` as the finance route.
+
+**Verification (CC):** frontend vitest 90 → 94 (7 cases in the new `SettlementPage.test.tsx`: ported form/validation cases + query-param seeding + malformed-param fallback + save-payload + navigate-back; minus the deleted modal test). `tsc -p tsconfig.app.json` + lint clean on the touched files (pre-existing TYPECHECK-1 errors elsewhere only). Backend untouched (219).
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/settle-page`, owner login, Lamamarka finance):**
+- "Calculate Settlement" → navigates to `/shops/{id}/finance/settlement?start=…&end=…`; the page shows a roomy two-column layout (form + LIVE PREVIEW side card) with the period pre-filled from the finance window (01.01 → 31.12.2026). ✓
+- Live preview updates on input: percent 25 → 50 moved Share 15.00 → 29.99 USD (Base 59.98 constant). ✓
+- Cancel → returns to `/shops/{id}/finance`. ✓
+- Record Payment still opens as a modal ("Record Partner Payment"), staying on the finance page — untouched. ✓
+- Read-only smoke; no settlement was saved (no data mutated).
+
+**Post-sprint notes:**
+- **Verification gap (not a defect):** the **save → return → real refetch** path was deliberately not live-committed (a real save creates a settlement row that's awkward to clean up). It's covered by the unit test (`createMutateAsync` fires with the expected payload + navigates to `/finance`), but the actual settlements-table refresh on return rests on OQ-3's invalidation reasoning — argued, not observed. Worth one real save the next time we're in front of the app.
+- **Deploy:** frontend-only rebuild — no backend, no migration.
+- **Closes:** the cramped-settlement-modal complaint. Branch `feat/settle-page` ready for merge + deploy.
 
 ---
 
