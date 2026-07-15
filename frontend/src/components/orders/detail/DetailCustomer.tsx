@@ -1,5 +1,6 @@
 import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { countryName } from '@/lib/countries';
 import { getInitials, getAvatarColor } from '@/utils/avatar';
 import type { OrderDetail } from '@/types/order';
 
@@ -41,7 +42,9 @@ export function DetailCustomer({ order }: DetailCustomerProps) {
         
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-medium text-zinc-400">Country</span>
-          <span className="text-sm text-zinc-300 font-semibold">{order.shipping_country || 'N/A'}</span>
+          <span className="text-sm text-zinc-300 font-semibold" title={order.shipping_country || undefined}>
+            {countryName(order.shipping_country, 'N/A')}
+          </span>
         </div>
       </div>
 

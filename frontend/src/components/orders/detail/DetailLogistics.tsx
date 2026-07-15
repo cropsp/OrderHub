@@ -10,6 +10,7 @@ import { useSearchCities, useGetWarehouses, useGetParcelEstimate } from '@/hooks
 import { useShops } from '@/hooks/useShops';
 import { usePackaging } from '@/hooks/usePackaging';
 import { cn } from '@/lib/utils';
+import { countryName } from '@/lib/countries';
 import { useToastStore } from '@/components/ui/Toast';
 
 interface DetailLogisticsProps {
@@ -401,8 +402,11 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                 </div>
                 <p className="text-zinc-400 text-[11px] ml-4.5">{order.shipping_city}{order.shipping_state ? `, ${order.shipping_state}` : ''} {order.shipping_zip}</p>
                 <div className="flex items-center gap-2 mt-3">
-                   <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[9px] font-bold uppercase tracking-widest border border-zinc-700/50">
-                    {order.shipping_country || '??'}
+                   <span
+                     className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[9px] font-bold border border-zinc-700/50 whitespace-nowrap"
+                     title={order.shipping_country || undefined}
+                   >
+                    {countryName(order.shipping_country, '??')}
                    </span>
                    {order.shipping_warehouse_ref && (
                      <span className="px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-500 text-[9px] font-bold uppercase tracking-widest border border-teal-500/20">
