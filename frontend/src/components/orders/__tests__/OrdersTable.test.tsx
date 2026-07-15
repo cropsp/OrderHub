@@ -1,6 +1,7 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { afterEach } from 'vitest';
 
 import OrdersTable from '../OrdersTable';
 import type { OrderListItem } from '@/types/order';
@@ -28,14 +29,30 @@ const order = {
   status: 'new',
 } as unknown as OrderListItem;
 
+const secondOrder = { ...order, id: 'order-2', external_id: 'EX-2' } as OrderListItem;
+
+function renderTable(props: Partial<React.ComponentProps<typeof OrdersTable>> = {}) {
+  const merged = {
+    orders: [order],
+    selectedIds: new Set<string>(),
+    onToggleOne: vi.fn(),
+    onToggleAll: vi.fn(),
+    ...props,
+  };
+  render(
+    <MemoryRouter>
+      <OrdersTable {...merged} />
+    </MemoryRouter>,
+  );
+  return merged;
+}
+
+afterEach(cleanup);
+
 describe('OrdersTable inline status change', () => {
   it('renders the order row and wires the status-update hook', () => {
     h.updateStatusCalls = 0;
-    render(
-      <MemoryRouter>
-        <OrdersTable orders={[order]} />
-      </MemoryRouter>,
-    );
+    renderTable();
 
     // Row content renders.
     expect(screen.getByText('Jane Doe')).toBeInTheDocument();
@@ -46,5 +63,51 @@ describe('OrdersTable inline status change', () => {
 
     // The row-actions trigger is present.
     expect(screen.getByRole('button')).toBeInTheDocument();
+  });
+});
+
+describe('OrdersTable bulk selection', () => {
+  it('toggles a single row through onToggleOne', () => {
+    const { onToggleOne } = renderTable();
+
+    fireEvent.click(screen.getByLabelText('Select order EX-1'));
+
+    expect(onToggleOne).toHaveBeenCalledWith('order-1');
+  });
+
+  it('selects every rendered row through onToggleAll', () => {
+    const { onToggleAll } = renderTable({ orders: [order, secondOrder] });
+
+    fireEvent.click(screen.getByLabelText('Select all orders on this page'));
+
+    expect(onToggleAll).toHaveBeenCalledWith(true);
+  });
+
+  it('reflects selection state and shows indeterminate on a partial page', () => {
+    renderTable({
+      orders: [order, secondOrder],
+      selectedIds: new Set(['order-1']),
+    });
+
+    const selectAll = screen.getByLabelText(
+      'Select all orders on this page',
+    ) as HTMLInputElement;
+    expect((screen.getByLabelText('Select order EX-1') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Select order EX-2') as HTMLInputElement).checked).toBe(false);
+    expect(selectAll.checked).toBe(false);
+    expect(selectAll.indeterminate).toBe(true);
+  });
+
+  it('checks the header box when every row on the page is selected', () => {
+    renderTable({
+      orders: [order, secondOrder],
+      selectedIds: new Set(['order-1', 'order-2']),
+    });
+
+    const selectAll = screen.getByLabelText(
+      'Select all orders on this page',
+    ) as HTMLInputElement;
+    expect(selectAll.checked).toBe(true);
+    expect(selectAll.indeterminate).toBe(false);
   });
 });
