@@ -1,6 +1,13 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import {
+  endOfMonth,
+  endOfYear,
+  format,
+  startOfMonth,
+  startOfYear,
+} from 'date-fns';
 
 import DashboardPage from '../DashboardPage';
 import type { DashboardResponse } from '@/types/dashboard';
@@ -50,22 +57,26 @@ function buildDashboardResponse(
   };
 }
 
+const mockOrders = vi.fn();
 vi.mock('@/hooks/useOrders', () => ({
-  useOrders: () => ({
-    data: {
-      items: [
-        {
-          id: 'ord-1',
-          external_id: '1001',
-          title: 'Custom Wallet',
-          status: 'new',
-          ordered_at: new Date().toISOString(),
-          shop_name: 'Main Shop',
-        },
-      ],
-    },
-    isLoading: false,
-  }),
+  useOrders: (...args: unknown[]) => {
+    mockOrders(...args);
+    return {
+      data: {
+        items: [
+          {
+            id: 'ord-1',
+            external_id: '1001',
+            title: 'Custom Wallet',
+            status: 'new',
+            ordered_at: new Date().toISOString(),
+            shop_name: 'Main Shop',
+          },
+        ],
+      },
+      isLoading: false,
+    };
+  },
 }));
 
 vi.mock('@/components/dashboard/RevenueChart', () => ({
@@ -130,5 +141,65 @@ describe('DashboardPage smoke test', () => {
     expect(
       screen.queryByTestId('unallocated-overhead-card'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage period selector (DASH-PERIOD)', () => {
+  const iso = (d: Date) => format(d, 'yyyy-MM-dd');
+
+  beforeEach(() => {
+    mockDashboard.mockReset();
+    mockOrders.mockClear();
+    localStorage.clear();
+    mockDashboard.mockReturnValue({
+      data: buildDashboardResponse(),
+      isLoading: false,
+      error: null,
+    });
+  });
+
+  it('defaults to This Month and fetches that window', () => {
+    renderDashboard();
+
+    expect(screen.getByRole('button', { name: 'This Month' })).toBeInTheDocument();
+    const now = new Date();
+    expect(mockDashboard).toHaveBeenLastCalledWith(
+      undefined,
+      iso(startOfMonth(now)),
+      iso(endOfMonth(now)),
+    );
+  });
+
+  it('refetches with the new window when the preset changes', () => {
+    renderDashboard();
+    fireEvent.click(screen.getByRole('button', { name: 'This Year' }));
+
+    const now = new Date();
+    expect(mockDashboard).toHaveBeenLastCalledWith(
+      undefined,
+      iso(startOfYear(now)),
+      iso(endOfYear(now)),
+    );
+  });
+
+  it('never scopes the attention queue by the period', () => {
+    renderDashboard();
+    fireEvent.click(screen.getByRole('button', { name: 'This Year' }));
+
+    // The attention/recent lists are the "what needs action now" queue — they
+    // stay live, so no useOrders call may carry date params.
+    expect(mockOrders).toHaveBeenCalled();
+    for (const [params] of mockOrders.mock.calls) {
+      expect(params).not.toHaveProperty('start_date');
+      expect(params).not.toHaveProperty('end_date');
+    }
+  });
+
+  it('remembers its own preset, not the Finance page key', () => {
+    renderDashboard();
+    fireEvent.click(screen.getByRole('button', { name: 'This Year' }));
+
+    expect(localStorage.getItem('orderhub:dashboard:lastPreset')).toBe('this_year');
+    expect(localStorage.getItem('orderhub:shopFinance:lastPreset')).toBeNull();
   });
 });

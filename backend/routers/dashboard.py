@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends
+from datetime import date, datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status as http_status
 from sqlalchemy import select, func, cast, Date, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,14 +19,48 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 @router.get("", response_model=DashboardResponse)
 async def get_dashboard_stats(
     shop_id: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get dashboard statistics and revenue (revenue only shown to owners)."""
+    """Get dashboard statistics and revenue (revenue only shown to owners).
+
+    DASH-PERIOD: when both start_date and end_date are supplied, the financial
+    widgets (revenue summary, trend, shop distribution, unallocated overhead)
+    are scoped to that inclusive window. The operational widgets — orders by
+    status, total_orders, attention_needed_count, low-stock packaging — stay
+    live (all-time) regardless: they answer "what needs action now".
+    Both dates absent → the previous all-time behaviour, unchanged.
+    """
     import logging
     logger = logging.getLogger("dashboard")
     logger.info(f"Fetching dashboard stats for shop_id: {shop_id}, user: {current_user.email}")
-    
+
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_date must be on or before end_date",
+        )
+    has_period = bool(start_date and end_date)
+
+    # Revenue is realised on fulfillment (shipment), not on order creation.
+    # COALESCE protects legacy/imported rows where shipped_at is NULL. Mirrors
+    # finance_service._run_kpi_aggregate so the two pages reconcile for the
+    # same (shop, period).
+    day_col = cast(func.coalesce(Order.shipped_at, Order.ordered_at), Date)
+
+    # Accrual-date window for revenue figures.
+    period_filter = []
+    # Placement-date window for the shop distribution (an order count, not revenue).
+    placed_filter = []
+    if has_period:
+        period_filter = [day_col >= start_date, day_col <= end_date]
+        placed_filter = [
+            cast(Order.ordered_at, Date) >= start_date,
+            cast(Order.ordered_at, Date) <= end_date,
+        ]
+
     # Base filter
     base_filter = []
     if shop_id and shop_id != "all" and shop_id != "undefined":
@@ -77,6 +111,7 @@ async def get_dashboard_stats(
             )
             .where(Order.status.in_([OrderStatus.COMPLETED, OrderStatus.SHIPPED]))
             .where(*base_filter)
+            .where(*period_filter)
             .group_by(Order.currency)
         )
         rev_result = await db.execute(rev_query)
@@ -90,18 +125,22 @@ async def get_dashboard_stats(
                 net_profit=float(rev or 0) - float(prod or 0) - float(fee or 0) - float(ship or 0)
             ))
 
-        # Daily Trend (Last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-        # Revenue is realised on fulfillment (shipment), not on order creation.
-        # COALESCE protects legacy/imported rows where shipped_at is NULL.
-        day_col = cast(func.coalesce(Order.shipped_at, Order.ordered_at), Date)
+        # Daily Trend — the selected period, or the last 30 days when unscoped.
+        # The fallback window is measured on day_col too, so the filter and the
+        # GROUP BY agree (pre-DASH-PERIOD it filtered ordered_at while grouping
+        # by the COALESCE column).
+        if has_period:
+            trend_filter = period_filter
+        else:
+            thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).date()
+            trend_filter = [day_col >= thirty_days_ago]
         trend_query = (
             select(
                 day_col.label("day"),
                 func.sum(Order.total_price).label("daily_rev")
             )
             .where(Order.status.in_([OrderStatus.COMPLETED, OrderStatus.SHIPPED]))
-            .where(Order.ordered_at >= thirty_days_ago)
+            .where(*trend_filter)
             .where(*base_filter)
             .group_by(day_col)
             .order_by(day_col)
@@ -116,6 +155,7 @@ async def get_dashboard_stats(
         select(Shop.name, func.count(Order.id))
         .join(Order, Order.shop_id == Shop.id)
         .where(*base_filter)
+        .where(*placed_filter)
         .group_by(Shop.name)
     )
     if current_user.role == UserRole.DESIGNER:
@@ -135,6 +175,12 @@ async def get_dashboard_stats(
     # Visible only to owners (same audience as revenue figures).
     unallocated_overhead: list[CurrencyAmount] = []
     if current_user.role == UserRole.OWNER:
+        # DASH-PERIOD: scoped by received_at — the same column
+        # finance_service._run_overhead_aggregate filters on.
+        overhead_filter = []
+        if has_period:
+            received_col = cast(OverheadMaterialReceipt.received_at, Date)
+            overhead_filter = [received_col >= start_date, received_col <= end_date]
         overhead_query = (
             select(
                 OverheadMaterialReceipt.currency,
@@ -143,6 +189,7 @@ async def get_dashboard_stats(
                 ).label("amount"),
             )
             .where(OverheadMaterialReceipt.shop_id.is_(None))
+            .where(*overhead_filter)
             .group_by(OverheadMaterialReceipt.currency)
         )
         overhead_result = await db.execute(overhead_query)

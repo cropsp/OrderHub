@@ -1,10 +1,18 @@
 import { useMemo } from 'react';
+import { format } from 'date-fns';
 import { formatDateTime, formatMoney } from '@/lib/format';
 import { AlertTriangle, Clock, PackagePlus, Receipt, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { useOrders } from '@/hooks/useOrders';
 import { useDashboard } from '@/hooks/useDashboard';
+import FinancePeriodSelector from '@/components/finance/FinancePeriodSelector';
+import {
+  DASHBOARD_PRESET_STORAGE_KEY,
+  loadLastPreset,
+  rangeForPreset,
+  type PeriodRange,
+} from '@/components/finance/periodPresets';
 import ShellPage from './ShellPage';
 import StatCards from '@/components/dashboard/StatCards';
 import RevenueChart from '@/components/dashboard/RevenueChart';
@@ -19,8 +27,16 @@ import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
   const [selectedShopId, setSelectedShopId] = useState<string | undefined>(undefined);
+  const [range, setRange] = useState<PeriodRange>(() => {
+    const preset = loadLastPreset(DASHBOARD_PRESET_STORAGE_KEY);
+    // A remembered 'custom' has no stored bounds — fall back to This Month.
+    return rangeForPreset(preset === 'custom' ? 'this_month' : preset);
+  });
+  const startIso = useMemo(() => format(range.start, 'yyyy-MM-dd'), [range.start]);
+  const endIso = useMemo(() => format(range.end, 'yyyy-MM-dd'), [range.end]);
+
   const { data: shops } = useShops();
-  const { data, isLoading, error } = useDashboard(selectedShopId);
+  const { data, isLoading, error } = useDashboard(selectedShopId, startIso, endIso);
   const { data: recentOrders, isLoading: isRecentLoading } = useOrders({ 
     page: 1, 
     limit: 10,
@@ -107,6 +123,14 @@ export default function DashboardPage() {
       }
     >
       <div className="space-y-10 animate-in fade-in duration-700">
+        {/* DASH-PERIOD: scopes the financial widgets below. The attention queue
+            and low-stock card deliberately ignore it — they stay live. */}
+        <FinancePeriodSelector
+          value={range}
+          onChange={setRange}
+          storageKey={DASHBOARD_PRESET_STORAGE_KEY}
+        />
+
         {isLoading || !data ? (
           <>
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
