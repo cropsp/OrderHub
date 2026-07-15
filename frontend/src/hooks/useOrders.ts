@@ -48,6 +48,31 @@ export function useUpdateOrderStatus() {
   })
 }
 
+export function useBulkUpdateOrderStatus() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore(s => s.addToast)
+
+  return useMutation({
+    mutationFn: ({
+      orderIds,
+      status,
+      comment,
+    }: {
+      orderIds: string[]
+      status: string
+      comment?: string
+    }) => ordersApi.bulkUpdateStatus(orderIds, status, comment),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      // Same MAT-4 rule as the single-order path: SHIPPED consumption warnings,
+      // aggregated across the batch.
+      for (const warning of data?.warnings ?? []) {
+        addToast(warning, warning.startsWith('⚠') ? 'error' : 'info')
+      }
+    },
+  })
+}
+
 export function useUpdateOrder() {
   const queryClient = useQueryClient()
 

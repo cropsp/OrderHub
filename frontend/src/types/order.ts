@@ -21,6 +21,19 @@ export interface OrderDetail extends OrderListItem {
 
 export type OrderListResponse = PaginatedResponse<OrderListItem>
 
+export interface BulkStatusSkippedItem {
+  order_id: string
+  reason: string
+}
+
+/** Per-order outcome summary returned by POST /orders/bulk-status. */
+export interface BulkStatusResult {
+  updated: number
+  unchanged: number
+  skipped: BulkStatusSkippedItem[]
+  warnings: string[]
+}
+
 export interface OrderListFilters {
   page?: number
   limit?: number

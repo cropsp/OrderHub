@@ -1,7 +1,13 @@
 import client from './client'
 
 import type { OrderItem } from '@/types/common'
-import type { OrderDetail, OrderListFilters, OrderListItem, OrderListResponse } from '@/types/order'
+import type {
+  BulkStatusResult,
+  OrderDetail,
+  OrderListFilters,
+  OrderListItem,
+  OrderListResponse,
+} from '@/types/order'
 
 export const ordersApi = {
   list: async (filters: OrderListFilters = {}): Promise<OrderListResponse> => {
@@ -18,6 +24,21 @@ export const ordersApi = {
     // MAT-4: response carries `warnings: string[]` populated by the SHIPPED
     // consumption hook (currency mismatch, partial BOM, negative stock).
     const { data } = await client.post<OrderDetail>(`/orders/${orderId}/status`, { new_status: status })
+    return data
+  },
+
+  bulkUpdateStatus: async (
+    orderIds: string[],
+    status: string,
+    comment?: string,
+  ): Promise<BulkStatusResult> => {
+    // One call for the whole batch; the response classifies each order as
+    // updated / unchanged / skipped.
+    const { data } = await client.post<BulkStatusResult>('/orders/bulk-status', {
+      order_ids: orderIds,
+      new_status: status,
+      comment,
+    })
     return data
   },
 

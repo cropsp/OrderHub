@@ -11,11 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.order import OrderStatus
+from models.order import Order, OrderStatus
 from models.user import User, UserRole
 from schemas.order import (
-    OrderFilters, OrderListResponse, OrderResponse, 
+    OrderFilters, OrderListResponse, OrderResponse,
     OrderCreate, OrderUpdate, StatusChangeRequest,
+    BulkStatusChangeRequest, BulkStatusChangeResponse, SkippedItem,
     OrderItemCreate, OrderItemUpdate, OrderItemResponse
 )
 from schemas.common import PaginatedResponse
@@ -189,6 +190,74 @@ async def update_existing_order(
     await db.commit()
     logger.info(f"Order {order_id} update committed")
     return await get_order(order_id, current_user, db)
+
+
+@router.post("/bulk-status", response_model=BulkStatusChangeResponse)
+async def bulk_transition_order_status(
+    body: BulkStatusChangeRequest,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply one status to many orders, reporting the per-order outcome.
+
+    Best-effort batch: each order runs through the same change_order_status path
+    as the single-order endpoint (audit history + MAT-4 consumption included),
+    and one failure does not abort the rest. A single commit closes the batch.
+
+    Declared above the /{order_id}/... routes so no future parametrised POST can
+    shadow this literal path.
+    """
+    updated = 0
+    unchanged = 0
+    skipped: list[SkippedItem] = []
+    warnings: list[str] = []
+
+    logger.info(
+        f"Bulk status change to {body.new_status} for {len(body.order_ids)} order(s) "
+        f"by {current_user.email}"
+    )
+
+    # dict.fromkeys dedupes while preserving the caller's order.
+    for order_id in dict.fromkeys(body.order_ids):
+        order = await db.get(Order, order_id)
+        if order is None:
+            skipped.append(SkippedItem(order_id=order_id, reason="not found"))
+            continue
+
+        # change_order_status treats this as a no-op early return, which is
+        # indistinguishable from success at the call site — classify it here.
+        if order.status == body.new_status:
+            unchanged += 1
+            continue
+
+        try:
+            # SAVEPOINT per order: the SHIPPED path flushes the status change and
+            # history row before the MAT-4 consumption hook runs, so a consumption
+            # failure would otherwise be committed by the loop's final commit while
+            # being reported as skipped.
+            async with db.begin_nested():
+                _, order_warnings = await change_order_status(
+                    db, order, body.new_status, current_user, body.comment
+                )
+        except HTTPException as exc:
+            skipped.append(SkippedItem(order_id=order_id, reason=str(exc.detail)))
+            continue
+
+        updated += 1
+        warnings.extend(order_warnings)
+
+    await db.commit()
+    logger.info(
+        f"Bulk status change committed: updated={updated} unchanged={unchanged} "
+        f"skipped={len(skipped)}"
+    )
+
+    return BulkStatusChangeResponse(
+        updated=updated,
+        unchanged=unchanged,
+        skipped=skipped,
+        warnings=warnings,
+    )
 
 
 @router.post("/{order_id}/status", response_model=OrderResponse)

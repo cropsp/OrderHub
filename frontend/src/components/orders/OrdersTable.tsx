@@ -32,12 +32,24 @@ import type { OrderListItem } from '@/types/order';
 interface OrdersTableProps {
   orders: OrderListItem[];
   isLoading?: boolean;
+  /** Ids of the selected rows — page-scoped, owned by OrdersLayout. */
+  selectedIds: Set<string>;
+  onToggleOne: (orderId: string) => void;
+  onToggleAll: (checked: boolean) => void;
 }
 
-export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
+export default function OrdersTable({
+  orders,
+  isLoading,
+  selectedIds,
+  onToggleOne,
+  onToggleAll,
+}: OrdersTableProps) {
   const navigate = useNavigate();
   const updateStatus = useUpdateOrderStatus();
   const addToast = useToastStore((s) => s.addToast);
+  const selectedOnPage = orders.filter((o) => selectedIds.has(o.id)).length;
+  const allSelected = orders.length > 0 && selectedOnPage === orders.length;
 
   if (isLoading) {
     return (
@@ -65,6 +77,18 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
       <Table className="min-w-[760px]">
         <TableHeader className="bg-zinc-900 sticky top-0 z-10">
           <TableRow className="border-zinc-800 hover:bg-transparent">
+            <TableHead className="w-10">
+              <input
+                type="checkbox"
+                aria-label="Select all orders on this page"
+                className="size-4 rounded accent-teal-500 cursor-pointer align-middle"
+                checked={allSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = selectedOnPage > 0 && !allSelected;
+                }}
+                onChange={(e) => onToggleAll(e.target.checked)}
+              />
+            </TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 py-4">Order</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Customer</TableHead>
             <TableHead className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Product</TableHead>
@@ -86,6 +110,16 @@ export default function OrdersTable({ orders, isLoading }: OrdersTableProps) {
                 className="border-zinc-800/60 hover:bg-zinc-800/40 transition-colors cursor-pointer group h-14"
                 onClick={() => navigate(`/orders/${order.id}`)}
               >
+                {/* stopPropagation so selecting a row does not open its detail card */}
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select order ${order.external_id}`}
+                    className="size-4 rounded accent-teal-500 cursor-pointer align-middle"
+                    checked={selectedIds.has(order.id)}
+                    onChange={() => onToggleOne(order.id)}
+                  />
+                </TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-1">
                     <span className="font-mono text-xs text-zinc-400">#{order.external_id}</span>
