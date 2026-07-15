@@ -19,6 +19,8 @@
 - Sprint ORD-UX-1 status: `DONE` (Orders pagination + inline status change + visible Finance entry — commits `e6e1671` / `c9c770a` / `90aefd8`)
 - Sprint PC-F-1 status: `DONE` (Product images — single, product-level; manual upload + Shopify pull — commits `c1cae4c` / `9268cc7` / `177f631` / `0f8f153`)
 - Sprint ORD-BULK-1 status: `DONE` (Bulk order status change — current-page select + one-call batch + per-order summary — commits `9f9aa37` / `f90a174`)
+- Sprint DASH-PERIOD status: `DONE` (Dashboard period selector — financial widgets scoped, operational live — commits `4acefc8` / `42f081c`)
+- Sprint CTRY-1 status: `DONE` (Full country names in address displays via Intl.DisplayNames — commit `5350671`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3538,6 +3540,67 @@ the picker offers every status; the backend applies each order through the exist
 
 ---
 
+**Sprint DASH-PERIOD — Dashboard period selector (reuse the Finance-page pattern)** (Status: `DONE` — commits `4acefc8` / `42f081c` on branch `feat/dash-period`; backend pytest 214 → 219, frontend vitest 81 → 85)
+
+Goal: the dashboard showed all-time figures (only the Revenue Trend chart was
+windowed, hard-coded to 30 days). Added a period selector identical to the per-shop
+Finance page (Today / This Week / This Month / Last Month / This Year / Custom).
+Financial/analytics widgets scope to the window; operational "what needs action now"
+widgets stay live. No DB migration.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| DASH-PERIOD-1 | Optional `start_date`/`end_date` on `GET /api/dashboard` (422 if reversed). When present, four widgets scope to the window: revenue summary + trend on `cast(coalesce(shipped_at, ordered_at), Date)` (mirroring `finance_service._run_kpi_aggregate`), shop distribution on `ordered_at`, unallocated overhead on `received_at`. Status counts / `attention_needed_count` / low-stock untouched (stay live). No dates → unchanged behaviour incl. the 30-day trend fallback. Incidental fix: the trend previously filtered `ordered_at` while grouping by the COALESCE column — both now measure the same column. | `routers/dashboard.py`, tests | `4acefc8` |
+| DASH-PERIOD-2 | `DashboardPage` mounts the reused `FinancePeriodSelector` + `periodPresets` (imported, **not** forked) above the stat cards, with its own resolved-range summary; passes `start_date`/`end_date` alongside `shop_id`. The only change to the selector is an additive `storageKey?: string` prop (defaults to the finance key, so `ShopFinancePage` is unchanged); the dashboard passes `orderhub:dashboard:lastPreset` so the two pages remember presets independently. Default **This Month**. | selector, presets, hook, page, page test | `42f081c` |
+
+**OQ decisions:** OQ-1 → revenue scoped on the finance service's accrual column (`coalesce(shipped_at, ordered_at)`), so Revenue/COGS/Fees reconcile with Finance. OQ-2 → overhead on `received_at`, shop distribution on `ordered_at`. OQ-3 → selector + presets reused via an additive `storageKey` prop (no fork, no lift needed). OQ-4 → existing empty states (RevenueChart "no data" etc.) reused.
+
+**Verification (CC):** backend 219 pass (+5) — accrual bounds, dropped 30-day window, `ordered_at`/`received_at` scoping, backward-compat, and a **byte-identical comparison of the status query with and without a period** (the real guard that the queue stays live). Frontend 85 pass (+4); `npx tsc -p tsconfig.app.json --noEmit` = the 25 pre-existing TYPECHECK-1 errors only, none in touched files; ESLint clean.
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/dash-period`, owner login):**
+- Selector present, default This Month (range shown), preset persisted across reload (localStorage). ✓
+- This Month → This Year: Net Profit **0 → 200.96 USD**, Revenue Trend empty → populated, Order Distribution empty → **77 total**, Workshop Overhead absent → **300 UAH** — all financial widgets tracked the window. ✓
+- Across both periods the operational counters held constant: **Active Orders 77, Attention 67, low-stock 1**. ✓ (proves financial-scoped vs operational-live split)
+- Interactive switching both ways works; shop filter composes (per CC backend tests). ✓
+- Tooling note: a heavy Cowork JS eval wedged one tab's CDP session mid-smoke; verified cleanly in a fresh tab — not an app issue.
+
+**Post-sprint notes:**
+- **Follow-up parked** (`NETPROFIT-RECONCILE`, see Explicitly deferred): dashboard Net Profit excludes allocated overhead while Finance subtracts it — the two diverge for any shop with overhead in the window (Revenue/COGS/Fees reconcile exactly). Pre-existing formula difference surfaced by the period view; needs a definition decision.
+- **Deploy:** backend + frontend rebuild, **no** `alembic upgrade head`.
+- **Closes:** the dashboard "all transactions for the entire period" inconvenience. Branch `feat/dash-period` ready for merge + deploy.
+
+---
+
+**Sprint CTRY-1 — Show full country names in address displays (display-only)** (Status: `DONE` — commit `5350671` on branch `feat/ctry-1`; frontend vitest 85 → 90, backend untouched at 219)
+
+Goal: shipping/customer country was stored + shown as an ISO-3166-1 alpha-2 code
+(`GB`, `JP`, `US`), so the operator read "GB" instead of "United Kingdom". Map the
+code → full name **for display only**; the stored value, the entry inputs, and all
+`shipping_country === 'UA'` Nova Poshta logic stay on the 2-letter code.
+Frontend-only, no backend, no migration.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| CTRY-1-1 | New `lib/countries.ts` — `countryName(code?, fallback='—')` built on the built-in **`Intl.DisplayNames(['en'], {type:'region'})`** (instance at module scope; `.of()` in try/catch). **No hardcoded list, no dependency.** Empty → caller's fallback; unresolvable code → raw upper-cased code. (Switched from an inline ISO map after generating the ~249-entry list tripped a content filter — `Intl.DisplayNames` is cleaner and sidesteps it.) | `lib/countries.ts` + test | `5350671` |
+| CTRY-1-2 | Applied at the three read-only display sites, full name + raw code as `title` tooltip, chip chrome kept: `DetailCustomer.tsx:44` (Country row, `'N/A'` fallback), `DetailLogistics.tsx:405` (badge, `'??'` fallback), `CustomersPage.tsx:152` (badge, `'Global'` fallback). | 3 display files | `5350671` |
+
+**OQ decisions:** OQ-1 → `Intl.DisplayNames`, not a hardcoded map (see above). OQ-2 → both ISO-2 entry inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) stay code fields this sprint; a searchable picker is a parked follow-up.
+
+**Verification (CC):** frontend vitest 85 → 90 (+5 `countryName` cases: known code → name, lower-case → name, unknown `QQ` → code, empty/null → fallback — note ICU resolves `ZZ` to "Unknown Region", so `QQ` is the genuine-unassigned test); `tsc -p tsconfig.app.json` holds at the 25-error TYPECHECK-1 baseline, none from this change; ESLint clean on the four fully-clean files (`DetailLogistics.tsx`'s 6 `no-explicit-any` are byte-identical to main — pre-existing). Backend untouched (219), not re-run.
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/ctry-1`, owner login):**
+- `/customers` → geographic badges show full names (Czechia, United States, Germany, Poland, Austria) with the raw code on hover (title = CZ/US/DE/PL/AT). ✓
+- Non-UA order (Lamamarka → Czechia): Customer-profile Country row **and** Shipping & Logistics badge both read "Czechia", `title="CZ"`. ✓
+- UA order (KoraKlenu #00001): reads "Ukraine" (`title="UA"`), and the **Nova Poshta flow is intact** — NP-verified address, "NP VERIFIED" badge, packaging AUTO-CALCULATED. This is the load-bearing check: the `=== 'UA'` logic survived the display change. ✓
+- Read-only smoke; no data mutated.
+
+**Post-sprint notes:**
+- **Two follow-ups parked** (`CTRY-FOLLOWUPS`, see Explicitly deferred): (a) `/customers` search placeholder advertises country search that the backend never implemented; (b) a searchable country picker to replace the two ISO-2 text inputs.
+- **Deploy:** frontend-only rebuild — no backend, no migration.
+- **Closes:** the "GB instead of United Kingdom" readability gap. Branch `feat/ctry-1` ready for merge + deploy.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3546,6 +3609,8 @@ in this document where applicable, to avoid duplication.
 
 | ID | Task | Why deferred (2026-05-08) |
 |---|---|---|
+| CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
+| NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
 | TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
 | PC-F-1-followup-1 | Products-list thumbnail (small image in the ProductsPage name cell so near-identical products are distinguishable at a glance) | Deferred per PC-F-1 OQ-4 to keep v1 bounded to the detail card. Needs a batch image endpoint or signed URLs — the current per-product authenticated blob fetch would mean N fetches per list render. |
 | PC-F-1-followup-2 | `GET /products/{id}` and the mirrored `GET /products/{id}/image` lack shop-scoping | **Security.** Pre-existing SEC-05 gap (the product GET never scoped by shop); the new PC-F-1 image route inherits it by mirroring the pattern — any authenticated user can read another shop's product / product image by id. NOT introduced by PC-F-1. Prioritise: add the shop-scope guard to both the product GET and the image GET. |
