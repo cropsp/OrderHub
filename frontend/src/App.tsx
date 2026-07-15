@@ -26,6 +26,7 @@ const OverheadMaterialDetailPage = lazy(
   () => import('@/pages/OverheadMaterialDetailPage'),
 )
 const ShopFinancePage = lazy(() => import('@/pages/ShopFinancePage'))
+const SettlementPage = lazy(() => import('@/pages/SettlementPage'))
 
 function RouteLoadingFallback() {
   return (
@@ -96,6 +97,14 @@ function App() {
               </Suspense>
             }
             path="/shops/:shopId/finance"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <SettlementPage />
+              </Suspense>
+            }
+            path="/shops/:shopId/finance/settlement"
           />
         </Route>
         <Route
