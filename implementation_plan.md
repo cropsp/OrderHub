@@ -16,6 +16,9 @@
 - Sprint PC-B status: `DONE` (Product Detail Page — commit `f99494f`)
 - Sprint PC-B.1 status: `DONE` (Shopify-style Inline Product Editing — commit `bf9f8ba`)
 - Sprint PC-B.2 status: `DONE` (Column Visibility Picker on ProductsPage — commit `46783bf`)
+- Sprint ORD-UX-1 status: `DONE` (Orders pagination + inline status change + visible Finance entry — commits `e6e1671` / `c9c770a` / `90aefd8`)
+- Sprint PC-F-1 status: `DONE` (Product images — single, product-level; manual upload + Shopify pull — commits `c1cae4c` / `9268cc7` / `177f631` / `0f8f153`)
+- Sprint ORD-BULK-1 status: `DONE` (Bulk order status change — current-page select + one-call batch + per-order summary — commits `9f9aa37` / `f90a174`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3440,6 +3443,101 @@ Cross-repo coordination via courier-via-Sergii (same channel as S004). idlaser-s
 
 ---
 
+**Sprint ORD-UX-1 — Orders list pagination + inline status change + visible Finance entry** (Status: `DONE` — commits `e6e1671` / `c9c770a` / `90aefd8` on branch `feat/ord-ux-1`; frontend `npm run test` 66 → 69, backend pytest 188 unchanged)
+
+Goal: three small, frontend-only UX fixes surfaced during the first real
+data load (operator noticed only the first page of orders rendered, status
+could only be changed from inside the detail card, and the per-shop Finance
+page had no discoverable entry point). No backend changes. Product photos
+(PC-F-1) explicitly out of scope.
+
+| ID | Change | File | Scope |
+|---|---|---|---|
+| ORD-UX-1-A | Added `page` state + `PAGE_LIMIT=50`, wired into `filters` → `useOrders` → `ordersApi.list`. Classic "Page X of Y" counter + Previous/Next below the table (table view only per OQ-A1). Page resets to 1 on status-tab / shop-select / search change. Mirrors the existing `CustomersPage.tsx` pager pattern. Backend already paginated (`routers/orders.py:40-64`), untouched. | `OrdersLayout.tsx` | frontend | DONE |
+| ORD-UX-1-B | Replaced the dead "Change Status" stub with a Radix `DropdownMenuSub` listing all statuses minus the current one (`ORDER_STATUS` / `statusLabel`), each calling `useUpdateOrderStatus().mutate` with a call-site `onError` toast via the reused `getApiErrorMessage` helper. Row-cell `stopPropagation` preserved so changing status does not open the detail card. "Archive" left as-is. | `OrdersTable.tsx` | frontend | DONE |
+| ORD-UX-1-C | Pulled the Finance `<Link>` out of the `opacity-0 group-hover` wrapper so it is persistently visible + added a "Finance" text label; Sync/Config/Delete stay hover-only. Kept OWNER gating per OQ-C1. Finance page + route (FIN-1) unchanged. | `ShopsPage.tsx` | frontend | DONE |
+
+**OQ decisions applied:** OQ-A1 → pagination controls in table view only (board unchanged). OQ-B1 → list all statuses; backend validates + `onError` toast on the (owner-never-hit) rejection path. OQ-C1 → kept OWNER-only gating.
+
+**Verification (CC):** `tsc --noEmit` clean; eslint zero new errors (8 pre-existing `no-explicit-any` in these files are identical on `main`); frontend tests 69 pass incl. 3 new (pagination reset/disable + inline-status wiring); backend zero diff, 188 pytest pass. CC note: the OrdersTable test is a render+hook-wiring smoke rather than a full Radix submenu click-through (no `@testing-library/user-event`; no jsdom Radix-menu precedent) — submenu interaction deferred to browser smoke.
+
+**Smoke (Cowork via browser MCP, 2026-07-14, on `feat/ord-ux-1`, owner login):**
+- **A — pagination:** `/orders` "All", footer showed "Page 1 of 2" (Previous disabled, Next enabled). Invoking the real Next handler advanced to "Page 2 of 2" (Previous enabled, Next disabled) and swapped the row set (`#7168337182876` → `#7071268077724`). Clicking the "New" status tab from page 2 reset the footer to "Page 1 of 2" and filtered the list to NEW-only (50 rows). ✓
+- **B — inline status:** on `#7168337182876` (NEW): row ⋯ → "Change Status" submenu opened listing all statuses **except** the current NEW → clicked "In Production" → row badge updated in place to IN PRODUCTION with no card open and no navigation. Reverted In Production → New via the same menu (badge back to NEW); left data clean. ✓
+- **C — Finance entry:** `/shops` renders a persistently visible 📈 "Finance" button in every shop's MANAGEMENT column **without hovering** (Sync/Config/Delete remained hover-only); all four `a[href*="/finance"]` links `visible:true`. Clicking Lamamarka Shopify's Finance navigated to `/shops/{id}/finance`, heading "Lamamarka Shopify — Finance", full KPI grid + chart rendered (Revenue 63 USD, Net Profit 63 USD with the "1 of 1 orders without cost" diagnostic, Shipping Net 3.02 USD). ✓
+
+**Post-sprint notes:**
+- **Note (not a code issue):** the coordinate-based browser-MCP click tool was unreliable in this session (screenshot space 1568-wide vs a 1920 CSS viewport from browser zoom → offset clicks). Cowork verified all interactions by invoking the real React `onClick`/Radix handlers via the page-JS tool, which is functionally identical to a user click for these handlers; visual state confirmed by screenshots. No bearing on the shipped code.
+- **Closes:** the "only first page of orders renders" and "status change requires opening the card" complaints, and the "can't find the finance page" discoverability gap (FIN-1's entry point was hover-only + unlabeled). No new parked items. Branch `feat/ord-ux-1` ready for merge to `main`.
+
+---
+
+**Sprint PC-F-1 — Product images (single, product-level; manual upload + pull-from-Shopify)** (Status: `DONE` — commits `c1cae4c` / `9268cc7` / `177f631` / `0f8f153` on branch `feat/pc-f-1`; backend pytest 188 → 208, frontend vitest 69 → 73)
+
+Goal: many imported products have near-identical titles and were indistinguishable
+in the catalog. Add a single, product-level image per product — populated by manual
+upload/replace/remove (all shops) or a "Pull from Shopify" featured-image fetch
+(Shopify-sourced products). Reuses the existing `/app/uploads` volume; does NOT reuse
+the order-bound `Attachment` model. Realises the parked `PC-F-1` "Future" backlog item.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| PC-F-1-1 | Nullable `image_path` column on `products` + Alembic migration (downgrade drops it; round-trip clean). | `models/product.py`, migration | `c1cae4c` |
+| PC-F-1-2 | `POST/GET/DELETE /products/{id}/image` — upload (mime allowlist jpeg/png/webp + 5 MB cap), authenticated `FileResponse` serve, delete (removes file + nulls column). `file_storage` generalized to store under `products/{product_id}/` without changing the existing order-attachment path (pinned by a regression test). | `routers/products.py`, `services/file_storage.py`, tests | `9268cc7` |
+| PC-F-1-3 | `POST /products/{id}/image/from-shopify` — new featured-image GraphQL query via the existing `call_shopify_graphql` helper; re-wraps `external_ref` → `gid://shopify/Product/{id}` (pinned by a test asserting the exact variables payload); downloads + stores. 409 on non-Shopify / missing token. | `routers/products.py`, `services/shopify_sync.py` (new query only), tests | `177f631` |
+| PC-F-1-4 | Product-image widget on `ProductDetailPage`: placeholder / image (authenticated blob fetch), Upload/Replace/Remove, plus "Pull from Shopify" shown only for Shopify products. api + hook + TS `image_url`. | `ProductDetailPage.tsx`, api/hook/types | `0f8f153` |
+
+**OQ decisions:** OQ-1 → generalized `save_file` with an entity-subdir param, existing order path proven byte-identical by a pinning test. OQ-2 → featured-image query via `call_shopify_graphql`; `external_ref` confirmed = numeric Shopify product id. OQ-3 → `image_url` (nullable) served through the authenticated route; `<img>` renders it via a blob fetch (Authorization header). OQ-4 → products-list thumbnail deferred (`PC-F-1-followup-1`). OQ-5 → mime allowlist jpeg/png/webp + 5 MB, mirroring attachment limits.
+
+**Verification (CC):** backend 208 pass (+20), frontend 73 pass (+4), `tsc`/eslint clean on touched files; migration `upgrade → downgrade → upgrade` clean. Beyond the mocked-DB endpoint tests, CC also ran a real-DB ORM round-trip (save → re-query in a fresh session → path persisted, bytes matched on disk, content-type `image/png`) then restored the column to NULL — dev DB left as found.
+
+**Smoke (Cowork via browser MCP, 2026-07-14, on `feat/pc-f-1`, owner login):**
+- **Etsy product** (Personalized Bat ID Card Holder, LeatherCraft UA): widget shows "NO IMAGE" placeholder + Upload, **no** "Pull from Shopify". Uploading a generated PNG through the input's real `onChange` set the image; after a full page reload it still rendered (served from the backend as an authenticated blob), buttons became Replace/Remove. ✓
+- **Shopify product** (Heavy Mushroom Keychain, Lamamarka, `external_ref=9009323180188`): widget shows Upload **+ Pull from Shopify**. Clicking Pull made a **live Shopify call** and fetched the real 695×695 featured image with no error (token valid). ✓
+- **Remove** on both → placeholder returns; persisted after reload (`image_path` NULL). Data restored to as-found (both products image-less). ✓
+- Caveat: the native OS file picker was not driven; the File was injected via the input's `change` event, which fires the exact React `onChange` the picker would — the widget's upload path is genuinely exercised.
+
+**Post-sprint notes:**
+- **Two follow-ups parked** (see Explicitly deferred): `PC-F-1-followup-1` (products-list thumbnail) and `PC-F-1-followup-2` (**security** — `GET /products/{id}` + the mirrored image route lack shop-scoping; pre-existing SEC-05 gap, worth prioritising).
+- **Commit split note (CC):** three files span commits 2 and 3; with `git add -p` unavailable, CC snapshotted the smoke-verified finals by checksum, staged commit 2 without the Shopify parts (203 pass standalone — bisects cleanly), then restored the snapshots byte-for-byte. All four files at HEAD are md5-identical to the smoked tree.
+- **Deploy note:** unlike ORD-UX-1, this sprint needs a **backend image rebuild + `alembic upgrade head`** on the server (not frontend-only). Product images persist in the `/app/uploads` volume — confirm the prod compose mounts it on the backend before recreating.
+- **Closes:** `PC-F-1` from the product-catalog "Future" list. Branch `feat/pc-f-1` ready for merge; joint deploy with ORD-UX-1.
+
+---
+
+**Sprint ORD-BULK-1 — Bulk order status change (select current page → set one status)** (Status: `DONE` — commits `9f9aa37` / `f90a174` on branch `feat/ord-bulk-1`; backend pytest 208 → 214, frontend vitest 73 → 81)
+
+Goal: let the operator select multiple orders in the list and set one status on
+all of them at once, instead of one-by-one. Selection is current-page-only (≤50);
+the picker offers every status; the backend applies each order through the existing
+`change_order_status` and returns a per-order summary. No DB migration.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| ORD-BULK-1-1 | `POST /orders/bulk-status` (`BulkStatusChangeRequest` / `BulkStatusChangeResponse`), `require_role(OWNER, MANAGER)`, declared **above** the `/{order_id}` routes (OQ-2, no collision). Per-order loop: `db.get` → not-found = `skipped`; already-at-target = `unchanged` (pre-checked, since the service's no-op early return is indistinguishable from success); otherwise `change_order_status` inside `async with db.begin_nested()`. One commit closes the batch. | `routers/orders.py`, `schemas/order.py`, tests | `9f9aa37` |
+| ORD-BULK-1-2 | Checkbox column in `OrdersTable` (native input, `stopPropagation` cell, header indeterminate via ref); selection `Set` in `OrdersLayout` cleared at all five navigation points; new `BulkStatusBar` (N-selected + all-status picker + Apply/Clear); `ConfirmDialog` before apply; summary toast; `ordersApi.bulkUpdateStatus` + `useBulkUpdateOrderStatus`. | 8 frontend files incl. new `BulkStatusBar.tsx` | `f90a174` |
+
+**OQ decisions:** OQ-1 (transaction safety) → **SAVEPOINT per order was necessary, not belt-and-suspenders.** The two documented raises in `change_order_status` are pre-mutation, but `apply_movement` (`material_stock_service.py:50-64`) raises 422/404 on a SHIPPED transition **after** `change_order_status` has already flushed the status change + history row (`order_service.py:178`). Without `begin_nested()`, a bulk-SHIPPED batch could report an order `skipped` while silently committing it; the savepoint rolls back exactly that order. This corrects task.md Ground-truth #3, which only accounted for the pre-mutation raises. OQ-2 → route declared above `/{order_id}` (no collision). OQ-3 → batch ≤ page size (≤ 100 by the list cap), no chunking. OQ-4 → header checkbox selects exactly the fetched page; selection dropped on any page/filter change.
+
+**Deliberate deviation from task.md rule 10:** the skipped-summary toast uses the `'info'` variant, not error/amber. `'error'` renders red (`Toast.tsx:62`) and a skipped cancelled order is an expected outcome, not a failure — `'info'` matches the "info/amber" intent. (The skip-styling path itself is not yet visually verified — see smoke note.)
+
+**Verification (CC):** backend 214 pass (+6), frontend 81 pass (+8), eslint clean on touched files. Typecheck: CC's files clean, but surfaced that the documented gate never ran — see `TYPECHECK-1` in Explicitly deferred.
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/ord-bulk-1`, owner login):**
+- Checkbox column + header checkbox present; bulk bar hidden with nothing selected. ✓
+- Header select-all selected all 50 page rows → "50 selected"; Clear deselected all + hid the bar. ✓
+- Selected 3 orders (2 NEW + 1 already IN PRODUCTION) → picker listed **all 9 statuses** → chose In Production → Apply → `ConfirmDialog` "Set 3 orders to In Production?" → confirm → toast **"Changed 2 · Unchanged 1 · Skipped 0"**, all three badges IN PRODUCTION in place, selection cleared. ✓ (validates one-call batch + per-order classification incl. the `unchanged` bucket)
+- Switching the status tab with a live selection cleared it. ✓
+- Data restored (both changed orders reverted to NEW).
+- **Not live-smoked:** the `skipped` bucket — as OWNER the transition matrix is bypassed and there's no reachable skip via the UI (skip = MANAGER+CANCELLED or not-found). Covered by CC's backend test. The `info`-toast skip styling therefore remains visually unverified until a real skip occurs.
+
+**Post-sprint notes:**
+- Automation caveat (not a product issue): driving the Radix Select picker + the row menus via synthetic pointer events was flaky; Cowork verified the forward flow cleanly and Sergii confirmed manual clicks work. No bearing on shipped code.
+- **Deploy:** backend + frontend rebuild, **no** `alembic upgrade head` (no schema change) — lighter than PC-F-1.
+- **Closes:** the bulk-status request. Branch `feat/ord-bulk-1` ready for merge + deploy. One follow-up filed (`TYPECHECK-1`).
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3448,6 +3546,9 @@ in this document where applicable, to avoid duplication.
 
 | ID | Task | Why deferred (2026-05-08) |
 |---|---|---|
+| TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
+| PC-F-1-followup-1 | Products-list thumbnail (small image in the ProductsPage name cell so near-identical products are distinguishable at a glance) | Deferred per PC-F-1 OQ-4 to keep v1 bounded to the detail card. Needs a batch image endpoint or signed URLs — the current per-product authenticated blob fetch would mean N fetches per list render. |
+| PC-F-1-followup-2 | `GET /products/{id}` and the mirrored `GET /products/{id}/image` lack shop-scoping | **Security.** Pre-existing SEC-05 gap (the product GET never scoped by shop); the new PC-F-1 image route inherits it by mirroring the pattern — any authenticated user can read another shop's product / product image by id. NOT introduced by PC-F-1. Prioritise: add the shop-scope guard to both the product GET and the image GET. |
 | BUG-4 | Orders list TOTAL + Dashboard widgets read stale `order.total_price` | Pending more user interaction with the system before deciding if it's a bug or by-design |
 | LINK-BACKFILL | Retroactively link historical `order_items` to catalog variants when their SKU appears in catalog | Decision blocked on observing IMP-1/IMP-2 behavior in practice |
 | PC-C | Sales Analytics per Product (see Section A) | Pure feature; revisit after current round closes |
