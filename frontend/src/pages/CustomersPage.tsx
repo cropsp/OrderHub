@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { formatDate } from '@/lib/format';
+import { countryName } from '@/lib/countries';
 import { Search, Users as UserGroup, Globe, ShoppingBag, Mail, History } from 'lucide-react';
 
 import ShellPage from './ShellPage';
@@ -148,8 +149,12 @@ export default function CustomersPage() {
                         <TableCell className="py-5">
                            <div className="flex items-center gap-2">
                               <Globe size={12} className="text-zinc-600" />
-                              <Badge variant="outline" className="border-zinc-800 bg-zinc-900/50 text-zinc-400 font-mono text-[10px] tracking-widest py-0">
-                                 {customer.country ? customer.country.toUpperCase() : 'Global'}
+                              <Badge
+                                 variant="outline"
+                                 className="border-zinc-800 bg-zinc-900/50 text-zinc-400 text-[10px] py-0 whitespace-nowrap"
+                                 title={customer.country || undefined}
+                              >
+                                 {countryName(customer.country, 'Global')}
                               </Badge>
                            </div>
                         </TableCell>
