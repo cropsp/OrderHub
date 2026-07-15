@@ -213,6 +213,33 @@ class StatusChangeRequest(BaseModel):
     """Payload for transitioning order status."""
     new_status: OrderStatus
     comment: str | None = None
+
+
+class BulkStatusChangeRequest(BaseModel):
+    """Payload for transitioning many orders to one status in a single call.
+
+    The cap mirrors the list endpoint's `limit` ceiling (routers/orders.py) — the
+    UI can only select a rendered page, so a legitimate batch never exceeds it.
+    """
+    order_ids: list[uuid.UUID] = Field(..., min_length=1, max_length=100)
+    new_status: OrderStatus
+    comment: str | None = None
+
+
+class SkippedItem(BaseModel):
+    """One order the bulk transition could not apply, with the reason why."""
+    order_id: uuid.UUID
+    reason: str
+
+
+class BulkStatusChangeResponse(BaseModel):
+    """Per-order outcome summary of a bulk status transition."""
+    updated: int
+    unchanged: int
+    skipped: list[SkippedItem]
+    warnings: list[str]
+
+
 class OrderFilters(BaseModel):
     status: OrderStatus | None = None
     shop_id: uuid.UUID | None = None
