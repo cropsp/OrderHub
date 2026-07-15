@@ -32,6 +32,10 @@ export const PRESETS: { key: PresetKey; label: string }[] = [
 
 export const PRESET_STORAGE_KEY = 'orderhub:shopFinance:lastPreset';
 
+// DASH-PERIOD: the dashboard mounts the same selector but remembers its own
+// preset, so pages don't overwrite each other's default.
+export const DASHBOARD_PRESET_STORAGE_KEY = 'orderhub:dashboard:lastPreset';
+
 export function rangeForPreset(preset: PresetKey, now: Date = new Date()): PeriodRange {
   switch (preset) {
     case 'today':
@@ -57,9 +61,9 @@ export function rangeForPreset(preset: PresetKey, now: Date = new Date()): Perio
   }
 }
 
-export function loadLastPreset(): PresetKey {
+export function loadLastPreset(storageKey: string = PRESET_STORAGE_KEY): PresetKey {
   try {
-    const raw = localStorage.getItem(PRESET_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (raw && PRESETS.some((p) => p.key === raw)) {
       return raw as PresetKey;
     }

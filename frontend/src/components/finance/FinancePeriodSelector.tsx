@@ -16,20 +16,26 @@ import {
 interface FinancePeriodSelectorProps {
   value: PeriodRange;
   onChange: (range: PeriodRange, preset: PresetKey) => void;
+  /** Where to remember the chosen preset. Defaults to the Finance page's key. */
+  storageKey?: string;
 }
 
-export default function FinancePeriodSelector({ value, onChange }: FinancePeriodSelectorProps) {
-  const [preset, setPreset] = useState<PresetKey>(() => loadLastPreset());
+export default function FinancePeriodSelector({
+  value,
+  onChange,
+  storageKey = PRESET_STORAGE_KEY,
+}: FinancePeriodSelectorProps) {
+  const [preset, setPreset] = useState<PresetKey>(() => loadLastPreset(storageKey));
   const [customStart, setCustomStart] = useState<string>(format(value.start, 'yyyy-MM-dd'));
   const [customEnd, setCustomEnd] = useState<string>(format(value.end, 'yyyy-MM-dd'));
 
   useEffect(() => {
     try {
-      localStorage.setItem(PRESET_STORAGE_KEY, preset);
+      localStorage.setItem(storageKey, preset);
     } catch {
       // ignore
     }
-  }, [preset]);
+  }, [preset, storageKey]);
 
   const handlePreset = (key: PresetKey) => {
     setPreset(key);
