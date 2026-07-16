@@ -22,6 +22,8 @@
 - Sprint DASH-PERIOD status: `DONE` (Dashboard period selector — financial widgets scoped, operational live — commits `4acefc8` / `42f081c`)
 - Sprint CTRY-1 status: `DONE` (Full country names in address displays via Intl.DisplayNames — commit `5350671`)
 - Sprint SETTLE-PAGE status: `DONE` (Calculate Settlement modal → dedicated page — commit `0349087`)
+- Sprint ETSY-COUNTRY-FIX status: `DONE` (Etsy country parser fix + backfill of 18 broken rows — commits `df9910e` / `d37778e`)
+- Sprint ORD-NAME-1 status: `DONE` (Orders list shows recipient name, not the Etsy buyer handle — commit `3807bfe`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3634,6 +3636,63 @@ no migration. Record Payment stays a modal.
 
 ---
 
+**Sprint ETSY-COUNTRY-FIX — Fix Etsy country codes (parser) + backfill existing data** (Status: `DONE` — commits `df9910e` (parser) / `d37778e` (backfill migration) on branch `feat/etsy-country-fix`; backend pytest 219 → 281)
+
+Goal: the Etsy CSV parser truncated the "Ship Country" full name to 2 chars
+(`etsy_parser.py:179` `.strip()[:2]`), producing garbage ISO codes on Etsy orders +
+customers — "United States" → `Un`, "Germany" → `Ge`, "Austria" → `Au`. CTRY-1 then
+resolved them to nonsense names ("United Nations", "Georgia", "Australia"). Shopify was
+fine (`countryCodeV2`). Fixed the parser (name → real ISO) and backfilled the existing
+broken Etsy rows. Root cause was a pre-existing parser bug; CTRY-1 only surfaced it.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| ETSY-COUNTRY-FIX-1 | New `services/country_resolver.py` (pycountry + an explicit alias overlay for UK/USA/Great Britain/Turkey/Russia/Ivory Coast/…); `etsy_parser.py` uses it — resolves a name/code → ISO-2, and on unresolvable input **stores NULL + logs a warning** (naming the raw value) instead of truncating. `pycountry==24.6.1` added to `requirements.txt`. | `country_resolver.py` (new), `etsy_parser.py`, `requirements.txt`, 2 tests | `df9910e` |
+| ETSY-COUNTRY-FIX-2 | Alembic **data migration** `c7d1e93b40af` backfills the broken codes on Etsy-source orders + customers, disambiguating via state/zip. Backs up all old→new pairs to a backup table; downgrade restores byte-identically and drops the backup. | migration + test | `d37778e` |
+
+**OQ decisions:** OQ-1 → `pycountry` (robust name/common-name → ISO) + a curated alias overlay for the gaps. OQ-2 → **inference migration** (no re-import needed). OQ-3 → state/zip disambiguation resolved every ambiguous case; **0 unresolvable**. OQ-4 → scoped to `ShopSource.ETSY`, backup table, clean migration round-trip. **Deviation from task.md rule A1:** unresolvable country → NULL (not the raw string) — cleaner, shows the UI's empty fallback rather than garbage.
+
+**Key CC finding (design change):** dropped `pycountry.countries.search_fuzzy` from the resolver — probing showed it returns *confidently wrong* single hits: `search_fuzzy("Republic of Korea")` → `KP` (North Korea), `"UK"` → Uganda first. The "single unambiguous hit" guard would have passed those. The resolver now uses the explicit alias overlay + returns NULL for anything unknown. A regression test pins `Republic of Korea → KR`.
+
+**Verification (CC):** backend 281 pass (219 baseline + 62). Backfill corrected **18/18** rows, 0 unresolvable (`Un→US×10`, `Un→GB×1`, `Ge→DE×3`, `Fr→FR`, `It→IT`, `Cz→CZ`, `Ca→CA`); Etsy now US×11 / DE×3 / UA×3 / FR×2 / GB·CZ·CA·IT×1. Migration round-trip clean (downgrade restored the pre-migration distribution byte-identically vs a snapshot + dropped the backup table; re-upgrade re-corrected all 18). Shopify + manual rows diffed pre/post — identical. (The "two alembic heads" CC saw mid-work was a false alarm from its own single-quote-only inspection regex; real state is a single linear head at `c7d1e93b40af`.)
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/etsy-country-fix` dev, owner):** after the backfill, `/customers` reads correct countries — United States ×8, Germany ×3, United Kingdom, Czechia, Poland, Austria, Sweden, Israel, France ×2, Italy — with **zero** "United Nations"/"Georgia"/"Australia" and correct ISO titles (US/DE/GB/…). German customers read Germany (not GE=Georgia), US read United States (not UN). Backfill applied identically to orders + customers, so the order-detail badges are corrected too; Shopify + UA rows untouched (migration scoped to ETSY).
+
+**Post-sprint notes:**
+- **Follow-up parked** (`CUST-CYRILLIC-COUNTRY`, see Explicitly deferred): customer `petrenko.serhii@gmail.com` has country `УК` (Cyrillic, manual entry — likely meant `UA`); outside Etsy scope so untouched, but CTRY-1 renders it as garbage.
+- **Deploy:** backend rebuild (picks up `pycountry`) **+ the backfill runs on `alembic upgrade head`** — not frontend-only. **Deployed to prod (merge `d2be328`, 2026-07-15):** the backfill corrected **205 of 215** Etsy orders (`Un→US×135`, `Ge→DE×22`, `Un→GB×17`, `Ca→CA×14`, `Fr→FR×6`, `Au→AU×4`, `It→IT×4`, `Po→PL×2`, `Cz→CZ×1`); **10 ambiguous rows left untouched** for review → filed as `ETSY-COUNTRY-MANUAL`. Backend recreated only; nginx/api/postgres/cloudflared verified healthy (origin checked over the docker network, since prod removed the LAN `80:80` publish so `127.0.0.1:80` isn't bound).
+- **Closes:** the "United Nations" country bug at its root. Deployed to prod.
+
+---
+
+**Sprint ORD-NAME-1 — Orders list shows the recipient name, not the Etsy buyer handle** (Status: `DONE` — commit `3807bfe` on branch `feat/ord-name-1`; frontend vitest +5)
+
+Goal: the orders list showed the Etsy **Buyer** field (a handle/initials —
+"E B (qzp7sdny)", "Sign in with Apple user (…)" — or empty) as the name, while the
+real recipient full name lived only in the order card's Shipping block. The recipient
+(`shipping_name`) is already returned by the list API. Switched the list + board to
+show it. Frontend-only, no backend.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| ORD-NAME-1-1 | New `lib/orderName.ts` — `orderDisplayName(order)` = `shipping_name.trim()` → `customer_name.trim()` → `"Unknown"`. `OrdersTable.tsx` + `PipelineCard.tsx` derive the name text **and** the avatar colour/initials from it. | `lib/orderName.ts` (new), `OrdersTable.tsx`, `PipelineCard.tsx` + 2 tests | `3807bfe` |
+
+**OQ decisions:** OQ-1 → `OrderListItem` already carries `shipping_name` (API returns it). OQ-2 → fallback `shipping_name → customer_name → "Unknown"`, whitespace-only treated as empty. OQ-3 → the board (`PipelineCard`) uses the same helper.
+
+**Verification (CC):** frontend vitest +5 (4 `orderName` cases + 1 new `OrdersTable` case asserting `shipping_name` renders and the buyer handle does not); `tsc -p tsconfig.app.json` + lint clean on touched files. Backend untouched.
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/ord-name-1` dev, owner):**
+- Orders list page 2 (the LeatherCraft UA / Etsy rows that used to read "Marty (gk721kjqc1e5aoop)", "Lynette Hunt (vfoaua6j)", "9ccstar", "My (8lrh3rr47bm04okf)") now shows **clean recipient names** — madison young, Jen Tuttelman, Ingrid Schäfer, Naïwen Piet, Luigi pietro Tucci, RACQUEL Diop… with **zero handle-gibberish and zero blank rows**. Avatar initials follow the displayed name. ✓
+- Shopify rows still read "Unknown Shopify Customer" — their `shipping_name` is empty, so the fallback correctly returns `customer_name` (correct behaviour, just no data to improve). ✓
+- Read-only smoke; no data changed.
+
+**Post-sprint notes:**
+- **Separate pre-existing bug found during smoke** (`SHOP-FILTER-STALE`, see Explicitly deferred): the shop-filtered orders view (`/shops/{id}/orders`) doesn't refetch when switching shops via the sidebar — the header updates to the new shop but the rows stay on the previously-viewed shop. Not caused by ORD-NAME-1.
+- **Deploy:** frontend-only rebuild — no backend, no migration.
+- **Closes:** the "strange symbols instead of names" complaint. Branch `feat/ord-name-1` ready for merge + deploy.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3642,6 +3701,9 @@ in this document where applicable, to avoid duplication.
 
 | ID | Task | Why deferred (2026-05-08) |
 |---|---|---|
+| SHOP-FILTER-STALE | Shop-filtered orders view shows the wrong shop's orders after switching shops | Found during ORD-NAME-1 smoke (2026-07-15). Navigating `/shops/{A}/orders` → `/shops/{B}/orders` via the sidebar updates the page header to shop B but the rows stay on shop A (e.g. "LeatherCraft UA Orders" header over Leather-by-Mykola rows/badges). Likely cause: `OrdersLayout.tsx` seeds `selectedShopId` with `useState(fixedShopId)`, which only reads the initial prop — when `fixedShopId` changes on a same-route param change the component updates but the state doesn't re-sync. Pre-existing (the `useState(fixedShopId)` pattern predates ORD-UX-1). Fix: derive/reset the shop filter from `fixedShopId` on change (effect or `key` remount). Medium priority — it shows the wrong data under a shop filter. |
+| ETSY-COUNTRY-MANUAL | 10 prod Etsy orders with ambiguous truncated country codes | Left untouched by the ETSY-COUNTRY-FIX backfill (it deliberately doesn't guess ambiguous truncations): `Sw` (Sweden/Switzerland ×4), `Ja` (Japan ×2), plus `Be`, `Sp`, `Ma`, `Is`. Order UUIDs are in the prod migration log. Most are resolvable from the `shipping_state`/city (e.g. `Ja` + 神奈川県 → `JP`, `Ma` + Selangor → `MY`) — either extend the resolver's disambiguation map + a small targeted UPDATE, or correct them by hand. Small. |
+| CUST-CYRILLIC-COUNTRY | Customer `petrenko.serhii@gmail.com` has country `УК` (Cyrillic) | Manual-entry typo — likely meant `UA` (Ukraine); the Cyrillic `УК` isn't a valid ISO code, so CTRY-1 renders it as garbage. Outside ETSY-COUNTRY-FIX's scope (manual, not Etsy), so its backfill skipped it. Tiny fix: correct this row (and add a guard on the manual country input to accept only valid ISO-2 / normalize). |
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
 | TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
