@@ -17,6 +17,7 @@ from models.shop import Shop
 from schemas.common import ImportResult
 from services.catalog_import import ensure_catalog_row
 from services.catalog_service import CatalogService
+from services.country_resolver import resolve_country_code
 from services.customer_service import upsert_customer
 
 logger = logging.getLogger(__name__)
@@ -176,7 +177,14 @@ async def parse_etsy_csv(db: AsyncSession, shop: Shop, file_content: bytes, user
             # Customer
             email = primary_row.get("Buyer Email", "").strip() or f"order_{sale_id}@etsy.internal"
             customer_name = primary_row.get("Buyer", "Unknown Buyer").strip()
-            country = primary_row.get("Ship Country", "US").strip()[:2] # Best effort
+            raw_country = (primary_row.get("Ship Country") or "").strip()
+            country = resolve_country_code(raw_country)
+            if country is None and raw_country:
+                logger.warning(
+                    "Sale ID %s: unresolvable Ship Country %r — storing NULL. "
+                    "Add it to COUNTRY_NAME_ALIASES if this is a real country.",
+                    sale_id, raw_country
+                )
             
             customer = await upsert_customer(db, email, customer_name, country)
             

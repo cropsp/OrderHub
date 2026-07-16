@@ -25,6 +25,7 @@ apscheduler==3.10.4
 tenacity==9.1.4
 
 # ─── Utilities ─────────────────────────────────
+pycountry==24.6.1
 python-dotenv==1.0.1
 aiofiles==23.2.1
 mcp==1.2.1
