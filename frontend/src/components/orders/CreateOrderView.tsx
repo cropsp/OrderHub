@@ -449,7 +449,7 @@ export default function CreateOrderView() {
                       placeholder="UA"
                       maxLength={2}
                       value={orderData.shipping_country}
-                      onChange={e => setOrderData(p => ({ ...p, shipping_country: e.target.value.toUpperCase() }))}
+                      onChange={e => setOrderData(p => ({ ...p, shipping_country: e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase() }))}
                     />
                   </div>
                 </div>

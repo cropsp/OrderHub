@@ -362,7 +362,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                       placeholder="Country Code (e.g. US)"
                       maxLength={2}
                       value={formData.shipping_country}
-                      onChange={e => setFormData(p => ({ ...p, shipping_country: e.target.value.toUpperCase() }))}
+                      onChange={e => setFormData(p => ({ ...p, shipping_country: e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase() }))}
                     />
                   </div>
                 </div>
