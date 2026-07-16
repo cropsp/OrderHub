@@ -64,6 +64,19 @@ describe('OrdersTable inline status change', () => {
     // The row-actions trigger is present.
     expect(screen.getByRole('button')).toBeInTheDocument();
   });
+
+  it('shows the recipient (shipping_name) instead of the Etsy buyer handle', () => {
+    const recipientOrder = {
+      ...order,
+      shipping_name: 'Paula Borowsky',
+      customer_name: 'E B (qzp7sdny)',
+    } as unknown as OrderListItem;
+
+    renderTable({ orders: [recipientOrder] });
+
+    expect(screen.getByText('Paula Borowsky')).toBeInTheDocument();
+    expect(screen.queryByText('E B (qzp7sdny)')).not.toBeInTheDocument();
+  });
 });
 
 describe('OrdersTable bulk selection', () => {

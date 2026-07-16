@@ -4,6 +4,7 @@ import { Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { getShopTheme } from '@/utils/shopTheme';
 import { getInitials, getAvatarColor } from '@/utils/avatar';
+import { orderDisplayName } from '@/lib/orderName';
 import { cn } from '@/lib/utils';
 import type { OrderListItem } from '@/types/order';
 
@@ -14,8 +15,9 @@ type PipelineCardProps = {
 export default function PipelineCard({ order }: PipelineCardProps) {
   const navigate = useNavigate();
   const shopTheme = getShopTheme(order.shop_name ?? '');
-  const avatarColor = getAvatarColor(order.customer_name ?? '');
-  const initials = getInitials(order.customer_name ?? '??');
+  const name = orderDisplayName(order);
+  const avatarColor = getAvatarColor(name);
+  const initials = getInitials(name);
 
   return (
     /* TODO: implement D&D in future sprint */
@@ -42,7 +44,7 @@ export default function PipelineCard({ order }: PipelineCardProps) {
           <div className={cn("size-6 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0", avatarColor)}>
             {initials}
           </div>
-          <span className="text-xs text-zinc-300 truncate font-medium">{order.customer_name}</span>
+          <span className="text-xs text-zinc-300 truncate font-medium">{name}</span>
         </div>
         
         <div className="flex items-center justify-between mt-auto pt-2 border-t border-zinc-800/60">
