@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils';
 import { useUpdateOrderStatus } from '@/hooks/useOrders';
 import { useToastStore } from '@/components/ui/Toast';
 import { ORDER_STATUS, statusLabel } from '@/lib/order-status';
+import { orderDisplayName } from '@/lib/orderName';
 import { getApiErrorMessage } from '@/types/api';
 import type { OrderListItem } from '@/types/order';
 
@@ -101,8 +102,9 @@ export default function OrdersTable({
         <TableBody>
           {orders.map((order) => {
             const shopTheme = getShopTheme(order.shop_name ?? '');
-            const avatarColor = getAvatarColor(order.customer_name ?? '');
-            const initials = getInitials(order.customer_name ?? '??');
+            const name = orderDisplayName(order);
+            const avatarColor = getAvatarColor(name);
+            const initials = getInitials(name);
 
             return (
               <TableRow 
@@ -134,7 +136,7 @@ export default function OrdersTable({
                       {initials}
                     </div>
                     <div className="flex flex-col min-w-0">
-                      <span className="text-sm font-medium text-zinc-100 truncate">{order.customer_name}</span>
+                      <span className="text-sm font-medium text-zinc-100 truncate">{name}</span>
                       <span className="text-[10px] text-zinc-400 truncate">ID: {order.customer_id.substring(0, 8)}</span>
                     </div>
                   </div>
