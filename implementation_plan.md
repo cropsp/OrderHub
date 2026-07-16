@@ -24,6 +24,8 @@
 - Sprint SETTLE-PAGE status: `DONE` (Calculate Settlement modal → dedicated page — commit `0349087`)
 - Sprint ETSY-COUNTRY-FIX status: `DONE` (Etsy country parser fix + backfill of 18 broken rows — commits `df9910e` / `d37778e`)
 - Sprint ORD-NAME-1 status: `DONE` (Orders list shows recipient name, not the Etsy buyer handle — commit `3807bfe`)
+- Sprint SHOP-FILTER-STALE status: `DONE` (Shop-filtered orders view remounts on shop switch — commit `39c2d57`)
+- Sprint COUNTRY-CLEANUP status: `DONE` (Residual ambiguous Etsy country codes + УК→UA + ISO input guard — commit `1f0dd60`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3693,6 +3695,74 @@ show it. Frontend-only, no backend.
 
 ---
 
+**Sprint SHOP-FILTER-STALE — Shop-filtered orders view didn't follow the shop** (Status: `DONE` — commit `39c2d57` on branch `feat/shop-filter-stale`; frontend vitest +1)
+
+Goal: on `/shops/{id}/orders`, switching shops via the sidebar updated the page header
+but left the table on the previous shop's orders. Root cause: `OrdersLayout.tsx:44`
+seeds `selectedShopId` with `useState(fixedShopId)` (reads the prop only on mount), and
+navigating between `/shops/A/orders` → `/shops/B/orders` is a same-route param change —
+React Router re-renders the same instance rather than remounting, so the stale filter
+sticks. Pre-existing, found during ORD-NAME-1 smoke. Frontend-only.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| SHOP-FILTER-STALE-1 | `ShopOrdersPage.tsx:46` — `key={shopId}` on `<OrdersLayout fixedShopId={shopId}/>` so it remounts on a shop-param change, re-seeding `selectedShopId` (+ page / tab / search / bulk selection) from the new shop. `OrdersLayout` internals unchanged. | `ShopOrdersPage.tsx`, new test | `39c2d57` |
+
+**OQ decisions:** OQ-1 → `key={shopId}` on `OrdersLayout` in `ShopOrdersPage` is sufficient; it's the only place feeding a route param into `fixedShopId` (`OrdersPage`/`ArchivePage` don't). OQ-2 → regression vitest drives `/shops/shop-a/orders → shop-b` via `createMemoryRouter` and asserts the `useOrders` filter's `shop_id` follows the param (removing the key fails with `'shop-a'` ≠ `'shop-b'`).
+
+**Verification (CC):** `tsc -p tsconfig.app.json` + lint clean on the 2 touched files; vitest +1 (passes with the key, provably fails without it). Backend untouched.
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/shop-filter-stale` dev, owner):** `/shops/{Leather-by-Mykola}/orders` (5 rows, `LEATHER BY MYKOLA` badges, header agrees) → click LeatherCraft UA in the sidebar → **rows + badges + header all switch together**: 18 rows, `LEATHERCRAFT UA` badges, different customers (John Davis… → Martha Giretti / My Thai…). Switching back returns to 5 rows / `LEATHER BY MYKOLA`. Bidirectional, pager resets to page 1. ✓ Read-only; no data changed.
+
+**Post-sprint notes:**
+- **Deploy:** frontend-only rebuild — no backend, no migration.
+- **Closes:** `SHOP-FILTER-STALE` (removed from Explicitly deferred). Branch `feat/shop-filter-stale` ready for merge + deploy.
+
+---
+
+**Sprint COUNTRY-CLEANUP — Resolve the residual bad country rows** (Status: `DONE` — commit `1f0dd60` on branch `feat/country-cleanup`; backend pytest 281 → 304)
+
+Goal: ETSY-COUNTRY-FIX left 10 ambiguous truncated Etsy country codes untouched
+(`ETSY-COUNTRY-MANUAL`) and a manual-entry customer had a Cyrillic country
+(`CUST-CYRILLIC-COUNTRY`). Cleaned up both so every `shipping_country` / customer
+`country` is a valid ISO-2 code — also unblocks the address-validation feature (whose
+coverage gate keys off `shipping_country`). Backend data-correction + a small input
+guard; no schema change.
+
+| ID | Change | File(s) | Commit |
+|---|---|---|---|
+| COUNTRY-CLEANUP-1 | New Alembic **data migration** `f2a9c4d7e1b8` (down_revision `c7d1e93b40af`) — self-contained frozen map, Etsy-scoped, resolves the ambiguous codes by reversing the name-truncation + `state`/`city` disambiguation for `Sw` (→ SE/CH), and fixes `УК`→`UA`. Two backup tables, reversible. | migration + test | `1f0dd60` |
+| COUNTRY-CLEANUP-2 | OQ-3 guard: `.replace(/[^A-Za-z]/g, '')` on the two manual country inputs so a non-Latin value can't be entered again. | `DetailLogistics.tsx`, `CreateOrderView.tsx` | `1f0dd60` |
+
+**Bonus catch:** CC found an **11th** broken row beyond the task's stated 10 —
+`Tü(Istanbul)→TR` — which the original ETSY-COUNTRY-FIX backfill had *silently skipped*
+because its truncation regex was ASCII-only (`^[A-Z][a-z]$`) and missed the accented
+`ü`. Included in this fix.
+
+**OQ decisions:** OQ-1/OQ-2 → explicit code→ISO map from the real rows
+(`Be→BE`, `Is→IL`, `Ja→JP`×2, `Ma→MY`, `Sp→ES`, `Tü→TR`, `Sw→CH`×3, `Sw→SE`×1),
+`Sw` split by state/city; any unresolvable row is reported, not guessed. OQ-3 → shipped
+the ISO-letters input guard now (cheap, prevents recurrence).
+
+**Verification (CC):** backend 304 pass (+23 `_resolve_row` tests). Migration round-trip
+on dev — seeded the 11 real rows + a US control + an unresolvable `Sw+zip123` control:
+upgrade corrected 11/12 (orders + linked customers in lockstep; `УК→UA` applied), left the
+US control and the unresolvable row untouched (reported); downgrade restored byte-identically
++ dropped both backup tables; re-upgrade re-corrected. Seed rows removed; dev pristine at head.
+`tsc` clean.
+
+**Smoke (Cowork via browser MCP, 2026-07-15, on `feat/country-cleanup` dev, owner):**
+- `/customers` search → `petrenko.serhii@gmail.com` (SERHII PETRENKO) now reads **Ukraine** (`UA`) — was the Cyrillic `УК`. ✓
+- The manual country input strips Cyrillic: typing "УКtest" → "TEST", "jp" → "JP" (guard + upper-case). ✓
+- The 11 Etsy order rows are **prod-only** (dev had none) — to be verified post-deploy.
+
+**Post-sprint notes:**
+- **Closes `ETSY-COUNTRY-MANUAL` + `CUST-CYRILLIC-COUNTRY`** (both removed from Explicitly deferred). `CUST-CYRILLIC` (УК) is a dev-only test customer → real fix on dev, clean no-op on prod.
+- **Deployed to prod (merge `476d240`, 2026-07-15):** backend + frontend rebuilt, migration ran on `alembic upgrade head` → **11/11** residual Etsy orders + their linked customers corrected (`BE×1, CH×3, ES×1, IL×1, JP×2, MY×1, SE×1, TR×1`), **0 residual broken rows**, alembic at `f2a9c4d7e1b8`; the УК customer was dev-only (0 on prod, as expected). Prod distribution matches the dev round-trip exactly; prod also live on the Cyrillic-stripping input guard.
+- **Closes:** the residual country-data cleanup — **country data is now clean on prod**, unblocking address validation.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3701,9 +3771,6 @@ in this document where applicable, to avoid duplication.
 
 | ID | Task | Why deferred (2026-05-08) |
 |---|---|---|
-| SHOP-FILTER-STALE | Shop-filtered orders view shows the wrong shop's orders after switching shops | Found during ORD-NAME-1 smoke (2026-07-15). Navigating `/shops/{A}/orders` → `/shops/{B}/orders` via the sidebar updates the page header to shop B but the rows stay on shop A (e.g. "LeatherCraft UA Orders" header over Leather-by-Mykola rows/badges). Likely cause: `OrdersLayout.tsx` seeds `selectedShopId` with `useState(fixedShopId)`, which only reads the initial prop — when `fixedShopId` changes on a same-route param change the component updates but the state doesn't re-sync. Pre-existing (the `useState(fixedShopId)` pattern predates ORD-UX-1). Fix: derive/reset the shop filter from `fixedShopId` on change (effect or `key` remount). Medium priority — it shows the wrong data under a shop filter. |
-| ETSY-COUNTRY-MANUAL | 10 prod Etsy orders with ambiguous truncated country codes | Left untouched by the ETSY-COUNTRY-FIX backfill (it deliberately doesn't guess ambiguous truncations): `Sw` (Sweden/Switzerland ×4), `Ja` (Japan ×2), plus `Be`, `Sp`, `Ma`, `Is`. Order UUIDs are in the prod migration log. Most are resolvable from the `shipping_state`/city (e.g. `Ja` + 神奈川県 → `JP`, `Ma` + Selangor → `MY`) — either extend the resolver's disambiguation map + a small targeted UPDATE, or correct them by hand. Small. |
-| CUST-CYRILLIC-COUNTRY | Customer `petrenko.serhii@gmail.com` has country `УК` (Cyrillic) | Manual-entry typo — likely meant `UA` (Ukraine); the Cyrillic `УК` isn't a valid ISO code, so CTRY-1 renders it as garbage. Outside ETSY-COUNTRY-FIX's scope (manual, not Etsy), so its backfill skipped it. Tiny fix: correct this row (and add a guard on the manual country input to accept only valid ISO-2 / normalize). |
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
 | TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
