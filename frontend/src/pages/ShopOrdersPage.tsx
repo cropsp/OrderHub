@@ -43,7 +43,7 @@ export default function ShopOrdersPage() {
       title={shop ? `${shop.name} Orders` : 'Shop Orders'}
       description="Order list filtered by selected shop."
     >
-      <OrdersLayout fixedShopId={shopId} />
+      <OrdersLayout key={shopId} fixedShopId={shopId} />
     </ShellPage>
   );
 }
