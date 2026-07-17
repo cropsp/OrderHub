@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, Shield, UserCircle2, LogOut } from 'lucide-react';
+import { Mail, MapPinCheck, Shield, UserCircle2, LogOut } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAddressValidationKey, useSetAddressValidationKey } from '@/hooks/useAppSettings';
 import { useAuth } from '@/hooks/useAuth';
 import { useUpdatePreferences } from '@/hooks/useUsers';
 
@@ -53,6 +54,28 @@ export default function SettingsPage() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [preferences, setPreferences] = useState<SystemPreferences>(() => normalizePreferences(user?.preferences));
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // The address-validation key is a global app setting, so its endpoints are
+  // owner-only — but /settings itself is open to every role. Gate both the query
+  // and the card, or non-owners would just see a section that 403s.
+  const isOwner = user?.role === 'owner';
+  const addressKey = useAddressValidationKey({ enabled: isOwner });
+  const setAddressKey = useSetAddressValidationKey();
+  const [googleApiKey, setGoogleApiKey] = useState('');
+  const [keyMessage, setKeyMessage] = useState<string | null>(null);
+
+  const saveGoogleApiKey = async () => {
+    const trimmed = googleApiKey.trim();
+    if (!trimmed) return;
+    try {
+      await setAddressKey.mutateAsync(trimmed);
+      setGoogleApiKey('');
+      setKeyMessage('API key saved.');
+      window.setTimeout(() => setKeyMessage(null), 2000);
+    } catch {
+      setKeyMessage('Failed to save the API key.');
+    }
+  };
 
   // Sync preferences when the user object changes (e.g. after login/refresh).
   // Derive state during render rather than in an effect to avoid cascading re-renders.
@@ -216,6 +239,59 @@ export default function SettingsPage() {
             )}
           </CardContent>
         </Card>
+
+        {isOwner && (
+          <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-zinc-100">Address Validation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex items-center gap-3">
+                <MapPinCheck className="h-5 w-5 text-zinc-400" />
+                {addressKey.data?.is_set ? (
+                  <Badge variant="outline" className="border-teal-800 bg-teal-950/40 text-teal-300">
+                    Configured ••••{addressKey.data.last4}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-400">
+                    Not configured
+                  </Badge>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Google API Key
+                </p>
+                <Input
+                  className="border-zinc-700 bg-zinc-900/50"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    addressKey.data?.is_set ? 'Leave empty to keep existing' : 'Google API key'
+                  }
+                  value={googleApiKey}
+                  onChange={(event) => setGoogleApiKey(event.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-zinc-400">
+                  Used to check non-Ukrainian shipping addresses. Stored encrypted; never shown again.
+                </p>
+                <Button
+                  className="bg-teal-600 text-white hover:bg-teal-500"
+                  onClick={saveGoogleApiKey}
+                  disabled={setAddressKey.isPending || !googleApiKey.trim()}
+                >
+                  {setAddressKey.isPending ? 'Saving...' : 'Save Key'}
+                </Button>
+              </div>
+
+              {keyMessage && <p className="text-xs text-teal-300">{keyMessage}</p>}
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
           <CardHeader>
