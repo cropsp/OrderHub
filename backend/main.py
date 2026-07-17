@@ -15,7 +15,7 @@ from config import get_settings
 from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, mcp, shipping, webhooks,
     products, packaging, finance, materials, overhead_materials,
-    partner_payouts, idlaser,
+    partner_payouts, idlaser, app_settings,
 )
 
 from logger import setup_logging, get_logger
@@ -96,6 +96,7 @@ async def internal_error_handler(request: Request, exc):
 # ─── Routers ──────────────────────────────────────────────
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(app_settings.router)
 app.include_router(shops.router)
 app.include_router(customers.router)
 app.include_router(orders.router)
