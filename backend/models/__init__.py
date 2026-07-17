@@ -6,9 +6,11 @@ Imports all models so Alembic and SQLAlchemy can discover them.
 
 from models.base import Base
 from models.user import User, UserRole
+from models.app_setting import AppSetting, GOOGLE_ADDRESS_VALIDATION_API_KEY
 from models.shop import Shop, ShopPlatform
 from models.customer import Customer
 from models.order import (
+    AddressValidationStatus,
     Order,
     OrderItem,
     OrderStatus,
@@ -36,9 +38,12 @@ __all__ = [
     "Base",
     "User",
     "UserRole",
+    "AppSetting",
+    "GOOGLE_ADDRESS_VALIDATION_API_KEY",
     "Shop",
     "ShopPlatform",
     "Customer",
+    "AddressValidationStatus",
     "Order",
     "OrderItem",
     "OrderStatus",

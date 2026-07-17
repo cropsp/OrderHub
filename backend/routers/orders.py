@@ -11,8 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.order import Order, OrderStatus
+from models.order import AddressValidationStatus, Order, OrderStatus
 from models.user import User, UserRole
+from schemas.address_validation import AddressInput, AddressVerdict
 from schemas.order import (
     OrderFilters, OrderListResponse, OrderResponse,
     OrderCreate, OrderUpdate, StatusChangeRequest,
@@ -28,6 +29,7 @@ from services.order_service import (
     add_order_item, update_order_item, delete_order_item,
     redact_financial_comment
 )
+from services.address_validation import validate_address
 from services.parcel_calculator import calculate_parcel_estimate
 from logger import get_logger
 
@@ -284,6 +286,49 @@ async def transition_order_status(
     # coverage, negative stock) on the SHIPPED-transition response only.
     response.warnings = warnings
     return response
+
+
+@router.post("/{order_id}/validate-address", response_model=AddressVerdict)
+async def validate_order_address(
+    order_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Check an order's shipping address against the address-validation provider.
+
+    Advisory only — never mutates the address and never blocks the order. UA,
+    uncovered countries, empty addresses and an unconfigured API key all resolve
+    inside the service without an API call.
+    """
+    order = await get_order_detail(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this order")
+
+    verdict = await validate_address(db, AddressInput(
+        street_1=order.shipping_street_1,
+        street_2=order.shipping_street_2,
+        city=order.shipping_city,
+        state=order.shipping_state,
+        zip=order.shipping_zip,
+        country=order.shipping_country,
+    ))
+
+    # UNAVAILABLE is transient (no key, timeout, provider down) — persisting it would
+    # let an outage erase a previously good verdict. Every other status is a real
+    # outcome and is recorded.
+    if verdict.status is not AddressValidationStatus.UNAVAILABLE:
+        order.address_validation_status = verdict.status
+        order.address_validation_at = verdict.validated_at
+        await db.commit()
+
+    logger.info(
+        f"Address validation for order {order_id}: {verdict.status.value} "
+        f"(country={order.shipping_country}) by {current_user.email}"
+    )
+    return verdict
 
 
 # --- Order Items CRUD ---

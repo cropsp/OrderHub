@@ -28,6 +28,23 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
+class AddressValidationStatus(str, enum.Enum):
+    """Derived outcome of an address check (ADDR-VAL-1).
+
+    Advisory only — never blocks an order. UA and UNSUPPORTED are produced by the
+    coverage gate without any API call; UNAVAILABLE is a transient failure (no key
+    configured, timeout, HTTP error) and is deliberately never persisted, so an
+    outage cannot overwrite a previously good verdict.
+    """
+
+    VERIFIED = "verified"
+    NEEDS_ATTENTION = "needs_attention"
+    COULDNT_VERIFY = "couldnt_verify"
+    UNSUPPORTED = "unsupported"
+    UA = "ua"
+    UNAVAILABLE = "unavailable"
+
+
 class OrderStatus(str, enum.Enum):
     NEW = "new"
     WAITING_INFO = "waiting_info"
@@ -129,6 +146,29 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     shipping_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     shipping_city_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
     shipping_warehouse_ref: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Address validation (ADDR-VAL-1) — the derived outcome only. Google's raw
+    # response is never persisted: Maps Service Specific Terms §1.3 allow caching
+    # Address Validation content for 30 days, but we store nothing beyond the badge
+    # status, so there is no cache to expire. A verdict older than 30 days should be
+    # treated as stale rather than authoritative (ADDR-VAL-2 renders it as "re-check").
+    # values_callable stores the lowercase member VALUES ("needs_attention") rather
+    # than SQLAlchemy's default of member NAMES ("NEEDS_ATTENTION"), so the DB value
+    # matches the API/TS string exactly. Same convention as StockMovementReason
+    # (models/stock_movement.py:47); note OrderStatus above deliberately does NOT do
+    # this, so `orders` carries both styles — the migration must match per column.
+    address_validation_status: Mapped[AddressValidationStatus | None] = mapped_column(
+        Enum(
+            AddressValidationStatus,
+            name="address_validation_status",
+            values_callable=lambda enum_cls: [m.value for m in enum_cls],
+            create_constraint=True,
+        ),
+        nullable=True,
+    )
+    address_validation_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Designer assignment
     assigned_designer_id: Mapped[uuid.UUID | None] = mapped_column(
