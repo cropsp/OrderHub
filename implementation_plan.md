@@ -26,6 +26,7 @@
 - Sprint ORD-NAME-1 status: `DONE` (Orders list shows recipient name, not the Etsy buyer handle — commit `3807bfe`)
 - Sprint SHOP-FILTER-STALE status: `DONE` (Shop-filtered orders view remounts on shop switch — commit `39c2d57`)
 - Sprint COUNTRY-CLEANUP status: `DONE` (Residual ambiguous Etsy country codes + УК→UA + ISO input guard — commit `1f0dd60`)
+- Sprint ADDR-VAL-1 status: `SIGN-OFF PASSED` (Address validation backend + encrypted Google API-key Settings UI; branch `feat/addr-val-1`, commits `73c9c0c` / `6c4e580` — **awaiting merge/deploy**)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3763,6 +3764,84 @@ US control and the unresolvable row untouched (reported); downgrade restored byt
 
 ---
 
+**Sprint ADDR-VAL-1 — Address validation: backend service + endpoint + in-app Google API-key setting** (Status: `DONE` — sign-off passed; commits `73c9c0c` (backend) + `6c4e580` (Settings UI) on branch `feat/addr-val-1`; backend pytest 357, `tsc -p tsconfig.app.json` clean on touched files, SettingsPage vitest 9/9; **not merged yet**)
+
+Goal: Phase 1 of address validation — a provider-agnostic backend service validating a
+non-UA shipping address via the **Google Address Validation API**, an OWNER-gated encrypted
+**global** API-key setting managed from the Settings UI (no server `.env`), and one
+order-scoped endpoint. Advisory only; UA is never sent to Google. The order-card badge/apply
+UI is ADDR-VAL-2. Full spec: `task.md` (ADDR-VAL-1 + "Post-sign-off amendments") +
+`task-address-validation.md`.
+
+**What shipped:**
+- `backend/services/address_validation.py` — `validate(address, country) -> AddressVerdict`,
+  Google impl (header auth `X-Goog-Api-Key`), coverage gate short-circuiting UA (→ `ua`) and
+  non-GA countries (→ `unsupported`) with **no** API call. Graceful degradation: no key / API
+  failure → non-fatal `unavailable`, never a 500 (mirrors the idlaser optional-dependency
+  convention).
+- Global encrypted app-setting store for the single Google key (Fernet, reusing
+  `encryption_service.py`) + OWNER-gated **masked** settings endpoint (`set: true, last4`;
+  plaintext never returned) + Settings UI field ("Address validation", write-only, shows
+  `Configured ••••XXXX`). Key managed in-app, not via server `.env`.
+- `POST /api/orders/{order_id}/validate-address` + `AddressVerdict` schema (status ∈
+  `verified` / `needs_attention` / `couldnt_verify` / `unsupported` / `ua` / `unavailable`,
+  standardized components, original-vs-suggested diff) + hand-mirrored TS type + migration
+  (`address_validation_status`, `_at`).
+- **Security (mutation-tested):** the dev key had been leaking into
+  `backend/logs/server.log` in plaintext (httpx `?key=` in the URL + `logger.exception`; 6
+  historical hits). Fixed: key sent as `X-Goog-Api-Key` header (no `params`) + an explicit
+  `HTTPStatusError` handler logging only status + Google's error body. The 6 old strings die
+  on dev-key rotation (post-deploy step).
+
+**Real-API sign-off (Sergii + CC/Cowork, 2026-07-17) — PASSED.** The bare
+`403 PERMISSION_DENIED` (new-account provisioning lag) cleared; every supported call returns
+a real Google verdict (HTTP 200). Coverage gate airtight: during re-verify, `logs/server.log`
+shows exactly **one** outbound `addressvalidation.googleapis.com` POST (the GB order) — JP,
+UA, IL fired zero. Verdicts: GB `RM6 4TJ` → `needs_attention` (`hasUnconfirmedComponents`;
+Google resolves it as **London**, not "Romford" — the pitched headline example does **not**
+demonstrate a post-town correction); US White House → `verified` (post-fix); JP →
+`unsupported` (no call); UA → `ua` (no call); IL → `unsupported` (no call).
+
+**Two refinements folded in before merge** (task.md → Post-sign-off amendments):
+- **AV1-FIX-1 (inference over-trigger).** `hasInferredComponents=True` alone was forcing
+  `needs_attention` on ~every US address (even the White House, purely for an inferred zip+4
+  and "Avenue"→"Ave"). Predicate now: `verified` = `addressComplete AND not
+  hasUnconfirmedComponents AND not hasReplacedComponents AND granularity ∈ {PREMISE,
+  SUB_PREMISE}` — bare inference dropped. Safe because Google co-sets
+  `hasUnconfirmedComponents` whenever it is unsure of an inference; the only gap is a
+  high-confidence-but-wrong inference, and the diff is returned regardless of status so the
+  manager still sees the change. The componentType-parsing alternative was rejected as more
+  code buying nothing the unconfirmed guard doesn't already give.
+- **AV1-FIX-2 (JP → UNSUPPORTED).** `PREVIEW_COUNTRIES_SENT` now empty → `country=='JP'`
+  short-circuits to `unsupported` (no call), with a code TODO to re-enable once a script-aware
+  diff exists. Reason: JP romaji input returns as fullwidth kanji (romaji→kanji false diff on
+  ~100% of JP orders) + 2/6 valid addresses `couldnt_verify`. Parked as **ADDR-VAL-JP** below.
+
+**Verification (CC):** backend **357 pass** (added `test_inferred_only_stays_verified` —
+mutation-verified, fails on the old predicate — + `test_inferred_plus_unconfirmed_still_needs_attention`;
+JP test rewritten to assert `UNSUPPORTED` + `client_cls.assert_not_called()`; coverage-constants
+test updated to 38 regions). Frontend: `tsc -p tsconfig.app.json` clean on touched files,
+eslint clean on the 5 staged files, SettingsPage vitest 9/9. `main` untouched (`1b7606b`);
+dev clean (0 stamped orders).
+
+**Operator follow-ups (non-blocking, before setting the prod key):**
+- **Key discrepancy:** the dev Settings key last4 = `YYFA`, not `AiEc` as the handoff assumed
+  — a different key than expected got pasted. It works; reconcile the key/project in the GCP
+  Console (project `orderhub-address-validation`) before setting the prod key.
+- **Key application restriction must stay `None` or `IP addresses`, never `Websites`** —
+  the backend calls Google server-side (no browser `Referer`); a Websites restriction would
+  403 every backend call on dev and prod.
+- **Post-deploy:** rotate the dev key (kills the 6 leaked log strings), then set the **prod**
+  key once via the prod Settings UI (no server `.env` change).
+
+**Closes:** ADDR-VAL-1 implementation + real-API sign-off. Branch `feat/addr-val-1` ready for
+merge + deploy (backend + frontend rebuild + one migration; no server `.env` change). Next:
+**ADDR-VAL-2** — order-card [Check address] button + badge + diff/apply UI; that sprint should
+also add cosmetic-diff suppression (zip+4 / street-suffix, plus the romaji→kanji
+script-conversion suppression that gates ADDR-VAL-JP).
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3772,6 +3851,8 @@ in this document where applicable, to avoid duplication.
 | ID | Task | Why deferred (2026-05-08) |
 |---|---|---|
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
+| ADDR-VAL-USER-ACCESS | Admin-granted per-user access to address validation | Idea (Sergii, 2026-07-15): let an OWNER/admin grant specific users permission to run address validation, rather than it being available to all order-endpoint roles. Deferred — ADDR-VAL-1/2 ship the feature gated by the existing order roles first; add fine-grained per-user access after the core works. Would build on the existing role/designer-access model. |
+| ADDR-VAL-JP | JP address validation (currently short-circuits to `unsupported`) | ADDR-VAL-1 real-API sign-off (2026-07-17) = **NO-GO as built**: Google returns romaji input as fullwidth kanji (romaji→kanji false diff on ~100% of JP orders) and 2/6 valid JP addresses returned `couldnt_verify`. Removed from the GA allowlist by **AV1-FIX-2** (`PREVIEW_COUNTRIES_SENT` now empty; code TODO left to re-enable). Re-enable only once the diff layer detects romaji-in / kanji-out and suppresses script-conversion-only changes — this naturally lands with ADDR-VAL-2's diff/apply UI (same suppression also cleans the cosmetic zip+4 / street-suffix diffs on GA countries). |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
 | TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
 | PC-F-1-followup-1 | Products-list thumbnail (small image in the ProductsPage name cell so near-identical products are distinguishable at a glance) | Deferred per PC-F-1 OQ-4 to keep v1 bounded to the detail card. Needs a batch image endpoint or signed URLs — the current per-product authenticated blob fetch would mean N fetches per list render. |
