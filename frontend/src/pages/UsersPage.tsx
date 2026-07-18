@@ -78,7 +78,7 @@ function getTemporaryPassword(response: unknown): string | null {
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
-  const { data: users, isLoading } = useUsers();
+  const { data: users, isLoading, isError, error: usersError, refetch } = useUsers();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -354,7 +354,11 @@ export default function UsersPage() {
              <div>
                 <h2 className="text-sm font-bold text-zinc-100 tracking-tight">Active Team</h2>
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
-                  {isLoading ? 'Scanning...' : `${users?.length ?? 0} Accounts Registered`}
+                  {isError
+                    ? 'Unavailable'
+                    : isLoading
+                      ? 'Scanning...'
+                      : `${users?.length ?? 0} Accounts Registered`}
                 </p>
              </div>
           </div>
@@ -368,7 +372,27 @@ export default function UsersPage() {
           )}
         </div>
 
-        {isLoading ? (
+        {isError ? (
+          <Card className="border-red-500/20 bg-red-500/[0.03] rounded-2xl">
+            <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+              <div className="size-12 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                <UserX className="size-6 text-red-400" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold text-zinc-100 tracking-tight">Failed to load team</h3>
+                <p className="text-[11px] font-medium text-zinc-400 max-w-sm">
+                  {getErrorMessage(usersError)}
+                </p>
+              </div>
+              <Button
+                className="bg-zinc-900 hover:bg-zinc-800 text-zinc-100 border border-zinc-800 rounded-xl font-bold uppercase text-[10px] tracking-widest h-10 px-5 transition-all"
+                onClick={() => refetch()}
+              >
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : isLoading ? (
           <div className="space-y-3">
             {[1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-20 w-full bg-zinc-900/40 rounded-2xl" />
