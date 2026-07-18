@@ -446,6 +446,31 @@ async def test_http_error_logs_google_status_and_body_but_never_the_key(caplog):
 
 
 @pytest.mark.asyncio
+async def test_bad_address_400_is_couldnt_verify_not_unavailable():
+    """A 400 INVALID_ARGUMENT means Google rejected the address (too sparse/malformed),
+    not that the service is down — so it must NOT surface the misleading
+    "temporarily unavailable, try again shortly" outage copy."""
+    request = httpx.Request("POST", GOOGLE_ENDPOINT)
+    response = httpx.Response(
+        400,
+        request=request,
+        json={"error": {"code": 400, "message": "Invalid postal address.",
+                        "status": "INVALID_ARGUMENT"}},
+    )
+    post = AsyncMock(side_effect=httpx.HTTPStatusError(
+        "400 Bad Request", request=request, response=response,
+    ))
+    db = _db_with_key()
+
+    with patch("services.address_validation.httpx.AsyncClient", return_value=_async_client_cm(post)):
+        with patch("services.address_validation.decrypt_value", return_value="plain-key"):
+            result = await validate_address(db, _uk_address())
+
+    assert result.status is AddressValidationStatus.COULDNT_VERIFY
+    assert "unavailable" not in (result.message or "").lower()
+
+
+@pytest.mark.asyncio
 async def test_jp_short_circuits_to_unsupported():
     """AV1-FIX-2: JP was dropped from the send-list, so it now resolves to UNSUPPORTED
     with NO Google call — the httpx client must never be constructed."""

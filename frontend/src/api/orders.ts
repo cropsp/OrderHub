@@ -8,6 +8,7 @@ import type {
   OrderListItem,
   OrderListResponse,
 } from '@/types/order'
+import type { AddressVerdict } from '@/types/addressValidation'
 
 export const ordersApi = {
   list: async (filters: OrderListFilters = {}): Promise<OrderListResponse> => {
@@ -47,6 +48,13 @@ export const ordersApi = {
     payload: Record<string, unknown> & { packaging_id?: string | null },
   ): Promise<OrderListItem> => {
     const { data } = await client.patch<OrderListItem>(`/orders/${orderId}`, payload)
+    return data
+  },
+
+  // ADDR-VAL-2: advisory address check (ADDR-VAL-1 endpoint). Never mutates the
+  // order — Apply goes through `update` above.
+  validateAddress: async (orderId: string): Promise<AddressVerdict> => {
+    const { data } = await client.post<AddressVerdict>(`/orders/${orderId}/validate-address`)
     return data
   },
 
