@@ -27,7 +27,8 @@
 - Sprint SHOP-FILTER-STALE status: `DONE` (Shop-filtered orders view remounts on shop switch — commit `39c2d57`)
 - Sprint COUNTRY-CLEANUP status: `DONE` (Residual ambiguous Etsy country codes + УК→UA + ISO input guard — commit `1f0dd60`)
 - Sprint ADDR-VAL-1 status: `DONE` (Address validation backend + encrypted Google API-key Settings UI — Google; merged `bdb5866`, deployed to prod, migration `b8e2f5a91c34`; prod key set + verified live)
-- Sprint ADDR-VAL-2 status: `DONE` (Address-validation UI — order-detail Check button + status badge + diff/Apply; commit `30f468f` on `feat/addr-val-2` — **awaiting merge/deploy**)
+- Sprint ADDR-VAL-2 status: `DONE` (Address-validation UI — order-detail Check button + status badge + diff/Apply; merged `2f94b28`, deployed to prod; closure commit `9f00154`)
+- Sprint USERS-LIST-500 status: `DONE` (Fix 500 on `GET /api/users` — the system user's reserved-TLD email broke `EmailStr` validation; merged `e44f6e2`, deployed to prod)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3923,10 +3924,84 @@ unrelated files).
 - Commit `30f468f` bundled `implementation_plan.md` with the 14 feature files;
   `task.md`, `start-dev.sh` and the scratch/review artifacts were excluded and left untracked.
 
-**Closes:** ADDR-VAL-2. Branch `feat/addr-val-2` ready for merge + deploy — **backend +
-frontend rebuild** (the smoke fix touched `address_validation.py`, so this is *not*
-frontend-only as the spec originally assumed), **no migration, no server `.env` change**.
-Next: **ADDR-VAL-JP** stays parked until a script-aware diff exists.
+**Deployed to prod (merge `2f94b28`, 2026-07-18):** closure commit `9f00154`; merged `--no-ff`
+(14 files); server fast-forwarded `bdb5866`→`2f94b28`; **backend + frontend** images rebuilt and
+recreated (the smoke fix touched `address_validation.py`, so this was *not* frontend-only as the
+spec originally assumed). No migration, no server `.env` change. **Verified:** backend +
+frontend Up (freshly recreated), postgres healthy, cloudflared untouched; `alembic current`
+unchanged at `b8e2f5a91c34` (confirming no new migration); `/api/health` →
+`{"status":"ok","service":"OrderHub CRM"}`; clean startup with live 200s. The
+`idlaser package not installed` warning is the documented server behaviour (idlaser is deferred
+there), not a regression.
+
+**Closes:** ADDR-VAL-2 — merged and live in production. Next: **ADDR-VAL-JP** stays parked until
+a script-aware diff exists.
+
+---
+
+**Sprint USERS-LIST-500 — `GET /api/users` 500 on prod (system user's reserved-TLD email)** (Status: `DONE` — commit `5967f9c` on branch `feat/users-list-500`, merged `e44f6e2`, deployed to prod; backend regression tests 2/2)
+
+**Trigger:** Sergii reported the prod Users page showed no users (2026-07-18). Cowork diagnosis
+from the browser: the page hung in an "Active Team — SCANNING…" skeleton (not an empty state);
+`GET /api/users` → **500** for any params, while `/api/users/me`, `/api/shops` and
+`/api/customers` → 200, and **dev** returned 200 with 3 users. Prod-data-specific; **not** an
+ADDR-VAL-2 regression.
+
+**Root cause (confirmed from the real prod traceback):** `UserResponse.email` is a Pydantic
+`EmailStr`, and the persistent system user (`SYSTEM_USER_ID` = `00000000-…-0001`) carries
+`email = 'system@orderhub.local'`. `email-validator` rejects `.local` as a special-use/reserved
+TLD (RFC 6761):
+
+```
+ValidationError: value is not a valid email address: The part after the @-sign
+is a special-use or reserved name  [input_value='system@orderhub.local']
+```
+
+`list_users` selected every row **including the system principal**; validating that one row
+raised and 500'd the entire list. `/me` worked because it returns only the caller's real
+address; dev never reproduced because its DB has no system-user row.
+
+**Ruled out with evidence:** role enum drift (the DB uses enum names consistently — the known
+gotcha did not apply here) and NULLs in non-Optional fields (all fields populated).
+**Scope check:** `EmailStr` is not nested in any other response schema (order audit history uses
+a plain `changed_by: str`), and there is **no `GET /api/users/{id}` route at all** — Cowork
+confirmed a `405 Method Not Allowed` on prod — so the blast radius was the list endpoint only.
+
+**Fix:**
+1. **Backend** — `list_users` now filters `SYSTEM_USER_ID` out of the query. The row is an
+   internal audit principal, never a team member; it is left **untouched** (never deleted or
+   reused, per the CLAUDE.md rule).
+2. **Test** — `backend/tests/test_users_router.py` asserts the query excludes the system user
+   *and* that `UserResponse` rejects its reserved-TLD email, encoding the reason so the filter
+   isn't silently reverted later.
+3. **Frontend** — `UsersPage` now consumes `isError`/`refetch` and renders a "Failed to load
+   team" card with a **Retry** button instead of the infinite "Scanning…" skeleton. (Cowork had
+   flagged the silent-failure skeleton as a secondary bug during diagnosis — a 500 was
+   indistinguishable from "still loading".)
+
+**Verification:**
+- Backend regression tests 2/2. CC additionally ran the fixed `list_users` against the **live
+  prod DB** inside the backend container — 2 real owners, no `ValidationError`, system user
+  excluded.
+- **Cowork over-the-wire check on prod** (authenticated HTTPS through Cloudflare Access — the
+  one path CC could not drive): `GET /api/users` → **200**, 2 rows, both `owner`,
+  `systemUserPresent: false`; the Users page renders the roster ("2 ACCOUNTS REGISTERED")
+  instead of the skeleton. ✓
+- The **error-card path could not be visually forced**: React Query deliberately retains cached
+  data when a background refetch fails, and the card only renders on a data-less first load —
+  precisely the scenario the fix addresses. Covered by code review; a visual confirm would need
+  the dev backend stopped during a fresh `/users` load.
+
+**Deployed to prod (merge `e44f6e2`, 2026-07-18):** merged `--no-ff`; server fast-forwarded
+`2f94b28`→`e44f6e2`; backend + frontend images rebuilt and recreated; postgres/cloudflared
+untouched. **Code-only** — `alembic current` unchanged at `b8e2f5a91c34`, no data change, no
+server `.env` change.
+
+**Residual (minor, noted not filed):** `/api/users/{id}` exists for mutations (GET → 405). A
+PATCH targeting the system user would hit the same `EmailStr` failure on its response, but the
+row is no longer surfaced anywhere in the UI, so it is unreachable in practice.
+
+**Closes:** the prod Users page — it now lists the real team.
 
 ---
 
@@ -3943,7 +4018,7 @@ in this document where applicable, to avoid duplication.
 | ADDR-VAL-JP | JP address validation (currently short-circuits to `unsupported`) | ADDR-VAL-1 real-API sign-off (2026-07-17) = **NO-GO as built**: Google returns romaji input as fullwidth kanji (romaji→kanji false diff on ~100% of JP orders) and 2/6 valid JP addresses returned `couldnt_verify`. Removed from the GA allowlist by **AV1-FIX-2** (`PREVIEW_COUNTRIES_SENT` now empty; code TODO left to re-enable). Re-enable only once the diff layer detects romaji-in / kanji-out and suppresses script-conversion-only changes — this naturally lands with ADDR-VAL-2's diff/apply UI (same suppression also cleans the cosmetic zip+4 / street-suffix diffs on GA countries). |
 | ADDR-VAL-2-followup-1 | Apply's confirmation uses a native `confirm()` rather than a styled dialog | Surfaced during the ADDR-VAL-2 Cowork smoke (2026-07-17). Apply *does* confirm before overwriting the customer-entered address (as specced in rule 4), but via the browser's native `confirm()` — unstyled, and it blocks the renderer while open (froze the browser automation for ~30s mid-smoke). Purely cosmetic/UX; the guard itself works correctly and the write path is sound. Fix: swap for the project's own modal/confirm idiom. Deliberately left out of ADDR-VAL-2 scope; bundle with the next order-detail frontend sprint. |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
-| TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
+| TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. **Update (2026-07-18, surfaced during USERS-LIST-500):** CC reported `npm run build` failing on `useProducts.ts`, `setupTests.ts` and `types/shipping.ts`, and characterised it as blocking a production build. Empirically it is **not** blocking today — the prod frontend image built and deployed successfully three times this week (ADDR-VAL-1 `bdb5866`, ADDR-VAL-2 `2f94b28`, USERS-LIST-500 `e44f6e2`), so `Dockerfile.deploy` evidently does not run `tsc` during the image build. Fold these three files into part (a) rather than filing a separate ticket, and confirm what the Docker build step actually runs before ever treating this as a deploy blocker. |
 | PC-F-1-followup-1 | Products-list thumbnail (small image in the ProductsPage name cell so near-identical products are distinguishable at a glance) | Deferred per PC-F-1 OQ-4 to keep v1 bounded to the detail card. Needs a batch image endpoint or signed URLs — the current per-product authenticated blob fetch would mean N fetches per list render. |
 | PC-F-1-followup-2 | `GET /products/{id}` and the mirrored `GET /products/{id}/image` lack shop-scoping | **Security.** Pre-existing SEC-05 gap (the product GET never scoped by shop); the new PC-F-1 image route inherits it by mirroring the pattern — any authenticated user can read another shop's product / product image by id. NOT introduced by PC-F-1. Prioritise: add the shop-scope guard to both the product GET and the image GET. |
 | BUG-4 | Orders list TOTAL + Dashboard widgets read stale `order.total_price` | Pending more user interaction with the system before deciding if it's a bug or by-design |
