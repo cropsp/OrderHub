@@ -26,7 +26,8 @@
 - Sprint ORD-NAME-1 status: `DONE` (Orders list shows recipient name, not the Etsy buyer handle — commit `3807bfe`)
 - Sprint SHOP-FILTER-STALE status: `DONE` (Shop-filtered orders view remounts on shop switch — commit `39c2d57`)
 - Sprint COUNTRY-CLEANUP status: `DONE` (Residual ambiguous Etsy country codes + УК→UA + ISO input guard — commit `1f0dd60`)
-- Sprint ADDR-VAL-1 status: `DONE` (Address validation backend + encrypted Google API-key Settings UI — Google; merged `bdb5866`, deployed to prod, migration `b8e2f5a91c34`; **prod Google key still to be set via Settings UI**)
+- Sprint ADDR-VAL-1 status: `DONE` (Address validation backend + encrypted Google API-key Settings UI — Google; merged `bdb5866`, deployed to prod, migration `b8e2f5a91c34`; prod key set + verified live)
+- Sprint ADDR-VAL-2 status: `DONE` (Address-validation UI — order-detail Check button + status badge + diff/Apply; commit `30f468f` on `feat/addr-val-2` — **awaiting merge/deploy**)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3855,6 +3856,80 @@ script-conversion suppression that gates ADDR-VAL-JP).
 
 ---
 
+**Sprint ADDR-VAL-2 — Address-validation UI: order-detail Check button + badge + diff/Apply** (Status: `DONE` — commit `30f468f` on branch `feat/addr-val-2`; backend pytest green (+30 address-service, +14 router/response), frontend vitest 132 incl. 16 on the new components, eslint clean on touched files; **not merged yet**)
+
+Goal: Phase 2 (the UI) of address validation — surface the ADDR-VAL-1 endpoint in the order
+detail: a manual **[Check address]** button, a **status badge**, and an original-vs-suggested
+**diff with Apply**. Advisory only, never blocks; UA stays on Nova Poshta. Spec: `task.md`
+(ADDR-VAL-2).
+
+**What shipped:**
+- **`AddressValidation.tsx`** (new) — rendered in `DetailLogistics`'s non-editing address
+  block. Persisted badge on load; **[Check address] / [Re-check]** (OWNER/MANAGER), spinner
+  in-flight, **disabled + hint when the order has no street address**; actionable-diff panel
+  with **Apply**; cosmetic-only results de-emphasised as "minor formatting differences".
+- **`AddressBadge.tsx`** (new) — mirrors the `StatusBadge` pill idiom for the 5 rendered
+  statuses; `ua` renders nothing (Nova Poshta owns that surface).
+- **`lib/addressDiff.ts`** (new) — the OQ-3 cosmetic predicate (zip+4 / a curated
+  street-suffix table; city, state and street *number* are always actionable). Fail-safe:
+  when in doubt it **over-surfaces**, never hides a real change.
+- `useValidateAddress` hook + `ordersApi.validateAddress`; the `OrderDetail` TS type gains the
+  two persisted fields.
+- **Backend (the one OQ-5 gap):** `OrderResponse` now serializes `address_validation_status` +
+  `address_validation_at` (`schemas/order.py`) so the badge renders on load — `from_attributes`
+  reads the columns ADDR-VAL-1 already persists. **No migration, no route change.**
+- **Apply** reuses the existing update path (`onUpdate` → `useUpdateOrder` →
+  `PATCH /orders/{id}`), sending **only the diffed `shipping_*` fields — never `country`** —
+  inheriting the `order_audit_history` row. No auto-re-validate after apply.
+
+**Cowork browser smoke (dev, owner, 2026-07-17):**
+
+| Case | Order | Result |
+|---|---|---|
+| non-UA, cosmetic-only | FR Rennemoulin | `verified` badge + "Minor formatting differences only" de-emphasis — no nagging diff ✓ |
+| persisted badge on load (OQ-5) | GB `f2b8de38` | `needs_attention` rendered on page load with no click ✓ |
+| actionable diff + **Apply** | GB `f2b8de38` | Re-check → `city: "Redbridge, London" → "London"` → Apply → city written as **London**; `country`, street, zip untouched (confirmed in DB) ✓ |
+| UA | Бориспіль | No Check affordance at all; card shows **NP VERIFIED** ✓ |
+| unsupported | JP Abuta-gun | **"Not supported here"**, no diff, no Google call ✓ |
+| no address | CZ Letonice (city-only) | **FINDING** — see below |
+
+**Smoke finding + fix (folded into `30f468f`):** on an order with only `city` + `country`
+(`shipping_street_1` / `zip` null — the UI itself renders "No address provided") the
+**[Check address] button was still enabled**, and the call returned `unavailable` with
+*"temporarily unavailable, try again shortly"* — misleading, since the service was healthy
+(full-address CZ orders returned `verified`); the address was simply too sparse for Google.
+Two-part fix:
+1. **Frontend guard** — the button now gates on `shipping_street_1` alone
+   (`hasAddress = Boolean(order.shipping_street_1)`), matching the "No address provided"
+   display predicate in `DetailLogistics.tsx`. City + country no longer enables Check; hint
+   reworded to "Add a street address to check this address."
+2. **Backend honesty** — a Google `400 INVALID_ARGUMENT` (address too sparse/malformed) now
+   maps to **`couldnt_verify`** ("Google could not check this address — it may be incomplete or
+   malformed") instead of `unavailable`. True outages still map to `unavailable`.
+
+**Verification:** backend pytest green — +30 address-service tests (incl. `400 INVALID_ARGUMENT
+→ COULDNT_VERIFY`, asserting the message contains no "unavailable") and +14 router/response
+tests (incl. the OQ-5 schema round-trip). Frontend vitest **132 pass**, 16 on the new
+components — badge 6-state mapping, `ua` hidden, empty/no-street disabled + hint, actionable
+diff, cosmetic-only de-emphasis, Apply-writes-shipping-only-never-country, owner-only
+unavailable hint, role gating. eslint clean on changed files. `tsc -p tsconfig.app.json`: no
+new errors in any touched file (remaining errors are pre-existing **TYPECHECK-1** baseline in
+unrelated files).
+
+**Notes:**
+- **Apply confirms via a native `confirm()`** — functional, but it blocks the renderer and is
+  unstyled. Deliberately left as-is; a styled confirm dialog is an optional follow-up
+  (`ADDR-VAL-2-followup-1`, parked below).
+- Commit `30f468f` bundled `implementation_plan.md` with the 14 feature files;
+  `task.md`, `start-dev.sh` and the scratch/review artifacts were excluded and left untracked.
+
+**Closes:** ADDR-VAL-2. Branch `feat/addr-val-2` ready for merge + deploy — **backend +
+frontend rebuild** (the smoke fix touched `address_validation.py`, so this is *not*
+frontend-only as the spec originally assumed), **no migration, no server `.env` change**.
+Next: **ADDR-VAL-JP** stays parked until a script-aware diff exists.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -3866,6 +3941,7 @@ in this document where applicable, to avoid duplication.
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
 | ADDR-VAL-USER-ACCESS | Admin-granted per-user access to address validation | Idea (Sergii, 2026-07-15): let an OWNER/admin grant specific users permission to run address validation, rather than it being available to all order-endpoint roles. Deferred — ADDR-VAL-1/2 ship the feature gated by the existing order roles first; add fine-grained per-user access after the core works. Would build on the existing role/designer-access model. |
 | ADDR-VAL-JP | JP address validation (currently short-circuits to `unsupported`) | ADDR-VAL-1 real-API sign-off (2026-07-17) = **NO-GO as built**: Google returns romaji input as fullwidth kanji (romaji→kanji false diff on ~100% of JP orders) and 2/6 valid JP addresses returned `couldnt_verify`. Removed from the GA allowlist by **AV1-FIX-2** (`PREVIEW_COUNTRIES_SENT` now empty; code TODO left to re-enable). Re-enable only once the diff layer detects romaji-in / kanji-out and suppresses script-conversion-only changes — this naturally lands with ADDR-VAL-2's diff/apply UI (same suppression also cleans the cosmetic zip+4 / street-suffix diffs on GA countries). |
+| ADDR-VAL-2-followup-1 | Apply's confirmation uses a native `confirm()` rather than a styled dialog | Surfaced during the ADDR-VAL-2 Cowork smoke (2026-07-17). Apply *does* confirm before overwriting the customer-entered address (as specced in rule 4), but via the browser's native `confirm()` — unstyled, and it blocks the renderer while open (froze the browser automation for ~30s mid-smoke). Purely cosmetic/UX; the guard itself works correctly and the write path is sound. Fix: swap for the project's own modal/confirm idiom. Deliberately left out of ADDR-VAL-2 scope; bundle with the next order-detail frontend sprint. |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
 | TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. |
 | PC-F-1-followup-1 | Products-list thumbnail (small image in the ProductsPage name cell so near-identical products are distinguishable at a glance) | Deferred per PC-F-1 OQ-4 to keep v1 bounded to the detail card. Needs a batch image endpoint or signed URLs — the current per-product authenticated blob fetch would mean N fetches per list render. |
