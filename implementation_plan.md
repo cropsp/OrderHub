@@ -26,7 +26,7 @@
 - Sprint ORD-NAME-1 status: `DONE` (Orders list shows recipient name, not the Etsy buyer handle — commit `3807bfe`)
 - Sprint SHOP-FILTER-STALE status: `DONE` (Shop-filtered orders view remounts on shop switch — commit `39c2d57`)
 - Sprint COUNTRY-CLEANUP status: `DONE` (Residual ambiguous Etsy country codes + УК→UA + ISO input guard — commit `1f0dd60`)
-- Sprint ADDR-VAL-1 status: `SIGN-OFF PASSED` (Address validation backend + encrypted Google API-key Settings UI; branch `feat/addr-val-1`, commits `73c9c0c` / `6c4e580` — **awaiting merge/deploy**)
+- Sprint ADDR-VAL-1 status: `DONE` (Address validation backend + encrypted Google API-key Settings UI — Google; merged `bdb5866`, deployed to prod, migration `b8e2f5a91c34`; **prod Google key still to be set via Settings UI**)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -3833,6 +3833,19 @@ dev clean (0 stamped orders).
   403 every backend call on dev and prod.
 - **Post-deploy:** rotate the dev key (kills the 6 leaked log strings), then set the **prod**
   key once via the prod Settings UI (no server `.env` change).
+
+**Deployed to prod (merge `bdb5866`, 2026-07-17):** `feat/addr-val-1` → `main` (`--no-ff`,
+19 files); docs commit `3fc1047` = `implementation_plan.md` only (`task.md` / `start-dev.sh` /
+`COWORK_HANDOFF.md` left uncommitted). Server fast-forwarded `476d240`→`bdb5866`, rebuilt
+backend + frontend, migration `b8e2f5a91c34` applied on backend start. **Verified:** all
+containers Up (postgres healthy); `alembic current` = `b8e2f5a91c34` (head); frontend SPA 200;
+new route `/api/settings/address-validation` → 403 unauth (deployed + role-gated); public
+`https://orderhub.orderapp.uk` → 302 Cloudflare Access (healthy, not 502/523). **Operator
+to-dos before live:** set the prod Google key via prod Settings → Address validation (it's a DB
+app-setting, not shipped with code → validation returns `unavailable` until set); reconcile the
+key/project in the Console (dev last4 `YYFA`; restriction None/IP, never Websites); rotate the
+dev key (kills the 6 leaked plaintext strings in dev `server.log`). Prod Settings-field eyeball
+still pending (behind Cloudflare Access).
 
 **Closes:** ADDR-VAL-1 implementation + real-API sign-off. Branch `feat/addr-val-1` ready for
 merge + deploy (backend + frontend rebuild + one migration; no server `.env` change). Next:

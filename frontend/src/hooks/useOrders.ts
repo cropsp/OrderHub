@@ -77,10 +77,23 @@ export function useUpdateOrder() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ orderId, payload }: { orderId: string; payload: any }) => 
+    mutationFn: ({ orderId, payload }: { orderId: string; payload: any }) =>
       ordersApi.update(orderId, payload),
     onSuccess: (_, { orderId }) => {
       void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+    },
+  })
+}
+
+// ADDR-VAL-2: run the advisory address check. Invalidates the order so the persisted
+// address_validation_status the endpoint just wrote is reflected on the badge.
+export function useValidateAddress() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (orderId: string) => ordersApi.validateAddress(orderId),
+    onSuccess: (_, orderId) => {
       void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
     },
   })

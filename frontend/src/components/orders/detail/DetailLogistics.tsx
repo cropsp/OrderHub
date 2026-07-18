@@ -12,6 +12,7 @@ import { usePackaging } from '@/hooks/usePackaging';
 import { cn } from '@/lib/utils';
 import { countryName } from '@/lib/countries';
 import { useToastStore } from '@/components/ui/Toast';
+import { AddressValidation } from './AddressValidation';
 
 interface DetailLogisticsProps {
   order: OrderDetail;
@@ -414,6 +415,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
                      </span>
                    )}
                 </div>
+                <AddressValidation order={order} canManageShipping={canManageShipping} onApply={onUpdate} />
               </div>
             </div>
           )}

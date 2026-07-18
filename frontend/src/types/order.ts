@@ -1,4 +1,5 @@
 import type { Order, OrderStatus, PaginatedResponse, OrderItem, OrderStatusHistoryEntry } from './common'
+import type { AddressValidationStatus } from './addressValidation'
 
 export interface OrderListItem extends Order {
   shop_name: string | null
@@ -17,6 +18,10 @@ export interface OrderDetail extends OrderListItem {
   // (currency mismatch, partial BOM coverage, negative stock). Empty/absent
   // on plain GETs.
   warnings?: string[];
+  // ADDR-VAL-2: last-known address-validation outcome, persisted by ADDR-VAL-1,
+  // so the order-detail badge renders on load without a fresh Google call.
+  address_validation_status?: AddressValidationStatus | null;
+  address_validation_at?: string | null;
 }
 
 export type OrderListResponse = PaginatedResponse<OrderListItem>

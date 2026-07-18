@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from models.order import OrderStatus
+from models.order import AddressValidationStatus, OrderStatus
 from schemas.packaging import PackagingBoxSummary
 
 
@@ -121,6 +121,11 @@ class OrderResponse(OrderListResponse):
     # MAT-4: operational warnings from the SHIPPED transition (currency
     # mismatch, partial BOM coverage, negative stock). Empty for plain reads.
     warnings: list[str] = []
+    # ADDR-VAL-2: last-known address-validation outcome, so the order-detail badge
+    # renders on load without a fresh Google call. Persisted by ADDR-VAL-1; from_attributes
+    # populates both from the ORM columns.
+    address_validation_status: AddressValidationStatus | None = None
+    address_validation_at: datetime | None = None
 
 
 class OrderItemCreate(BaseModel):

@@ -153,6 +153,14 @@ async def validate_address(db: AsyncSession, address: AddressInput) -> AddressVe
             exc.response.status_code,
             exc.response.text,
         )
+        # A 400 (INVALID_ARGUMENT) means Google rejected the *address* — too sparse or
+        # malformed to parse — not that the service is down. Report that honestly as
+        # "couldn't verify" instead of the misleading "try again shortly" outage copy.
+        if exc.response.status_code == 400:
+            return _verdict(
+                AddressValidationStatus.COULDNT_VERIFY,
+                "Google could not check this address — it may be incomplete or malformed.",
+            )
         return _verdict(
             AddressValidationStatus.UNAVAILABLE,
             "Address validation is temporarily unavailable. Try again shortly.",
