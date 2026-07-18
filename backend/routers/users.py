@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from constants import SYSTEM_USER_ID
 from database import get_db
 from models.user import User, UserRole
 from schemas.user import UserCreate, UserUpdate, UserResponse, UserWithPasswordResponse, UserPreferencesUpdate
@@ -24,8 +25,18 @@ async def list_users(
     current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all users (owner only)."""
-    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    """List all users (owner only).
+
+    Excludes the persistent system user (SYSTEM_USER_ID) — it's an internal
+    audit principal for webhook/scheduler rows, never a team member, and its
+    reserved-TLD email (system@orderhub.local) is not a valid EmailStr, so
+    including it would fail UserResponse serialization.
+    """
+    result = await db.execute(
+        select(User)
+        .where(User.id != SYSTEM_USER_ID)
+        .order_by(User.created_at.desc())
+    )
     return result.scalars().all()
 
 
