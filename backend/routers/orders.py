@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.order import AddressValidationStatus, Order, OrderStatus
+from models.order import AddressValidationStatus, Order, OrderItem, OrderStatus
 from models.user import User, UserRole
 from schemas.address_validation import AddressInput, AddressVerdict
 from schemas.order import (
@@ -22,7 +22,10 @@ from schemas.order import (
 )
 from schemas.common import PaginatedResponse
 from schemas.parcel import ParcelEstimate
-from routers.dependencies import get_current_user, require_role
+from routers.dependencies import (
+    get_current_user, require_role, assert_order_access, assert_shop_access,
+)
+from services.access_service import get_shop_scope
 from services.order_service import (
     get_orders_filtered, get_order_detail,
     create_order, update_order, change_order_status,
@@ -58,10 +61,14 @@ async def list_orders(
         search=search,
     )
     
-    # Designer sees only their own assigned orders
+    # USER-ACCESS-1 shop scope: designer = assignment wins; manager = granted shops.
     if current_user.role == UserRole.DESIGNER:
         filters.assigned_designer_id = current_user.id
-        
+    elif current_user.role != UserRole.OWNER:
+        scope = await get_shop_scope(db, current_user)
+        if not scope.is_unrestricted:
+            filters.shop_ids = list(scope.shop_ids)
+
     skip = (page - 1) * limit
     orders, total = await get_orders_filtered(db, skip, limit, filters)
     pages = (total + limit - 1) // limit
@@ -94,11 +101,9 @@ async def get_order(
     order = await get_order_detail(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
-    # Check access for designer
-    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not assigned to this order")
-        
+
+    await assert_order_access(db, order, current_user)
+
     data = OrderResponse.model_validate(order).model_dump()
     data["shop_name"] = order.shop.name if order.shop else None
     data["platform"] = order.shop.platform.value if order.shop else None
@@ -128,11 +133,10 @@ async def get_order_parcel_estimate(
     order = await get_order_detail(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
+
     # 2. Check access
-    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not assigned to this order")
-        
+    await assert_order_access(db, order, current_user)
+
     # 3. Calculate estimate
     try:
         estimate = await calculate_parcel_estimate(db, str(order_id))
@@ -162,7 +166,10 @@ async def create_new_order(
     """Manually create a new order."""
     if current_user.role == UserRole.DESIGNER:
         raise HTTPException(status_code=403, detail="Designers cannot create orders manually")
-        
+
+    # USER-ACCESS-1: a manager may only create orders in shops they can access.
+    await assert_shop_access(db, body.shop_id, current_user)
+
     logger.info(f"Creating new order for user {current_user.email}")
     order = await create_order(db, body, current_user)
     await db.commit()
@@ -181,11 +188,14 @@ async def update_existing_order(
     order = await get_order_detail(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
+
     # Designers cannot update core fields
     if current_user.role == UserRole.DESIGNER:
         raise HTTPException(status_code=403, detail="Designers cannot modify order fields directly")
-        
+
+    # USER-ACCESS-1: manager must have access to this order's shop.
+    await assert_order_access(db, order, current_user)
+
     # Security validations are inside update_order service
     logger.info(f"Updating order {order_id} by user {current_user.email}")
     await update_order(db, order, body, current_user)
@@ -219,11 +229,19 @@ async def bulk_transition_order_status(
         f"by {current_user.email}"
     )
 
+    # USER-ACCESS-1: resolve the caller's shop scope once; a manager silently
+    # skips orders in shops they cannot access (reported as skipped, not fatal).
+    scope = await get_shop_scope(db, current_user)
+
     # dict.fromkeys dedupes while preserving the caller's order.
     for order_id in dict.fromkeys(body.order_ids):
         order = await db.get(Order, order_id)
         if order is None:
             skipped.append(SkippedItem(order_id=order_id, reason="not found"))
+            continue
+
+        if not scope.can_access(order.shop_id):
+            skipped.append(SkippedItem(order_id=order_id, reason="no access to shop"))
             continue
 
         # change_order_status treats this as a no-op early return, which is
@@ -273,10 +291,9 @@ async def transition_order_status(
     order = await get_order_detail(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
-    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not assigned to this order")
-        
+
+    await assert_order_access(db, order, current_user)
+
     logger.info(f"Transitioning order {order_id} status to {body.new_status} by {current_user.email}")
     _, warnings = await change_order_status(db, order, body.new_status, current_user, body.comment)
     await db.commit()
@@ -304,8 +321,7 @@ async def validate_order_address(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    if current_user.role == UserRole.DESIGNER and order.assigned_designer_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not assigned to this order")
+    await assert_order_access(db, order, current_user)
 
     verdict = await validate_address(db, AddressInput(
         street_1=order.shipping_street_1,
@@ -343,7 +359,12 @@ async def add_item_to_order(
     """Add a new item to an existing order."""
     if current_user.role == UserRole.DESIGNER:
         raise HTTPException(status_code=403, detail="Designers cannot add items")
-    
+
+    order = await db.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await assert_order_access(db, order, current_user)
+
     item = await add_order_item(db, order_id, body)
     await db.commit()
     return item
@@ -359,7 +380,13 @@ async def update_item_in_order(
     """Update an existing order item."""
     if current_user.role == UserRole.DESIGNER:
         raise HTTPException(status_code=403, detail="Designers cannot update items")
-    
+
+    item_row = await db.get(OrderItem, item_id)
+    if not item_row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    order = await db.get(Order, item_row.order_id)
+    await assert_order_access(db, order, current_user)
+
     item = await update_order_item(db, item_id, body)
     await db.commit()
     return item
@@ -374,7 +401,13 @@ async def remove_item_from_order(
     """Remove an item from an order."""
     if current_user.role == UserRole.DESIGNER:
         raise HTTPException(status_code=403, detail="Designers cannot delete items")
-    
+
+    item_row = await db.get(OrderItem, item_id)
+    if not item_row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    order = await db.get(Order, item_row.order_id)
+    await assert_order_access(db, order, current_user)
+
     await delete_order_item(db, item_id)
 
 
@@ -388,6 +421,11 @@ async def export_orders_csv(
 ):
     """Export filtered orders as CSV. Designers cannot export."""
     filters = OrderFilters(status=status, shop_id=shop_id, search=search)
+    # USER-ACCESS-1: a manager exports only orders from shops they can access.
+    if current_user.role != UserRole.OWNER:
+        scope = await get_shop_scope(db, current_user)
+        if not scope.is_unrestricted:
+            filters.shop_ids = list(scope.shop_ids)
     orders, _ = await get_orders_filtered(db, 0, 10000, filters)
     
     # Generate CSV in memory

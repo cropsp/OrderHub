@@ -190,11 +190,18 @@ async def test_bulk_status_skips_cancelled_order_for_manager_and_updates_rest():
     body = BulkStatusChangeRequest(
         order_ids=[ok.id, cancelled.id], new_status=OrderStatus.IN_PRODUCTION
     )
+    # USER-ACCESS-1: bulk resolves the caller's shop scope once; give the manager
+    # an unrestricted scope so this test stays focused on the cancelled-skip logic.
+    from services.access_service import ShopScope
     with patch(
-        "routers.orders.change_order_status", new_callable=AsyncMock
-    ) as change:
-        change.side_effect = _change
-        result = await bulk_transition_order_status(body, user, db)
+        "routers.orders.get_shop_scope",
+        new=AsyncMock(return_value=ShopScope.unrestricted()),
+    ):
+        with patch(
+            "routers.orders.change_order_status", new_callable=AsyncMock
+        ) as change:
+            change.side_effect = _change
+            result = await bulk_transition_order_status(body, user, db)
 
     assert result.updated == 1
     assert result.unchanged == 0

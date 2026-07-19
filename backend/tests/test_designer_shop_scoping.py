@@ -1,7 +1,8 @@
-"""SEC-05 — Designer shop access scoping.
+"""USER-ACCESS-1 — grant-based shop access via get_shop_for_user.
 
-Verifies get_shop_for_user enforces that designers can only access shops where
-they have at least one assigned order. Owner/manager roles are unaffected.
+Supersedes the SEC-05 assignment-in-shop rule: shop access is now an explicit
+`user_shop_access` grant. OWNER is unrestricted; MANAGER and DESIGNER need a
+grant (a designer's grant is materialised when an order is assigned to them).
 """
 import pytest
 from uuid import uuid4
@@ -32,33 +33,34 @@ def _shop_result(shop):
     return r
 
 
-def _assignment_result(found):
+def _grant_result(shop_ids):
+    """Mimics `db.execute(select(UserShopAccess.shop_id))` in get_shop_scope."""
     r = MagicMock()
-    r.scalar_one_or_none.return_value = uuid4() if found else None
+    r.scalars.return_value.all.return_value = list(shop_ids)
     return r
 
 
 @pytest.mark.asyncio
-async def test_designer_with_assignment_in_shop_gets_access():
+async def test_designer_with_grant_gets_access():
     shop_id = uuid4()
     shop = _make_shop(shop_id)
     designer = _make_user(UserRole.DESIGNER)
 
     db = AsyncMock()
-    db.execute.side_effect = [_shop_result(shop), _assignment_result(True)]
+    db.execute.side_effect = [_shop_result(shop), _grant_result([shop_id])]
 
     result = await get_shop_for_user(shop_id=shop_id, db=db, current_user=designer)
     assert result is shop
 
 
 @pytest.mark.asyncio
-async def test_designer_without_assignment_in_shop_gets_403():
+async def test_designer_without_grant_gets_403():
     shop_id = uuid4()
     shop = _make_shop(shop_id)
     designer = _make_user(UserRole.DESIGNER)
 
     db = AsyncMock()
-    db.execute.side_effect = [_shop_result(shop), _assignment_result(False)]
+    db.execute.side_effect = [_shop_result(shop), _grant_result([])]
 
     with pytest.raises(HTTPException) as exc:
         await get_shop_for_user(shop_id=shop_id, db=db, current_user=designer)
@@ -66,7 +68,35 @@ async def test_designer_without_assignment_in_shop_gets_403():
 
 
 @pytest.mark.asyncio
-async def test_owner_does_not_require_assignment():
+async def test_manager_with_grant_gets_access():
+    shop_id = uuid4()
+    shop = _make_shop(shop_id)
+    manager = _make_user(UserRole.MANAGER)
+
+    db = AsyncMock()
+    db.execute.side_effect = [_shop_result(shop), _grant_result([shop_id])]
+
+    result = await get_shop_for_user(shop_id=shop_id, db=db, current_user=manager)
+    assert result is shop
+
+
+@pytest.mark.asyncio
+async def test_manager_without_grant_gets_403():
+    """Behaviour change from SEC-05: managers are no longer globally unrestricted."""
+    shop_id = uuid4()
+    shop = _make_shop(shop_id)
+    manager = _make_user(UserRole.MANAGER)
+
+    db = AsyncMock()
+    db.execute.side_effect = [_shop_result(shop), _grant_result([uuid4()])]
+
+    with pytest.raises(HTTPException) as exc:
+        await get_shop_for_user(shop_id=shop_id, db=db, current_user=manager)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_owner_is_unrestricted_without_grant_query():
     shop_id = uuid4()
     shop = _make_shop(shop_id)
     owner = _make_user(UserRole.OWNER)
@@ -76,20 +106,8 @@ async def test_owner_does_not_require_assignment():
 
     result = await get_shop_for_user(shop_id=shop_id, db=db, current_user=owner)
     assert result is shop
+    # OWNER short-circuits — only the shop lookup runs, never a grant query.
     assert db.execute.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_manager_does_not_require_assignment():
-    shop_id = uuid4()
-    shop = _make_shop(shop_id)
-    manager = _make_user(UserRole.MANAGER)
-
-    db = AsyncMock()
-    db.execute.side_effect = [_shop_result(shop)]
-
-    result = await get_shop_for_user(shop_id=shop_id, db=db, current_user=manager)
-    assert result is shop
 
 
 @pytest.mark.asyncio

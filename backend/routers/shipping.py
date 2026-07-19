@@ -17,7 +17,7 @@ from models.order import Order, OrderStatus
 from models.shop import Shop
 from models.stock_movement import StockMovementReason
 from models.user import User, UserRole
-from routers.dependencies import require_role
+from routers.dependencies import assert_order_access, require_role
 from services import stock_service
 from services.order_service import get_order_detail, change_order_status
 from services.nova_poshta import NovaPoshtaClient, NovaPoshtaAPIError
@@ -110,7 +110,10 @@ async def create_np_ttn(
     order = await get_order_detail(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
+
+    # USER-ACCESS-1: a manager may only create a TTN for an accessible shop.
+    await assert_order_access(db, order, current_user)
+
     if order.ttn_number:
         raise HTTPException(status_code=400, detail="Order already has a TTN")
 
@@ -311,7 +314,10 @@ async def delete_np_ttn(
     order = await get_order_detail(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-        
+
+    # USER-ACCESS-1: a manager may only delete a TTN for an accessible shop.
+    await assert_order_access(db, order, current_user)
+
     if not order.ttn_number:
         raise HTTPException(status_code=400, detail="Order does not have a TTN")
 

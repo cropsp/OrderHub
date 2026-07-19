@@ -12,7 +12,7 @@ from logger import get_logger
 from models.user import User, UserRole
 from models.shop import Shop, ShopPlatform
 from schemas.common import ImportResult
-from routers.dependencies import get_current_user, require_role
+from routers.dependencies import assert_shop_access, get_current_user, require_role
 from services.etsy_parser import parse_etsy_csv
 
 logger = get_logger("routers.imports")
@@ -31,7 +31,10 @@ async def import_etsy_orders(
     
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
-        
+
+    # USER-ACCESS-1: a manager may only import into a shop they can access.
+    await assert_shop_access(db, shop_id, current_user)
+
     result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
     shop = result.scalar_one_or_none()
     

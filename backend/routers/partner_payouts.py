@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.user import User, UserRole
-from routers.dependencies import get_current_user, require_role
+from routers.dependencies import get_current_user, require_role, require_shop_access
 from schemas.partner_payout import (
     PartnerBalancesResponse,
     PartnerNamesResponse,
@@ -31,7 +31,11 @@ from services import partner_payout_service
 router = APIRouter(
     prefix="/api/shops/{shop_id}/partner-payouts",
     tags=["partner-payouts"],
-    dependencies=[Depends(require_role(UserRole.OWNER, UserRole.MANAGER))],
+    # USER-ACCESS-1: role gate + per-shop grant (path shop_id was previously trusted).
+    dependencies=[
+        Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+        Depends(require_shop_access),
+    ],
 )
 
 

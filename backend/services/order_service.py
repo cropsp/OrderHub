@@ -66,7 +66,11 @@ async def get_orders_filtered(
         
     if filters.shop_id:
         conditions.append(Order.shop_id == filters.shop_id)
-        
+
+    # USER-ACCESS-1: manager shop scoping. Empty list → in_([]) → zero rows.
+    if filters.shop_ids is not None:
+        conditions.append(Order.shop_id.in_(filters.shop_ids))
+
     if filters.assigned_designer_id:
         conditions.append(Order.assigned_designer_id == filters.assigned_designer_id)
         
@@ -160,6 +164,11 @@ async def change_order_status(
         if order.assigned_designer_id is None and user.role == UserRole.DESIGNER:
             order.assigned_designer_id = user.id
             order.assigned_at = now
+            # USER-ACCESS-1: assignment materialises the designer's shop grant.
+            from services.access_service import grant_shop_access
+            await grant_shop_access(
+                db, user.id, order.shop_id, actor_id=user.id, source="assignment"
+            )
 
     old_status = order.status
     order.status = new_status
@@ -348,7 +357,19 @@ async def update_order(db: AsyncSession, order: Order, data: OrderUpdate, user: 
             comment=f"Fields updated: {', '.join(changes)}"
         )
         db.add(history)
-        
+
+    # USER-ACCESS-1: assigning an order to a designer materialises their shop
+    # grant so order-level and shop-level access stay coherent (assignment wins).
+    new_designer_id = update_data.get("assigned_designer_id")
+    if new_designer_id is not None:
+        assignee = await db.get(User, new_designer_id)
+        if assignee and assignee.role == UserRole.DESIGNER:
+            from services.access_service import grant_shop_access
+            await grant_shop_access(
+                db, new_designer_id, order.shop_id,
+                actor_id=user.id, source="assignment",
+            )
+
     await db.flush()
     return order
 

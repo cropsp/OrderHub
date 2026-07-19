@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status as http_status
 from sqlalchemy import select, func, cast, Date, text
@@ -65,7 +66,6 @@ async def get_dashboard_stats(
     base_filter = []
     if shop_id and shop_id != "all" and shop_id != "undefined":
         try:
-            import uuid
             shop_uuid = uuid.UUID(shop_id)
             base_filter.append(Order.shop_id == shop_uuid)
             logger.info(f"Adding shop filter: {shop_uuid}")
@@ -75,6 +75,22 @@ async def get_dashboard_stats(
     if current_user.role == UserRole.DESIGNER:
         base_filter.append(Order.assigned_designer_id == current_user.id)
         logger.info(f"Adding designer filter: {current_user.id}")
+    elif current_user.role != UserRole.OWNER:
+        # USER-ACCESS-1: manager aggregates sum only over accessible shops.
+        from services.access_service import get_shop_scope
+        scope = await get_shop_scope(db, current_user)
+        if shop_id and shop_id not in ("all", "undefined"):
+            try:
+                requested = uuid.UUID(shop_id)
+            except ValueError:
+                requested = None
+            if requested is not None and not scope.can_access(requested):
+                raise HTTPException(
+                    status_code=http_status.HTTP_403_FORBIDDEN,
+                    detail="You do not have access to this shop",
+                )
+        if not scope.is_unrestricted:
+            base_filter.append(Order.shop_id.in_(scope.shop_ids))
 
     # 1. Orders by Status
     status_query = select(Order.status, func.count()).where(*base_filter).group_by(Order.status)
