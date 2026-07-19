@@ -28,6 +28,33 @@ export function useUpdateUser() {
   });
 }
 
+export function useUserShopAccess(userId: string | null) {
+  return useQuery({
+    queryKey: ['users', userId, 'shop-access'],
+    queryFn: () => usersApi.getShopAccess(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
+export function useSetUserShopAccess() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      shop_ids,
+      unassign_orders,
+    }: {
+      id: string;
+      shop_ids: string[];
+      unassign_orders?: boolean;
+    }) => usersApi.setShopAccess(id, { shop_ids, unassign_orders }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['users', variables.id, 'shop-access'] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+  });
+}
+
 export function useUpdatePreferences() {
   const queryClient = useQueryClient();
   return useMutation({

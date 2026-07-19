@@ -52,6 +52,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { getInitials, getAvatarColor } from '@/utils/avatar';
 import { cn } from '@/lib/utils';
 import type { User } from '@/types/user';
+import ShopAccessDialog from '@/components/users/ShopAccessDialog';
 
 const ROLE_COLORS = {
   owner: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
@@ -93,6 +94,7 @@ export default function UsersPage() {
   const [editRole, setEditRole] = useState<UserRoleType>('designer');
   const [editIsActive, setEditIsActive] = useState(true);
   const [editError, setEditError] = useState<string | null>(null);
+  const [shopAccessUser, setShopAccessUser] = useState<User | null>(null);
   
   const isOwner = currentUser?.role === 'owner';
 
@@ -344,6 +346,14 @@ export default function UsersPage() {
         </DialogContent>
       </Dialog>
 
+      <ShopAccessDialog
+        user={shopAccessUser}
+        open={Boolean(shopAccessUser)}
+        onOpenChange={(open) => {
+          if (!open) setShopAccessUser(null);
+        }}
+      />
+
       <div className="space-y-6">
         {/* Modern Header Section */}
         <div className="flex items-center justify-between bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800/40">
@@ -484,6 +494,12 @@ export default function UsersPage() {
                                 onClick={() => openEditPermissions(u)}
                               >
                                 Modify Permissions
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-lg cursor-pointer px-3 py-2.5 mt-0.5"
+                                onClick={() => setShopAccessUser(u)}
+                              >
+                                Shop Access
                               </DropdownMenuItem>
                               <DropdownMenuItem 
                                 className={cn(

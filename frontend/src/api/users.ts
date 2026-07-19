@@ -1,9 +1,26 @@
 import client from './client';
 import type { User } from '../types/user';
 
+export interface ShopAccess {
+  shop_ids: string[];
+}
+
 export const usersApi = {
   getMe: async (): Promise<User> => {
     const { data } = await client.get<User>('/users/me');
+    return data;
+  },
+
+  getShopAccess: async (id: string): Promise<ShopAccess> => {
+    const { data } = await client.get<ShopAccess>(`/users/${id}/shop-access`);
+    return data;
+  },
+
+  setShopAccess: async (
+    id: string,
+    payload: { shop_ids: string[]; unassign_orders?: boolean },
+  ): Promise<ShopAccess> => {
+    const { data } = await client.put<ShopAccess>(`/users/${id}/shop-access`, payload);
     return data;
   },
   
