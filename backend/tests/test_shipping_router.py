@@ -23,7 +23,9 @@ from routers.shipping import (
 )
 
 
-def _make_user(role=UserRole.MANAGER):
+def _make_user(role=UserRole.OWNER):
+    # USER-ACCESS-1: default to OWNER so the shop-access guard is a no-op — these
+    # tests exercise TTN mechanics, not access control (covered by dedicated tests).
     user = MagicMock()
     user.id = uuid.uuid4()
     user.role = role

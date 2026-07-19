@@ -12,12 +12,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from constants import SYSTEM_USER_ID
 from database import get_db
+from models.order import Order
+from models.shop import Shop
 from models.user import User, UserRole
-from schemas.user import UserCreate, UserUpdate, UserResponse, UserWithPasswordResponse, UserPreferencesUpdate
+from schemas.user import (
+    UserCreate, UserUpdate, UserResponse, UserWithPasswordResponse,
+    UserPreferencesUpdate, ShopAccessResponse, ShopAccessUpdate,
+)
 from routers.dependencies import get_current_user, require_role
+from services import access_service
 from services.auth_service import hash_password, generate_temp_password
+from services.order_service import get_order_detail, update_order
+from schemas.order import OrderUpdate
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+async def _load_manageable_user(db: AsyncSession, user_id: uuid.UUID) -> User:
+    """Load a non-system user or raise 404 (shop-access endpoints)."""
+    if user_id == SYSTEM_USER_ID:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+async def _active_shop_ids(db: AsyncSession) -> list[uuid.UUID]:
+    result = await db.execute(select(Shop.id).where(Shop.is_active == True))  # noqa: E712
+    return list(result.scalars().all())
 
 
 @router.get("", response_model=list[UserResponse])
@@ -87,6 +111,12 @@ async def create_user(
     await db.flush()
     await db.refresh(user)
 
+    # USER-ACCESS-1 (rule 2): set initial shop access at creation so a new
+    # MANAGER/DESIGNER is not trapped with zero visibility.
+    await access_service.default_grants_for_new_user(
+        db, user, body.shop_ids, actor_id=current_user.id
+    )
+
     # Return the response with temp password (shown only once)
     response_data = UserResponse.model_validate(user).model_dump()
     response_data["temporary_password"] = temp_password
@@ -141,3 +171,97 @@ async def update_user(
     await db.flush()
     await db.refresh(user)
     return user
+
+
+# ─── Shop access (USER-ACCESS-1) ───────────────────────────
+
+@router.get("/{user_id}/shop-access", response_model=ShopAccessResponse)
+async def get_user_shop_access(
+    user_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """The shops a user can access (owner only).
+
+    OWNER targets are unrestricted — reported as every active shop so the editor
+    reflects reality (and is shown disabled).
+    """
+    user = await _load_manageable_user(db, user_id)
+    if user.role == UserRole.OWNER:
+        return ShopAccessResponse(shop_ids=await _active_shop_ids(db))
+    granted = await access_service.get_granted_shop_ids(db, user_id)
+    return ShopAccessResponse(shop_ids=list(granted))
+
+
+@router.put("/{user_id}/shop-access", response_model=ShopAccessResponse)
+async def set_user_shop_access(
+    user_id: uuid.UUID,
+    body: ShopAccessUpdate,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace a user's shop grants (owner only).
+
+    OWNER targets are a no-op (unrestricted). Revoking a shop from a DESIGNER who
+    still has assigned orders there is refused with 409 unless `unassign_orders`
+    is set — in which case those orders are unassigned (audited) before the grant
+    is removed, so revocation actually removes visibility of that shop's PII.
+    """
+    user = await _load_manageable_user(db, user_id)
+    if user.role == UserRole.OWNER:
+        # Unrestricted by design — ignore and report the full set.
+        return ShopAccessResponse(shop_ids=await _active_shop_ids(db))
+
+    desired = set(body.shop_ids)
+    current = await access_service.get_granted_shop_ids(db, user_id)
+    removed = current - desired
+
+    # Which revoked shops still have orders assigned to this user?
+    blocked: list[dict] = []
+    if removed:
+        count_rows = await db.execute(
+            select(Order.shop_id, func.count())
+            .where(
+                Order.assigned_designer_id == user_id,
+                Order.shop_id.in_(removed),
+            )
+            .group_by(Order.shop_id)
+        )
+        blocked = [
+            {"shop_id": str(shop_id), "assigned_order_count": count}
+            for shop_id, count in count_rows.all()
+            if count > 0
+        ]
+
+    if blocked and not body.unassign_orders:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "User still has assigned orders in shops being revoked.",
+                "blocked": blocked,
+            },
+        )
+
+    # Confirmed: unassign the user's orders in every revoked shop (audited path).
+    if blocked and body.unassign_orders:
+        revoked_shop_ids = {uuid.UUID(b["shop_id"]) for b in blocked}
+        order_rows = await db.execute(
+            select(Order.id).where(
+                Order.assigned_designer_id == user_id,
+                Order.shop_id.in_(revoked_shop_ids),
+            )
+        )
+        for (order_id,) in order_rows.all():
+            order = await get_order_detail(db, order_id)
+            if order is not None:
+                await update_order(
+                    db, order, OrderUpdate(assigned_designer_id=None), current_user
+                )
+
+    await access_service.set_shop_access(
+        db, user_id, desired, actor_id=current_user.id
+    )
+    await db.flush()
+
+    granted = await access_service.get_granted_shop_ids(db, user_id)
+    return ShopAccessResponse(shop_ids=list(granted))

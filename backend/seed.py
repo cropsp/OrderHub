@@ -25,6 +25,7 @@ from models import (
     Shop, ShopPlatform,
     Customer,
     Order, OrderStatus, OrderItem, OrderStatusHistory,
+    UserShopAccess,
 )
 from services.auth_service import hash_password
 
@@ -138,6 +139,9 @@ async def seed():
             (shop_lm, 3, "3001234511", OrderStatus.CANCELLED, "Phone Case Leather", 35.00, "EUR", 20, False),
         ]
 
+        # USER-ACCESS-1: track the shops a designer is assigned to, so seeded
+        # grants mirror the migration backfill (assignment → shop grant).
+        designer_shop_ids: set = set()
         for shop, ci, ext_id, order_status, title, total, curr, days, multi in orders_spec:
             customer = customers[ci]
             ordered = now - timedelta(days=days)
@@ -167,6 +171,7 @@ async def seed():
             if order_status in (OrderStatus.DESIGN_PENDING, OrderStatus.DESIGN_READY):
                 order.assigned_designer_id = designer.id
                 order.assigned_at = ordered + timedelta(hours=2)
+                designer_shop_ids.add(shop.id)
 
             # TTN for shipped
             if order_status == OrderStatus.SHIPPED:
@@ -226,6 +231,14 @@ async def seed():
                 changed_at=ordered,
             )
             session.add(history)
+
+        # USER-ACCESS-1: shop-access grants matching today's visibility —
+        # manager sees all shops; designer sees the shops of their assignments.
+        all_shops = [shop_lc, shop_lm, shop_sf, shop_kk]
+        for s in all_shops:
+            session.add(UserShopAccess(id=uuid.uuid4(), user_id=manager.id, shop_id=s.id))
+        for sid in designer_shop_ids:
+            session.add(UserShopAccess(id=uuid.uuid4(), user_id=designer.id, shop_id=sid))
 
         await session.commit()
         print(f"✅ Seed complete: 3 users, 4 shops, {len(orders_spec)} orders")

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -21,6 +21,7 @@ from models.material import OverheadMaterial, OverheadMaterialReceipt
 from models.shop import Shop
 from models.user import UserRole
 from routers.dependencies import require_role
+from services.access_service import get_shop_scope
 from schemas.material import (
     OverheadMaterialCreate,
     OverheadMaterialRead,
@@ -167,6 +168,14 @@ async def create_overhead_receipt(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Shop {body.shop_id} not found or inactive",
             )
+        # USER-ACCESS-1: a manager may only allocate a receipt to a shop they can
+        # access (checked after existence so a bad id still returns 422, not 403).
+        scope = await get_shop_scope(db, user)
+        if not scope.can_access(body.shop_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have access to this shop",
+            )
         shop_name = shop.name
 
     receipt = OverheadMaterialReceipt(
@@ -214,6 +223,16 @@ async def list_overhead_receipts(
         .offset(offset)
         .limit(limit)
     )
+    # USER-ACCESS-1: a manager sees only receipts for accessible shops, plus the
+    # unallocated (shop_id IS NULL) ones. Owner sees all.
+    scope = await get_shop_scope(db, user)
+    if not scope.is_unrestricted:
+        stmt = stmt.where(
+            or_(
+                OverheadMaterialReceipt.shop_id.is_(None),
+                OverheadMaterialReceipt.shop_id.in_(scope.shop_ids),
+            )
+        )
     result = await db.execute(stmt)
     rows = result.all()
     return [_serialize_overhead_receipt(r, shop_name) for r, shop_name in rows]

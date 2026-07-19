@@ -250,3 +250,6 @@ class OrderFilters(BaseModel):
     shop_id: uuid.UUID | None = None
     search: str | None = None
     assigned_designer_id: uuid.UUID | None = None
+    # USER-ACCESS-1: restrict to a set of accessible shops (manager scoping).
+    # An empty list means "no accessible shops" → zero rows.
+    shop_ids: list[uuid.UUID] | None = None

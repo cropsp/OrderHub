@@ -61,6 +61,69 @@ def require_role(*roles: UserRole):
     return role_checker
 
 
+async def assert_shop_access(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    current_user: User,
+) -> None:
+    """Guard: 404 if the shop is missing, 403 if the caller may not see it.
+
+    The single shop-scope gate (USER-ACCESS-1). Access is by explicit grant
+    (`user_shop_access`); OWNER is unrestricted. 403-not-404 for a known shop the
+    caller can't see is intentional and consistent (shop ids are unguessable
+    UUIDs and list_shops already hides them).
+    """
+    from models.shop import Shop
+    from sqlalchemy import select
+    from services.access_service import get_shop_scope
+
+    result = await db.execute(select(Shop.id).where(Shop.id == shop_id))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shop not found",
+        )
+
+    scope = await get_shop_scope(db, current_user)
+    if not scope.can_access(shop_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this shop",
+        )
+
+
+async def assert_order_access(
+    db: AsyncSession,
+    order,
+    current_user: User,
+) -> None:
+    """Guard for order-scoped surfaces (USER-ACCESS-1).
+
+    OWNER: unrestricted. DESIGNER: assignment wins — visible iff assigned to them
+    (the assignment auto-grants shop access, so shop-level surfaces stay coherent).
+    MANAGER: scoped by shop grant on the order's shop.
+    """
+    if current_user.role == UserRole.OWNER:
+        return
+
+    if current_user.role == UserRole.DESIGNER:
+        if order.assigned_designer_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not assigned to this order",
+            )
+        return
+
+    from services.access_service import get_shop_scope
+
+    scope = await get_shop_scope(db, current_user)
+    if not scope.can_access(order.shop_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this shop",
+        )
+
+
 async def get_shop_for_user(
     shop_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
@@ -69,12 +132,11 @@ async def get_shop_for_user(
     """
     Fetch a shop and verify the current user has access to it.
 
-    Owner/manager: access to any shop. Designer: only shops where they have at
-    least one assigned order. A designer with zero assignments gets 403 on every
-    shop-scoped endpoint — see CLAUDE.md Gotchas (SEC-05).
+    Owner: any shop (unrestricted). Manager/Designer: only shops explicitly
+    granted via `user_shop_access` (USER-ACCESS-1). A designer's shop access is
+    materialised when an order in that shop is assigned to them.
     """
     from models.shop import Shop
-    from models.order import Order
     from sqlalchemy import select
 
     result = await db.execute(select(Shop).filter(Shop.id == shop_id))
@@ -86,20 +148,27 @@ async def get_shop_for_user(
             detail="Shop not found",
         )
 
-    if current_user.role == UserRole.DESIGNER:
-        assignment = await db.execute(
-            select(Order.id)
-            .where(Order.shop_id == shop_id)
-            .where(Order.assigned_designer_id == current_user.id)
-            .limit(1)
+    from services.access_service import get_shop_scope
+
+    scope = await get_shop_scope(db, current_user)
+    if not scope.can_access(shop_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this shop",
         )
-        if assignment.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not assigned to this shop",
-            )
 
     return shop
+
+
+async def require_shop_access(
+    shop_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Router/route-level dependency form of assert_shop_access for endpoints
+    that carry `shop_id` in the path (USER-ACCESS-1)."""
+    await assert_shop_access(db, shop_id, current_user)
+    return current_user
 
 
 def require_platform(platform_name: str):

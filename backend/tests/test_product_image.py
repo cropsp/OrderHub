@@ -18,6 +18,16 @@ from fastapi import HTTPException, UploadFile
 
 from models.product import Product
 from models.shop import ShopPlatform
+from models.user import UserRole
+
+
+def _owner():
+    # USER-ACCESS-1: OWNER short-circuits the shop-access guard, keeping these
+    # image tests focused on storage/serving rather than access control.
+    u = MagicMock()
+    u.role = UserRole.OWNER
+    u.id = uuid.uuid4()
+    return u
 from routers.products import (
     _project_product,
     delete_product_image,
@@ -161,7 +171,7 @@ async def test_upload_sets_image_path(monkeypatch, tmp_path):
 
     with _mock_catalog(product):
         result = await upload_product_image(
-            id=product.id, file=_upload(PNG_BYTES), db=db, user=MagicMock()
+            id=product.id, file=_upload(PNG_BYTES), db=db, user=_owner()
         )
 
     assert product.image_path.startswith(f"products/{product.id}/")
@@ -181,7 +191,7 @@ async def test_upload_rejects_non_image_with_415(monkeypatch, tmp_path):
                 id=product.id,
                 file=_upload(HTML_BYTES, filename="evil.png"),
                 db=AsyncMock(),
-                user=MagicMock(),
+                user=_owner(),
             )
 
     assert exc.value.status_code == 415
@@ -196,11 +206,11 @@ async def test_replace_deletes_the_previous_file(monkeypatch, tmp_path):
 
     with _mock_catalog(product):
         await upload_product_image(
-            id=product.id, file=_upload(PNG_BYTES), db=db, user=MagicMock()
+            id=product.id, file=_upload(PNG_BYTES), db=db, user=_owner()
         )
         first_path = product.image_path
         await upload_product_image(
-            id=product.id, file=_upload(JPEG_BYTES, filename="new.jpg"), db=db, user=MagicMock()
+            id=product.id, file=_upload(JPEG_BYTES, filename="new.jpg"), db=db, user=_owner()
         )
 
     assert product.image_path != first_path
@@ -217,10 +227,10 @@ async def test_delete_nulls_column_and_removes_file(monkeypatch, tmp_path):
 
     with _mock_catalog(product):
         await upload_product_image(
-            id=product.id, file=_upload(PNG_BYTES), db=db, user=MagicMock()
+            id=product.id, file=_upload(PNG_BYTES), db=db, user=_owner()
         )
         saved = uploads / product.image_path
-        await delete_product_image(id=product.id, db=db, user=MagicMock())
+        await delete_product_image(id=product.id, db=db, user=_owner())
 
     assert product.image_path is None
     assert not saved.exists()
@@ -230,7 +240,7 @@ async def test_delete_nulls_column_and_removes_file(monkeypatch, tmp_path):
 async def test_delete_is_idempotent_when_no_image():
     product = _product()
     with _mock_catalog(product):
-        await delete_product_image(id=product.id, db=AsyncMock(), user=MagicMock())
+        await delete_product_image(id=product.id, db=AsyncMock(), user=_owner())
     assert product.image_path is None
 
 
@@ -239,7 +249,7 @@ async def test_serve_404s_when_no_image():
     product = _product()
     with _mock_catalog(product):
         with pytest.raises(HTTPException) as exc:
-            await get_product_image(id=product.id, db=AsyncMock(), user=MagicMock())
+            await get_product_image(id=product.id, db=AsyncMock(), user=_owner())
     assert exc.value.status_code == 404
 
 
@@ -251,9 +261,9 @@ async def test_serve_returns_bytes_with_sniffed_content_type(monkeypatch, tmp_pa
 
     with _mock_catalog(product):
         await upload_product_image(
-            id=product.id, file=_upload(WEBP_BYTES, filename="x.bin"), db=db, user=MagicMock()
+            id=product.id, file=_upload(WEBP_BYTES, filename="x.bin"), db=db, user=_owner()
         )
-        response = await get_product_image(id=product.id, db=db, user=MagicMock())
+        response = await get_product_image(id=product.id, db=db, user=_owner())
 
     assert response.media_type == "image/webp"
     assert Path(response.path).read_bytes() == WEBP_BYTES
@@ -321,7 +331,7 @@ async def test_pull_from_shopify_rewraps_gid_and_sets_image(monkeypatch, tmp_pat
             patch("routers.products.call_shopify_graphql", graphql), \
             patch("routers.products.httpx.AsyncClient", _FakeAsyncClient):
         result = await pull_product_image_from_shopify(
-            id=product.id, db=db, user=MagicMock()
+            id=product.id, db=db, user=_owner()
         )
 
     # external_ref stores the numeric id — it must be re-wrapped into a GID.
@@ -344,7 +354,7 @@ async def test_pull_from_shopify_409_on_non_shopify_shop():
 
     with _mock_catalog(product):
         with pytest.raises(HTTPException) as exc:
-            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+            await pull_product_image_from_shopify(id=product.id, db=db, user=_owner())
 
     assert exc.value.status_code == 409
 
@@ -357,7 +367,7 @@ async def test_pull_from_shopify_409_without_external_ref():
 
     with _mock_catalog(product):
         with pytest.raises(HTTPException) as exc:
-            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+            await pull_product_image_from_shopify(id=product.id, db=db, user=_owner())
 
     assert exc.value.status_code == 409
 
@@ -373,7 +383,7 @@ async def test_pull_from_shopify_404_when_listing_has_no_featured_image():
             patch("routers.products.call_shopify_graphql",
                   AsyncMock(return_value={"product": {"featuredImage": None}})):
         with pytest.raises(HTTPException) as exc:
-            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+            await pull_product_image_from_shopify(id=product.id, db=db, user=_owner())
 
     assert exc.value.status_code == 404
     assert product.image_path is None
@@ -396,7 +406,7 @@ async def test_pull_from_shopify_415_when_remote_bytes_are_not_an_image(monkeypa
                   AsyncMock(return_value={"product": {"featuredImage": {"url": "https://cdn/x"}}})), \
             patch("routers.products.httpx.AsyncClient", _HtmlClient):
         with pytest.raises(HTTPException) as exc:
-            await pull_product_image_from_shopify(id=product.id, db=db, user=MagicMock())
+            await pull_product_image_from_shopify(id=product.id, db=db, user=_owner())
 
     assert exc.value.status_code == 415
     assert product.image_path is None

@@ -37,6 +37,9 @@ class User(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     assigned_orders = relationship("Order", back_populates="assigned_designer", foreign_keys="Order.assigned_designer_id")
     status_changes = relationship("OrderStatusHistory", back_populates="changed_by")
     uploaded_attachments = relationship("Attachment", back_populates="uploaded_by")
+    shop_access = relationship(
+        "UserShopAccess", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User {self.email} ({self.role.value})>"

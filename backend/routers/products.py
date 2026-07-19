@@ -11,7 +11,7 @@ from logger import get_logger
 from models.product import Product
 from models.shop import Shop, ShopPlatform
 from models.user import UserRole
-from routers.dependencies import get_current_user, get_shop_for_user, require_platform, require_role
+from routers.dependencies import assert_shop_access, get_current_user, get_shop_for_user, require_platform, require_role
 from schemas.bom import BomCostBreakdown, BomReadResponse, BomReplaceRequest
 from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
@@ -88,10 +88,7 @@ async def get_product(
     user=Depends(get_current_user)
 ):
     """Get product details."""
-    service = CatalogService(db)
-    product = await service.get_product(id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+    product = await _load_product_checked(db, id, user)
     return _project_product(product)
 
 
@@ -103,6 +100,7 @@ async def update_product(
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER))
 ):
     """Update product details."""
+    await _load_product_checked(db, id, user)
     service = CatalogService(db)
     try:
         product = await service.update_product(id, schema)
@@ -120,6 +118,7 @@ async def delete_product(
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER))
 ):
     """Soft-delete a product."""
+    await _load_product_checked(db, id, user)
     service = CatalogService(db)
     await service.soft_delete_product(id)
 
@@ -132,6 +131,18 @@ async def _load_product_or_404(db: AsyncSession, product_id: uuid.UUID) -> Produ
     product = await service.get_product(product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    return product
+
+
+async def _load_product_checked(db: AsyncSession, product_id: uuid.UUID, user) -> Product:
+    """Load a product and verify the caller can access its shop (USER-ACCESS-1).
+
+    Product-by-id endpoints resolve the shop only indirectly via product.shop_id;
+    without this a scoped manager/designer could read or edit catalog in a shop
+    they were not granted.
+    """
+    product = await _load_product_or_404(db, product_id)
+    await assert_shop_access(db, product.shop_id, user)
     return product
 
 
@@ -158,7 +169,7 @@ async def upload_product_image(
     The declared Content-Type is ignored — the type is sniffed from the leading
     bytes, because this file is served back to the browser.
     """
-    product = await _load_product_or_404(db, id)
+    product = await _load_product_checked(db, id, user)
 
     head = await file.read(32)
     mime = sniff_image_mime(head)
@@ -191,7 +202,7 @@ async def delete_product_image(
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
     """Remove a product's image. Idempotent — 204 even if there is none."""
-    product = await _load_product_or_404(db, id)
+    product = await _load_product_checked(db, id, user)
 
     old_path = product.image_path
     if old_path:
@@ -212,7 +223,7 @@ async def get_product_image(
     header, so a bare <img src> would 401). Content-Type derives from the
     extension we generated at upload, never from stored client input.
     """
-    product = await _load_product_or_404(db, id)
+    product = await _load_product_checked(db, id, user)
     if not product.image_path:
         raise HTTPException(status_code=404, detail="Product has no image")
 
@@ -238,7 +249,7 @@ async def pull_product_image_from_shopify(
 
     On-demand only — order sync never pulls images.
     """
-    product = await _load_product_or_404(db, id)
+    product = await _load_product_checked(db, id, user)
 
     shop = await db.get(Shop, product.shop_id)
     if not shop or shop.platform != ShopPlatform.SHOPIFY:
@@ -373,6 +384,7 @@ async def get_product_bom(
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
     """Fetch a product's recipe + per-currency cost preview."""
+    await _load_product_checked(db, id, user)
     items, has_inactive = await bom_service.get_bom(db, product_id=id)
     cost = await bom_service.compute_bom_cost(db, product_id=id)
     return BomReadResponse(
@@ -391,6 +403,7 @@ async def replace_product_bom(
 ):
     """Replace a product's full recipe. DELETE-all + bulk INSERT in one
     transaction. Empty list clears the recipe."""
+    await _load_product_checked(db, id, user)
     items, has_inactive = await bom_service.replace_bom(
         db, product_id=id, items=payload.items
     )
@@ -414,4 +427,5 @@ async def get_product_bom_cost(
 ):
     """Recompute recipe cost without fetching the full BOM. Cheap endpoint
     for a manual "Refresh cost" affordance in the editor."""
+    await _load_product_checked(db, id, user)
     return await bom_service.compute_bom_cost(db, product_id=id)

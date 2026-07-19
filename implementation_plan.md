@@ -29,6 +29,7 @@
 - Sprint ADDR-VAL-1 status: `DONE` (Address validation backend + encrypted Google API-key Settings UI — Google; merged `bdb5866`, deployed to prod, migration `b8e2f5a91c34`; prod key set + verified live)
 - Sprint ADDR-VAL-2 status: `DONE` (Address-validation UI — order-detail Check button + status badge + diff/Apply; merged `2f94b28`, deployed to prod; closure commit `9f00154`)
 - Sprint USERS-LIST-500 status: `DONE` (Fix 500 on `GET /api/users` — the system user's reserved-TLD email broke `EmailStr` validation; merged `e44f6e2`, deployed to prod)
+- Sprint USER-ACCESS-1 status: `DONE` (Per-user shop access — explicit grants, enforcement sweep, closes the finance + shop-list holes; branch `feat/user-access-1`, migration `f9a1c3e5b7d2` — **awaiting merge/deploy**)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -4005,6 +4006,124 @@ row is no longer surfaced anywhere in the UI, so it is unreachable in practice.
 
 ---
 
+**Sprint USER-ACCESS-1 — Per-user shop access (scoping foundation) + two live gaps closed** (Status: `DONE` — branch `feat/user-access-1`, migration `f9a1c3e5b7d2`; backend pytest **388 pass** (+36 new), frontend vitest **137 pass** (+4); **not merged yet**)
+
+Goal: phase 1 of flexible user permissions — let an OWNER control **which shops each user can
+see**, and enforce that scope **server-side across every shop-scoped surface**. Capability flags
+(`view_finance`, `view_costs`, …) are deliberately deferred to **USER-ACCESS-2**. Spec: `task.md`
+(USER-ACCESS-1).
+
+**Why this was bigger than "add a table".** The design review (Cowork, reading the code rather
+than the docs) found that OrderHub had **effectively no shop scoping at all**: MANAGER and OWNER
+were unrestricted everywhere, and the single existing guard `get_shop_for_user`
+(`routers/dependencies.py:64-102`) reached only **4 catalog endpoints** — `orders.py`,
+`dashboard.py`, `finance.py` and `shops.py` never called it. Two live holes fell out of that:
+- **GAP A (security):** `GET /api/shops/{shop_id}/finance` was gated by `require_role(OWNER,
+  MANAGER)` only (`finance.py:27`) and `finance_service.get_shop_finance()` took no user
+  argument — **any manager could read any shop's full P&L by supplying its id.**
+- **GAP B:** `list_shops` (`shops.py:28-48`) returned **every** active shop to any authenticated
+  user, including designers.
+> **`CLAUDE.md` was wrong** and has been corrected in this sprint: it claimed a designer with an
+> assigned order in shop X could reach "all shop-level endpoints" for that shop. The guard never
+> did that. Designers were scoped by **assignment**, never by shop.
+
+**What shipped:**
+- **`user_shop_access`** table + model (unique `(user_id, shop_id)`, cascade FKs) + migration
+  `f9a1c3e5b7d2` with a data backfill.
+- **`access_service`** — the single mutation point for grants, shared by the editor, the
+  assignment hook and shop-create propagation. Exposes an explicit **`ShopScope` value object**
+  (`is_unrestricted`, `shop_ids`, `can_access()`) — deliberately **not** a `None` sentinel, so a
+  missed check fails loudly rather than silently denying or crashing.
+- **Guards** `assert_shop_access` / `assert_order_access` in `dependencies.py`;
+  `get_shop_for_user` refactored to delegate to the grant check, so the 4 pre-existing catalog
+  endpoints upgraded for free.
+- **Enforcement sweep** across orders (list/detail/mutations/bulk/**CSV export**/items), dashboard
+  aggregates, finance (**GAP A**), shops list + detail (**GAP B**), products (including the
+  by-id/image/BOM drift CC found during planning — those resolved the shop only indirectly via
+  `product.shop_id` and were unguarded), partner_payouts, imports, overhead receipts, attachments
+  (with an explicit DELETE rule) and shipping TTNs. Deliberately-unscoped surfaces (global
+  catalogs: materials, packaging, overhead catalog, NP city/warehouse lookups) are documented with
+  reasons.
+- **Frontend:** Shop Access editor on the Users page (checklist per user; owner rows show
+  "unrestricted"); the sidebar/shop-switcher filter themselves because `list_shops` is now scoped
+  server-side — no client-side hiding logic.
+
+**Six review items folded in before implementation (Cowork review of CC's plan):**
+1. **New shops** → auto-granted on `create_shop`, but **only to managers who were effectively
+   unrestricted**. A deliberately scoped manager does not silently receive every new shop.
+2. **New managers** → the create-user path defaults a MANAGER to all shops, so a freshly created
+   manager never starts blind (the same onboarding trap this sprint fixes for designers).
+3. **Assignment implies a grant** — assigning an order to a designer in a shop they lack
+   auto-creates the grant (hook in `order_service`). Without this, "assignment wins" on orders but
+   grant-gated catalog would have produced the exact broken state of a designer who can open an
+   order but not its products. CC enumerated **every** write path that can set
+   `assigned_designer_id` (only `update_order`, `change_order_status`, `seed.py`; imports,
+   webhooks, scheduler, Shopify and MCP confirmed non-writers).
+4. **Revocation actually revokes** — `PUT …/shop-access` returns **409** with
+   `{shop_id, assigned_order_count}` when a removed grant still has assigned orders, unless
+   `unassign_orders: true`, which nulls the assignments through the audited path and drops the
+   grant atomically.
+5. **Attachments DELETE** target rule stated exactly: OWNER, or (`uploaded_by_id == me` AND
+   `assert_order_access` passes).
+6. **Grant/revoke emit a structured audit log line**; a persistent audit table is explicitly
+   deferred to USER-ACCESS-2.
+
+**Completeness proof (the sprint's main risk — a missed endpoint silently keeps a hole open):**
+three layers — a path-enumeration test over `{shop_id}` routes; a **route-classification inventory
+test** (`test_route_scope_completeness.py`) that fails when a newly registered route is left
+unclassified, forcing a conscious guarded/unscoped decision; and behavioural 403 tests per swept
+surface.
+
+**Migration + backfill:** preserves today's visibility exactly — OWNER unrestricted (no rows,
+resolver short-circuits), MANAGER → all shops, DESIGNER → the shops derived from existing
+assignments. Round-trip verified on dev: upgrade → per-user visibility diff **zero** (owner 4/4,
+manager 4/4, designer 1/1; 5 grant rows) → downgrade drops the table cleanly → re-upgrade works.
+
+**Cowork browser smoke (dev, 2026-07-18)** — owner session, then a real `manager@orderhub.dev`
+session with Оксана deliberately restricted to 2 of 4 shops:
+
+| Check | Result |
+|---|---|
+| `/finance` of a non-granted shop (**GAP A**) | **403** "You do not have access to this shop" ✓ |
+| `GET /api/shops` (**GAP B**) | only the 2 granted ✓ |
+| Shop detail / dashboard `?shop_id=` of a non-granted shop | 403 ✓ |
+| Non-existent shop id | 404 — 403-vs-404 semantics correctly separated ✓ |
+| Any `shop_id` leak elsewhere | **zero** across orders / customers / products / dashboard / materials ✓ |
+| Dashboard aggregates | 19 active / 14 attention (owner sees 127 / 117) ✓ |
+| Sidebar | 2 shops; Users + Shops nav items absent ✓ |
+| CSV export | 19 rows = scope; with a foreign `shop_id` → **0 rows** ✓ |
+| Shop Access editor | checklist renders; owner row unrestricted ✓ |
+| Backfill as seen in UI | manager 4/4, designer 1/1 ✓ |
+| 409 revoke flow | exact count ("1 assigned order"), then atomic unassign + revoke; order status untouched ✓ |
+| Assignment ⇒ auto-grant | assigning an order to a designer with **zero** shops re-created the grant automatically ✓ |
+
+**Smoke finding (not a leak, not a blocker):** an explicitly-supplied non-granted `shop_id` returns
+**200 with an empty result** on the orders list and CSV export, while finance / dashboard / shop
+detail return **403**. No data escapes (the scope is applied as an intersection, not a
+replacement), but the same forbidden action answers differently depending on the surface. Parked
+as **USER-ACCESS-403-CONSISTENCY** below.
+
+**Not verified by the smoke:** the DESIGNER session was not driven in the browser (it needs a
+third login; the designer path is covered by the rewritten `test_designer_shop_scoping.py` and by
+the assignment/auto-grant checks that were exercised). Also, a false alarm during the smoke is
+worth recording: a probe that appeared to show a manager reading a non-granted shop's P&L turned
+out to be an **owner** session — the tab had been re-authenticated between steps. Always
+re-assert `GET /api/users/me` before interpreting an authorization probe.
+
+**Deploy note:** backend + frontend rebuild **+ a migration with a data backfill**. Prod currently
+has exactly **2 users, both OWNER**, so the backfill inserts **zero rows** and prod behaviour is
+unchanged on deploy — the feature stays dormant until the first MANAGER/DESIGNER exists. The
+correctness burden therefore sits on dev seeds and the automated tests, **not** on prod smoke.
+
+**Closes:** GAP A + GAP B, the SEC-05 overstatement in CLAUDE.md, and the designer onboarding trap.
+Next: **USER-ACCESS-2** — capability flags (`view_finance`, `view_costs`, `manage_shop_settings`,
+`manage_users`, `manage_products`, `import_export_data`, `run_address_validation`,
+`delete_orders`), the ACCOUNTANT preset, a persistent grant audit table, and the
+`FINANCIAL_FIELDS`-vs-`/finance` cost-hiding inconsistency (a manager is denied
+`production_cost` on a single order yet can read aggregate COGS + net profit for the same shop).
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -4015,6 +4134,7 @@ in this document where applicable, to avoid duplication.
 |---|---|---|
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
 | ADDR-VAL-USER-ACCESS | Admin-granted per-user access to address validation | Idea (Sergii, 2026-07-15): let an OWNER/admin grant specific users permission to run address validation, rather than it being available to all order-endpoint roles. Deferred — ADDR-VAL-1/2 ship the feature gated by the existing order roles first; add fine-grained per-user access after the core works. Would build on the existing role/designer-access model. |
+| USER-ACCESS-403-CONSISTENCY | Forbidden `shop_id` answers 200-empty on orders/CSV but 403 elsewhere | Found during the USER-ACCESS-1 Cowork smoke (2026-07-18). Passing a non-granted `shop_id` to `GET /api/orders` or the CSV export returns **200 with an empty result** (scope is applied as an intersection on the filter), while `/finance`, `/dashboard` and shop detail return **403**. **No data leaks** — this is purely an inconsistency in how the same forbidden action is reported, so it was not treated as a blocker. Fix: when `shop_id` is explicitly supplied and not accessible, return 403 from the orders list and CSV export too, matching the other surfaces. Small; bundle with USER-ACCESS-2. |
 | ADDR-VAL-JP | JP address validation (currently short-circuits to `unsupported`) | ADDR-VAL-1 real-API sign-off (2026-07-17) = **NO-GO as built**: Google returns romaji input as fullwidth kanji (romaji→kanji false diff on ~100% of JP orders) and 2/6 valid JP addresses returned `couldnt_verify`. Removed from the GA allowlist by **AV1-FIX-2** (`PREVIEW_COUNTRIES_SENT` now empty; code TODO left to re-enable). Re-enable only once the diff layer detects romaji-in / kanji-out and suppresses script-conversion-only changes — this naturally lands with ADDR-VAL-2's diff/apply UI (same suppression also cleans the cosmetic zip+4 / street-suffix diffs on GA countries). |
 | ADDR-VAL-2-followup-1 | Apply's confirmation uses a native `confirm()` rather than a styled dialog | Surfaced during the ADDR-VAL-2 Cowork smoke (2026-07-17). Apply *does* confirm before overwriting the customer-entered address (as specced in rule 4), but via the browser's native `confirm()` — unstyled, and it blocks the renderer while open (froze the browser automation for ~30s mid-smoke). Purely cosmetic/UX; the guard itself works correctly and the write path is sound. Fix: swap for the project's own modal/confirm idiom. Deliberately left out of ADDR-VAL-2 scope; bundle with the next order-detail frontend sprint. |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |

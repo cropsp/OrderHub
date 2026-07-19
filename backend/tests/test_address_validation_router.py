@@ -92,12 +92,19 @@ async def test_owner_and_manager_are_allowed(role):
     db = AsyncMock()
     order = _make_order()
 
+    # USER-ACCESS-1: a manager passes the order-access guard when the order's shop
+    # is in their scope (owner short-circuits without consulting the scope).
+    from services.access_service import ShopScope
     with patch("routers.orders.get_order_detail", new=AsyncMock(return_value=order)):
         with patch(
-            "routers.orders.validate_address",
-            new=AsyncMock(return_value=_verdict(AddressValidationStatus.VERIFIED)),
+            "services.access_service.get_shop_scope",
+            new=AsyncMock(return_value=ShopScope.unrestricted()),
         ):
-            result = await validate_order_address(order.id, _make_user(role=role), db)
+            with patch(
+                "routers.orders.validate_address",
+                new=AsyncMock(return_value=_verdict(AddressValidationStatus.VERIFIED)),
+            ):
+                result = await validate_order_address(order.id, _make_user(role=role), db)
 
     assert result.status is AddressValidationStatus.VERIFIED
 

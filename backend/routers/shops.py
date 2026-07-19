@@ -14,7 +14,11 @@ from models.shop import Shop
 from models.order import Order
 from models.user import User, UserRole
 from schemas.shop import ShopCreate, ShopUpdate, ShopResponse, ShopDetailResponse
-from routers.dependencies import get_current_user, require_role
+from routers.dependencies import assert_shop_access, get_current_user, require_role
+from services.access_service import (
+    get_shop_scope,
+    propagate_new_shop_to_unrestricted_managers,
+)
 from services.shopify_sync import sync_shop_orders
 from services.encryption_service import encrypt_value, decrypt_value
 from services.phone_normalization import normalize_ua_sender_phone
@@ -30,12 +34,21 @@ async def list_shops(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all active shops. All authenticated users can see this."""
-    result = await db.execute(
+    """List active shops the caller can access (USER-ACCESS-1, closes GAP B).
+
+    Owner: all shops. Manager/designer: only granted shops. This is the source
+    for the frontend sidebar / shop switcher, so scoping here filters those too.
+    """
+    query = (
         select(Shop)
         .where(Shop.is_active == True)
         .order_by(Shop.created_at.desc())
     )
+    scope = await get_shop_scope(db, current_user)
+    if not scope.is_unrestricted:
+        query = query.where(Shop.id.in_(scope.shop_ids))
+
+    result = await db.execute(query)
     shops = result.scalars().all()
     
     # Map to schema manually to set mask flags
@@ -80,8 +93,12 @@ async def create_shop(
     db.add(shop)
     await db.flush()
     await db.refresh(shop)
+    # USER-ACCESS-1 (rule 1): grant the new shop to effectively-unrestricted
+    # managers so today's "manager sees all shops" invariant holds for new shops,
+    # without overriding a manager deliberately scoped to a subset.
+    await propagate_new_shop_to_unrestricted_managers(db, shop.id, actor_id=current_user.id)
     await db.commit()
-    
+
     resp = ShopDetailResponse.model_validate({
         **shop.__dict__,
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
@@ -100,12 +117,15 @@ async def get_shop(
     db: AsyncSession = Depends(get_db),
 ):
     """Get shop details and order count."""
+    # USER-ACCESS-1 (GAP B): a non-owner may only see a granted shop.
+    await assert_shop_access(db, shop_id, current_user)
+
     result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
     shop = result.scalar_one_or_none()
-    
+
     if not shop:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
-        
+
     count_result = await db.execute(
         select(func.count()).select_from(Order).where(Order.shop_id == shop_id)
     )
@@ -197,6 +217,9 @@ async def manual_sync_shop(
     db: AsyncSession = Depends(get_db),
 ):
     """Trigger a manual order sync for a specific shop."""
+    # USER-ACCESS-1: a manager may only sync a shop they can access.
+    await assert_shop_access(db, shop_id, current_user)
+
     result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))
     shop = result.scalar_one_or_none()
     
