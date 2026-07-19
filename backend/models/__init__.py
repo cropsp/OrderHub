@@ -33,6 +33,7 @@ from models.bom import BomItem
 from models.partner_settlement import PartnerSettlement, PartnerSettlementFormula
 from models.partner_payment import PartnerPayment
 from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
+from models.user_shop_access import UserShopAccess
 
 __all__ = [
     "Base",
@@ -69,4 +70,5 @@ __all__ = [
     "PartnerPayment",
     "IdlaserDraftJob",
     "IdlaserDraftJobState",
+    "UserShopAccess",
 ]
