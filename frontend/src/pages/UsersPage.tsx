@@ -53,6 +53,7 @@ import { getInitials, getAvatarColor } from '@/utils/avatar';
 import { cn } from '@/lib/utils';
 import type { User } from '@/types/user';
 import ShopAccessDialog from '@/components/users/ShopAccessDialog';
+import CapabilityDialog from '@/components/users/CapabilityDialog';
 
 const ROLE_COLORS = {
   owner: 'bg-teal-500/10 text-teal-400 border-teal-500/20',
@@ -95,7 +96,8 @@ export default function UsersPage() {
   const [editIsActive, setEditIsActive] = useState(true);
   const [editError, setEditError] = useState<string | null>(null);
   const [shopAccessUser, setShopAccessUser] = useState<User | null>(null);
-  
+  const [capabilityUser, setCapabilityUser] = useState<User | null>(null);
+
   const isOwner = currentUser?.role === 'owner';
 
   const toggleUserStatus = (userId: string, currentStatus: boolean) => {
@@ -354,6 +356,14 @@ export default function UsersPage() {
         }}
       />
 
+      <CapabilityDialog
+        user={capabilityUser}
+        open={Boolean(capabilityUser)}
+        onOpenChange={(open) => {
+          if (!open) setCapabilityUser(null);
+        }}
+      />
+
       <div className="space-y-6">
         {/* Modern Header Section */}
         <div className="flex items-center justify-between bg-zinc-900/20 p-4 rounded-2xl border border-zinc-800/40">
@@ -500,6 +510,12 @@ export default function UsersPage() {
                                 onClick={() => setShopAccessUser(u)}
                               >
                                 Shop Access
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-lg cursor-pointer px-3 py-2.5 mt-0.5"
+                                onClick={() => setCapabilityUser(u)}
+                              >
+                                Money Access
                               </DropdownMenuItem>
                               <DropdownMenuItem 
                                 className={cn(

@@ -171,6 +171,41 @@ async def require_shop_access(
     return current_user
 
 
+async def assert_capability(
+    db: AsyncSession,
+    capability,
+    current_user: User,
+) -> None:
+    """Guard: 403 unless the caller holds `capability` (USER-ACCESS-2).
+
+    The single capability gate, mirroring assert_shop_access. Capabilities are
+    resolved by access_service.get_capabilities (role default + explicit
+    override); OWNER holds every capability. Composes with — does not replace —
+    the shop-scope guard: money surfaces that are also shop-scoped call both.
+    """
+    from services.access_service import get_capabilities
+
+    caps = await get_capabilities(db, current_user)
+    if not caps.has(capability):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this financial data",
+        )
+
+
+def require_capability(capability):
+    """Route/router-level dependency form of assert_capability (USER-ACCESS-2)."""
+
+    async def capability_checker(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ) -> User:
+        await assert_capability(db, capability, current_user)
+        return current_user
+
+    return capability_checker
+
+
 def require_platform(platform_name: str):
     """Dependency factory to enforce a specific shop platform (e.g. MANUAL)."""
     async def platform_checker(shop=Depends(get_shop_for_user)):

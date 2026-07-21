@@ -39,6 +39,7 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
     isOwner,
     isManager,
     canManageShipping,
+    canViewCosts,
     saveStatus,
     handleUpdate,
     handleStatusChange,
@@ -191,7 +192,7 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
                 onUpdate={handleUpdate}
               />
             </div>
-            {isOwner && (
+            {canViewCosts && (
               <div className="order-2 lg:order-none">
                 <DetailFinance order={order} />
               </div>

@@ -5,7 +5,7 @@ from sqlalchemy import select, func, cast, Date, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.user import User, UserRole
+from models.user import Capability, User, UserRole
 from models.order import Order, OrderStatus
 from models.shop import Shop
 from models.material import OverheadMaterialReceipt
@@ -109,10 +109,21 @@ async def get_dashboard_stats(
         attention_needed_count=attention_needed_count
     )
     
-    # 2. Revenue calculation (only for Owner)
+    # 2. Revenue calculation (money widgets — USER-ACCESS-2 view_finance)
+    # Replaces the old owner-only gate: any user with view_finance sees revenue,
+    # net profit, the daily trend and unallocated overhead — scoped, for a
+    # designer, to their own assigned orders via base_filter. OWNER short-circuits
+    # to true inside get_capabilities.
+    from services.access_service import get_capabilities
+    caps = await get_capabilities(db, current_user)
+    can_view_finance = caps.has(Capability.VIEW_FINANCE)
+    # view_costs gates itemised costs the same way the finance page does (OQ-3a):
+    # revenue + net_profit stay under view_finance; COGS + fees are stripped.
+    can_view_costs = caps.has(Capability.VIEW_COSTS)
+
     revenue_data = []
     daily_trend = []
-    if current_user.role == UserRole.OWNER:
+    if can_view_finance:
         # Summary Revenue (Shipped + Completed)
         rev_query = (
             select(
@@ -133,11 +144,18 @@ async def get_dashboard_stats(
         rev_result = await db.execute(rev_query)
         
         for curr, rev, prod, fee, ship in rev_result.all():
+            # net_profit is computed from the true figures regardless; the
+            # itemised COGS/fees are zeroed on the wire when view_costs is absent
+            # (kept consistent with the finance page).
             revenue_data.append(RevenueByCurrency(
                 currency=curr,
                 total_revenue=float(rev or 0),
-                total_production_cost=float(prod or 0),
-                total_fees=float(fee or 0) + float(ship or 0),
+                total_production_cost=(
+                    float(prod or 0) if can_view_costs else 0.0
+                ),
+                total_fees=(
+                    float(fee or 0) + float(ship or 0) if can_view_costs else 0.0
+                ),
                 net_profit=float(rev or 0) - float(prod or 0) - float(fee or 0) - float(ship or 0)
             ))
 
@@ -188,9 +206,9 @@ async def get_dashboard_stats(
     )
 
     # MAT-5: per-currency SUM of overhead receipts not tied to any shop.
-    # Visible only to owners (same audience as revenue figures).
+    # Same audience as the revenue figures (USER-ACCESS-2 view_finance).
     unallocated_overhead: list[CurrencyAmount] = []
-    if current_user.role == UserRole.OWNER:
+    if can_view_finance:
         # DASH-PERIOD: scoped by received_at — the same column
         # finance_service._run_overhead_aggregate filters on.
         overhead_filter = []

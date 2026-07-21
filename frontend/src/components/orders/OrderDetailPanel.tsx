@@ -29,6 +29,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
     isOwner,
     isManager,
     canManageShipping,
+    canViewCosts,
     saveStatus,
     handleUpdate,
     handleStatusChange,
@@ -114,7 +115,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                     onGenerateTTN={handleGenerateTTN}
                     onRemoveTTN={handleDeleteTTN}
                   />
-                  {isOwner && <DetailFinance order={order} />}
+                  {canViewCosts && <DetailFinance order={order} />}
                   <DetailTimeline order={order} />
                 </aside>
               </div>

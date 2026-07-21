@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
+from models.user import UserRole
 from routers.products import list_products
 from routers.dependencies import require_platform
 
@@ -22,6 +23,13 @@ def _shop(platform):
     return s
 
 
+def _owner():
+    # OWNER → get_capabilities short-circuits (no db hit) in _can_view_costs.
+    u = MagicMock()
+    u.role = UserRole.OWNER
+    return u
+
+
 @pytest.mark.asyncio
 async def test_list_products_accepts_etsy_shop():
     shop_id = uuid4()
@@ -29,7 +37,7 @@ async def test_list_products_accepts_etsy_shop():
     with patch("routers.products.CatalogService") as MockSvc:
         MockSvc.return_value.get_products = AsyncMock(return_value=[])
         result = await list_products(
-            shop_id=shop_id, is_active=True, db=db, shop=_shop("etsy")
+            shop_id=shop_id, is_active=True, db=db, shop=_shop("etsy"), user=_owner()
         )
     assert result == []
     MockSvc.return_value.get_products.assert_awaited_once_with(shop_id, is_active=True)
@@ -42,7 +50,7 @@ async def test_list_products_accepts_shopify_shop():
     with patch("routers.products.CatalogService") as MockSvc:
         MockSvc.return_value.get_products = AsyncMock(return_value=[])
         result = await list_products(
-            shop_id=shop_id, is_active=True, db=db, shop=_shop("shopify")
+            shop_id=shop_id, is_active=True, db=db, shop=_shop("shopify"), user=_owner()
         )
     assert result == []
 
@@ -54,7 +62,7 @@ async def test_list_products_accepts_manual_shop():
     with patch("routers.products.CatalogService") as MockSvc:
         MockSvc.return_value.get_products = AsyncMock(return_value=[])
         result = await list_products(
-            shop_id=shop_id, is_active=True, db=db, shop=_shop("manual")
+            shop_id=shop_id, is_active=True, db=db, shop=_shop("manual"), user=_owner()
         )
     assert result == []
 

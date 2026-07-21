@@ -12,8 +12,13 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.user import User, UserRole
-from routers.dependencies import get_current_user, require_role, require_shop_access
+from models.user import Capability, User, UserRole
+from routers.dependencies import (
+    get_current_user,
+    require_capability,
+    require_role,
+    require_shop_access,
+)
 from schemas.partner_payout import (
     PartnerBalancesResponse,
     PartnerNamesResponse,
@@ -32,9 +37,11 @@ router = APIRouter(
     prefix="/api/shops/{shop_id}/partner-payouts",
     tags=["partner-payouts"],
     # USER-ACCESS-1: role gate + per-shop grant (path shop_id was previously trusted).
+    # USER-ACCESS-2: partner payouts are a money surface — also require view_finance.
     dependencies=[
         Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
         Depends(require_shop_access),
+        Depends(require_capability(Capability.VIEW_FINANCE)),
     ],
 )
 

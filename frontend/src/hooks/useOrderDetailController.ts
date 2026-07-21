@@ -12,7 +12,7 @@ import {
 import { useCreateTTN, useDeleteTTN } from '@/hooks/useShipping';
 import { useToastStore } from '@/components/ui/Toast';
 import type { OrderDetail } from '@/types/order';
-import { UserRole } from '@/types/user';
+import { UserRole, Capability } from '@/types/user';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
@@ -45,6 +45,10 @@ export function useOrderDetailController(orderId: string | null) {
   const isOwner = user?.role === UserRole.OWNER;
   const isManager = user?.role === UserRole.MANAGER;
   const canManageShipping = isOwner || isManager;
+  // USER-ACCESS-2: per-order costs (DetailFinance) are gated by view_costs, not
+  // by owner-ship. Owner always qualifies; others need the explicit capability.
+  const canViewCosts =
+    isOwner || Boolean(user?.capabilities?.includes(Capability.VIEW_COSTS));
 
   const handleUpdate = async (payload: Partial<OrderDetail>) => {
     if (!order) return;
@@ -139,6 +143,7 @@ export function useOrderDetailController(orderId: string | null) {
     isOwner,
     isManager,
     canManageShipping,
+    canViewCosts,
     saveStatus,
     handleUpdate,
     handleStatusChange,

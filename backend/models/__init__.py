@@ -5,7 +5,7 @@ Imports all models so Alembic and SQLAlchemy can discover them.
 """
 
 from models.base import Base
-from models.user import User, UserRole
+from models.user import User, UserRole, Capability
 from models.app_setting import AppSetting, GOOGLE_ADDRESS_VALIDATION_API_KEY
 from models.shop import Shop, ShopPlatform
 from models.customer import Customer
@@ -34,11 +34,14 @@ from models.partner_settlement import PartnerSettlement, PartnerSettlementFormul
 from models.partner_payment import PartnerPayment
 from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
 from models.user_shop_access import UserShopAccess
+from models.user_capability import UserCapability
+from models.access_audit import AccessAudit
 
 __all__ = [
     "Base",
     "User",
     "UserRole",
+    "Capability",
     "AppSetting",
     "GOOGLE_ADDRESS_VALIDATION_API_KEY",
     "Shop",
@@ -71,4 +74,6 @@ __all__ = [
     "IdlaserDraftJob",
     "IdlaserDraftJobState",
     "UserShopAccess",
+    "UserCapability",
+    "AccessAudit",
 ]

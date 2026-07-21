@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from typing import List, Optional
 
 import httpx
@@ -10,9 +11,17 @@ from database import get_db
 from logger import get_logger
 from models.product import Product
 from models.shop import Shop, ShopPlatform
-from models.user import UserRole
-from routers.dependencies import assert_shop_access, get_current_user, get_shop_for_user, require_platform, require_role
-from schemas.bom import BomCostBreakdown, BomReadResponse, BomReplaceRequest
+from models.user import Capability, UserRole
+from routers.dependencies import (
+    assert_capability,
+    assert_shop_access,
+    get_current_user,
+    get_shop_for_user,
+    require_platform,
+    require_role,
+)
+from services.access_service import get_capabilities
+from schemas.bom import BomCostBreakdown, BomItemRead, BomReadResponse, BomReplaceRequest
 from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
 from services import bom_service
@@ -40,11 +49,24 @@ router = APIRouter(prefix="/api", tags=["Products"])
 _EXT_TO_MIME = {ext: mime for mime, ext in PRODUCT_IMAGE_MIME.items()}
 
 
-def _project_product(product: Product) -> ProductRead:
-    """Serialize a Product, deriving image_url from image_path (PC-F-1)."""
+def _project_product(product: Product, *, can_view_costs: bool = True) -> ProductRead:
+    """Serialize a Product, deriving image_url from image_path (PC-F-1).
+
+    USER-ACCESS-2: `cost_price` is a per-product cost input — nulled unless the
+    caller holds VIEW_COSTS. `price` (the selling price) is revenue-side and
+    stays visible.
+    """
     data = ProductRead.model_validate(product)
     data.image_url = f"/api/products/{product.id}/image" if product.image_path else None
+    if not can_view_costs:
+        data.cost_price = None
     return data
+
+
+async def _can_view_costs(db: AsyncSession, user) -> bool:
+    """Resolve the caller's VIEW_COSTS capability (USER-ACCESS-2)."""
+    caps = await get_capabilities(db, user)
+    return caps.has(Capability.VIEW_COSTS)
 
 
 @router.get("/shops/{shop_id}/products", response_model=List[ProductRead])
@@ -52,12 +74,14 @@ async def list_products(
     shop_id: uuid.UUID,
     is_active: Optional[bool] = Query(True),
     db: AsyncSession = Depends(get_db),
-    shop=Depends(get_shop_for_user)
+    shop=Depends(get_shop_for_user),
+    user=Depends(get_current_user),
 ):
     """List all products for a shop (any platform). Access is gated by get_shop_for_user."""
     service = CatalogService(db)
     products = await service.get_products(shop_id, is_active=is_active)
-    return [_project_product(p) for p in products]
+    cvc = await _can_view_costs(db, user)
+    return [_project_product(p, can_view_costs=cvc) for p in products]
 
 
 @router.post("/shops/{shop_id}/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
@@ -65,11 +89,12 @@ async def create_product(
     shop_id: uuid.UUID,
     schema: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    shop=Depends(require_platform(ShopPlatform.MANUAL.value))
+    shop=Depends(require_platform(ShopPlatform.MANUAL.value)),
+    user=Depends(get_current_user),
 ):
     """Create a new product with variants."""
     service = CatalogService(db)
-    
+
     # Check SKU uniqueness for all new variants
     for variant in schema.variants:
         if await service.is_sku_taken(shop_id, variant.sku):
@@ -78,7 +103,10 @@ async def create_product(
                 detail=f"SKU '{variant.sku}' is already taken in this shop"
             )
 
-    return _project_product(await service.create_product(shop_id, schema))
+    cvc = await _can_view_costs(db, user)
+    return _project_product(
+        await service.create_product(shop_id, schema), can_view_costs=cvc
+    )
 
 
 @router.get("/products/{id}", response_model=ProductRead)
@@ -89,7 +117,7 @@ async def get_product(
 ):
     """Get product details."""
     product = await _load_product_checked(db, id, user)
-    return _project_product(product)
+    return _project_product(product, can_view_costs=await _can_view_costs(db, user))
 
 
 @router.patch("/products/{id}", response_model=ProductRead)
@@ -108,7 +136,7 @@ async def update_product(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _project_product(product)
+    return _project_product(product, can_view_costs=await _can_view_costs(db, user))
 
 
 @router.delete("/products/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -192,7 +220,7 @@ async def upload_product_image(
         raise HTTPException(status_code=500, detail="Failed to save product image")
 
     await _set_product_image(db, product, relative_path)
-    return _project_product(product)
+    return _project_product(product, can_view_costs=await _can_view_costs(db, user))
 
 
 @router.delete("/products/{id}/image", status_code=status.HTTP_204_NO_CONTENT)
@@ -307,7 +335,7 @@ async def pull_product_image_from_shopify(
 
     relative_path, _size = await save_product_image_bytes(content, id, PRODUCT_IMAGE_MIME[mime])
     await _set_product_image(db, product, relative_path)
-    return _project_product(product)
+    return _project_product(product, can_view_costs=await _can_view_costs(db, user))
 
 
 # --- Bulk CSV Import (Two-step) ---
@@ -377,21 +405,59 @@ async def confirm_products_import(
 # --- MAT-3: Bill of Materials ---
 
 
+def _strip_bom_costs(items: list[BomItemRead]) -> list[BomItemRead]:
+    """Zero the per-line cost fields for a caller without VIEW_COSTS
+    (USER-ACCESS-2). Recipe structure (materials, quantities, names) stays;
+    only the cost numbers are hidden."""
+    return [
+        item.model_copy(
+            update={
+                "material_current_unit_cost": Decimal("0"),
+                "line_cost": Decimal("0"),
+            }
+        )
+        for item in items
+    ]
+
+
+async def _bom_response(
+    db: AsyncSession,
+    product_id: uuid.UUID,
+    items: list,
+    has_inactive: bool,
+    user,
+) -> BomReadResponse:
+    """Build a BomReadResponse, nulling all cost numbers (per-line + the cost
+    preview) unless the caller holds VIEW_COSTS. Shared by the BOM read AND
+    replace endpoints so their cost censoring cannot drift (USER-ACCESS-2)."""
+    projected = [bom_service.project_bom_item(item) for item in items]
+    if await _can_view_costs(db, user):
+        cost = await bom_service.compute_bom_cost(db, product_id=product_id)
+    else:
+        projected = _strip_bom_costs(projected)
+        cost = []
+    return BomReadResponse(
+        items=projected,
+        cost=cost,
+        has_inactive_material=has_inactive,
+    )
+
+
 @router.get("/products/{id}/bom", response_model=BomReadResponse)
 async def get_product_bom(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
-    """Fetch a product's recipe + per-currency cost preview."""
+    """Fetch a product's recipe + per-currency cost preview.
+
+    USER-ACCESS-2: the recipe structure is visible to any OWNER/MANAGER with shop
+    access, but the cost preview and per-line costs are nulled unless the caller
+    holds VIEW_COSTS.
+    """
     await _load_product_checked(db, id, user)
     items, has_inactive = await bom_service.get_bom(db, product_id=id)
-    cost = await bom_service.compute_bom_cost(db, product_id=id)
-    return BomReadResponse(
-        items=[bom_service.project_bom_item(item) for item in items],
-        cost=cost,
-        has_inactive_material=has_inactive,
-    )
+    return await _bom_response(db, id, items, has_inactive, user)
 
 
 @router.put("/products/{id}/bom", response_model=BomReadResponse)
@@ -402,18 +468,16 @@ async def replace_product_bom(
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
     """Replace a product's full recipe. DELETE-all + bulk INSERT in one
-    transaction. Empty list clears the recipe."""
+    transaction. Empty list clears the recipe.
+
+    USER-ACCESS-2: the echoed cost preview is nulled for a caller without
+    VIEW_COSTS, same as the read endpoint."""
     await _load_product_checked(db, id, user)
     items, has_inactive = await bom_service.replace_bom(
         db, product_id=id, items=payload.items
     )
     await db.commit()
-    cost = await bom_service.compute_bom_cost(db, product_id=id)
-    return BomReadResponse(
-        items=[bom_service.project_bom_item(item) for item in items],
-        cost=cost,
-        has_inactive_material=has_inactive,
-    )
+    return await _bom_response(db, id, items, has_inactive, user)
 
 
 @router.get(
@@ -426,6 +490,10 @@ async def get_product_bom_cost(
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
     """Recompute recipe cost without fetching the full BOM. Cheap endpoint
-    for a manual "Refresh cost" affordance in the editor."""
+    for a manual "Refresh cost" affordance in the editor.
+
+    USER-ACCESS-2: this endpoint returns ONLY cost, so it is 403 (not nulled)
+    for a caller without VIEW_COSTS."""
     await _load_product_checked(db, id, user)
+    await assert_capability(db, Capability.VIEW_COSTS, user)
     return await bom_service.compute_bom_cost(db, product_id=id)
