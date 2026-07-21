@@ -4468,13 +4468,35 @@ Goal: Show order history and sales stats per product variant on the detail page.
 
 ### B. Production & Deployment
 
-**Sprint 11 — Production & Deployment** (Status: `NOT STARTED`)
+**Sprint 11 — Production & Deployment** (Status: `PARTIALLY DONE`)
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| S11-1 | SSL & Domain Configuration | nginx | TODO |
-| S11-2 | Database Backup Jobs | cron | TODO |
+| S11-1 | SSL & Domain Configuration | Cloudflare Tunnel | **DONE** — `https://orderhub.orderapp.uk`, zero inbound ports. See `CLAUDE.md` § Server Deployment + `SERVER_DEPLOY_PLAN.md` |
+| S11-2 | Database Backup Jobs | systemd timer + age + R2 | **DONE 2026-07-13** — daily 03:30 UTC, age-encrypted to Cloudflare R2, restore tested. Canonical reference: **`BACKUP_PLAN.md`**. Not cron — systemd |
 | S11-3 | Performance Monitoring | prometheus/grafana | TODO |
+| S11-2-followup-1 | **Backup failure alerting** | ops | TODO — see below |
+
+> **S11-2 correction (2026-07-21).** This row read `TODO` for eight days after the work shipped,
+> and `CLAUDE.md` listed DB backup jobs under "What's Pending" for the same period. The only
+> description of the working system lived in a `BACKUP_PLAN.md` that sat **outside the repository**
+> and still said "ЗАПЛАНОВАНО, ще не впроваджено". A planning agent trusted the repo, told Sergii
+> the pre-deploy dump was the only copy, and was wrong. `BACKUP_PLAN.md` now lives in the repo and
+> describes the running configuration.
+>
+> **S11-2-followup-1 — the one real gap.** There is no alerting if the backup fails *or silently
+> stops*. Output goes to journald and a log file; the only configured notification is a Cloudflare
+> **billing** alert on storage approaching 8 GB — which fires on storage *growth*. If backups stop,
+> storage stops growing and that alert never fires, so the single existing signal is inversely
+> correlated with the failure it should catch. An error handler cannot help either: if the timer
+> never fires, there is no error to handle. The fix is a dead-man's-switch — the script pings an
+> external service on success, the service emails when the ping fails to arrive — which covers
+> script failure, timer removal and a powered-off server alike. Parked until the WesternBid work
+> is finished; see `BACKUP_PLAN.md` §5.
+>
+> Also open: the restore test (2026-07-13) ran against a near-empty DB with an empty uploads
+> volume, so it proved the *mechanism* but not data integrity, and the attachments leg has never
+> been exercised with real files. Worth re-running now that prod holds real orders.
 
 **Performance & Testing**
 

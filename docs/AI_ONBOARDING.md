@@ -110,14 +110,31 @@ them. Source code is the inverse — CC owns it; Cowork only reads.
 The repo lives in WSL on Sergii's Windows box. Cowork reaches the
 filesystem through **two different paths** depending on the tool:
 
-| Path style | Used by | Example |
-|---|---|---|
-| **UNC** `\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub\...` | `Read`, `Write`, `Edit`, `Grep`, `Glob` | `\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub\CLAUDE.md` |
-| **Sandbox** `/sessions/<session-id>/mnt/OrderHub/...` | `Bash` (`mcp__workspace__bash`) | `/sessions/<your-id>/mnt/OrderHub/backend/`. The session ID is unique per chat — check the `<env>` block in the system prompt at session start. |
+Sergii mounts the repo in Cowork's folder picker using this exact
+UNC path (Cowork cannot request it programmatically — the folder
+picker will not accept a UNC path from `request_cowork_directory`):
 
-A file you edited via `Edit` at the UNC path is visible to `Bash`
-at the sandbox path, and vice versa — same file on disk, two
-mounts.
+```
+\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub
+```
+
+| Tool | Works over the WSL mount? |
+|---|---|
+| `Read`, `Write`, `Edit`, `Grep` | **Yes** |
+| `Glob` | Unreliable — times out on broad patterns over UNC. Prefer `Grep` with a narrow `path`. |
+| `Bash` (`mcp__workspace__bash`) | **No.** Returns `UNC paths are not supported`. |
+
+**Correction (2026-07-21):** an earlier version of this section
+claimed a file edited at the UNC path was also reachable by `Bash`
+at a `/sessions/<id>/mnt/` path. **That is false.** The Linux
+sandbox cannot mount UNC at all, so Cowork can read and write the
+repo but **cannot run anything in it** — no `pytest`, no `alembic`,
+no `npm`, no `git`. Those are run by Sergii in WSL, or by CC.
+Do not spend time looking for a workaround; there isn't one.
+
+Practical consequence: Cowork can never verify its own doc edits by
+running the test suite, and cannot inspect git state. When Cowork
+needs `git status` or a test result, it must ask.
 
 **Browser MCP** (`mcp__Claude_in_Chrome__*`) automates the
 frontend at `http://localhost:3000` (Vite dev server) backed by
@@ -129,6 +146,26 @@ exist yet. Other browser tools fail until a tab is registered.
 **Scheduled tasks** (`mcp__scheduled-tasks__*`) — Cowork can set
 reminders for Sergii (e.g., "tomorrow 10:00, continue with X").
 Used between work sessions.
+
+### 4.1 Where the environments live
+
+Three distinct places — do not confuse them:
+
+| Environment | Where | Who touches it |
+|---|---|---|
+| **Dev** | Sergii's WSL, `/home/serhii/projects/OrderHub`. Vite on `:3000`, uvicorn on `:8000`, local Postgres. There is **no separate dev server** — "dev" is this laptop. | CC edits, Sergii runs, Cowork reads |
+| **Remote** | `github.com/cropsp/OrderHub` (**private**). Branches are local until Sergii pushes — a committed sprint is *not* automatically on GitHub. | Sergii pushes |
+| **Prod** | Home server `prorder@192.168.31.71` (`ssh orderhub`), Docker Compose, public at `https://orderhub.orderapp.uk` via Cloudflare Tunnel. | Sergii deploys |
+
+**Canonical prod reference is `CLAUDE.md` § "Server Deployment" plus
+`SERVER_DEPLOY_PLAN.md` §1–§10, and `BACKUP_PLAN.md` for backups and
+restore** — deliberately not duplicated here, so there is one place to
+keep correct. This table exists only so a new agent
+knows the three environments are distinct and which document to open.
+
+A sprint is on prod only after: commit → push → merge to `main` →
+deploy. A closure entry that says "not merged, not deployed" means the
+code exists **only in Sergii's working copy.**
 
 ## 5. Documentation hierarchy
 

@@ -82,8 +82,11 @@ Sprints 1–10 + UI Modernization are complete. This includes: core architecture
 
 ## What's Pending
 
-Sprint 11 (Production & Deployment): DB backup jobs, Prometheus/Grafana monitoring.
-(SSL/remote access is DONE via Cloudflare Tunnel — see below.)
+Sprint 11 (Production & Deployment): Prometheus/Grafana monitoring.
+(SSL/remote access is DONE via Cloudflare Tunnel — see below.
+**DB backups are DONE** since 2026-07-13 — systemd timer → `age`-encrypted tarball → Cloudflare R2,
+daily, restore tested. Canonical reference: `BACKUP_PLAN.md`. One gap remains: no alerting if a
+backup fails or silently stops — tracked as `S11-2-followup-1` in `implementation_plan.md`.)
 Performance: route-level chunk splitting (frontend). Testing: smoke tests with Vitest + Playwright.
 
 ## Server Deployment (LAN + Cloudflare Tunnel)
