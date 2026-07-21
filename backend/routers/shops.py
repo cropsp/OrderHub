@@ -13,12 +13,19 @@ from logger import get_logger
 from models.shop import Shop
 from models.order import Order
 from models.user import User, UserRole
-from schemas.shop import ShopCreate, ShopUpdate, ShopResponse, ShopDetailResponse
+from schemas.shop import (
+    ShopBackfillRequest,
+    ShopCreate,
+    ShopUpdate,
+    ShopResponse,
+    ShopDetailResponse,
+)
 from routers.dependencies import assert_shop_access, get_current_user, require_role
 from services.access_service import (
     get_shop_scope,
     propagate_new_shop_to_unrestricted_managers,
 )
+from services.partner_payout_service import find_settlements_overlapping_period
 from services.shopify_sync import sync_shop_orders
 from services.encryption_service import encrypt_value, decrypt_value
 from services.phone_normalization import normalize_ua_sender_phone
@@ -238,3 +245,69 @@ async def manual_sync_shop(
         # for the operator triggering the sync; surface them. Traceback still goes to logs.
         logger.error(f"[SHOPS] Manual sync failed for shop {shop_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Manual sync failed: {str(e)}")
+
+
+@router.post("/{shop_id}/backfill")
+async def backfill_shop(
+    shop_id: uuid.UUID,
+    body: ShopBackfillRequest,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bounded historical Shopify import for one shop (SHOPIFY-BACKFILL).
+
+    Paginated + idempotent + dry-runnable. `dry_run=true` (the default) reports
+    found / already-present / would-create per month WITHOUT writing — the first
+    approval gate. Also returns two pre-import diagnostics:
+      - suspicious_external_ids: existing orders in THIS shop whose external_id is
+        not purely numeric (candidate hand-entries that won't dedup against the
+        numeric backfill → double-count risk, Q1).
+      - overlapping_settlements: immutable partner settlements whose period
+        overlaps the window (their frozen amounts may now be under-settled, Q4).
+    """
+    # Same access rule as manual /sync: OWNER/MANAGER with access to this shop.
+    await assert_shop_access(db, shop_id, current_user)
+
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))  # noqa: E712
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+
+    # Q1 diagnostic: non-numeric external_ids in this shop (portable Python filter
+    # rather than a DB-specific regex).
+    existing_ids = (
+        await db.execute(select(Order.external_id).where(Order.shop_id == shop_id))
+    ).scalars().all()
+    suspicious_external_ids = sorted(
+        {eid for eid in existing_ids if eid and not eid.isdigit()}
+    )
+
+    # Q4 diagnostic: settlements overlapping the backfill window.
+    overlapping_settlements = await find_settlements_overlapping_period(
+        db, shop_id, body.since, body.until
+    )
+
+    try:
+        result = await sync_shop_orders(
+            db,
+            shop,
+            current_user,
+            since=body.since,
+            until=body.until,
+            dry_run=body.dry_run,
+            stop_on_existing=False,  # backfill walks the entire date range
+        )
+        # Real import commits via get_db on return; a raised HTTPException rolls it
+        # back. Dry-run writes nothing, so the trailing get_db commit is a no-op.
+        if body.dry_run:
+            await db.rollback()  # belt-and-suspenders: dry-run must write nothing
+    except Exception as e:
+        logger.error(f"[SHOPS] Backfill failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Backfill failed: {str(e)}")
+
+    return {
+        "status": "success",
+        **result.model_dump(),
+        "suspicious_external_ids": suspicious_external_ids,
+        "overlapping_settlements": overlapping_settlements,
+    }
