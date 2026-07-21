@@ -46,8 +46,12 @@ async def run_shopify_sync():
         system_user = system_user_result.scalar_one_or_none()
         if system_user is None:
             logger.error(
-                "System user %s not found — skipping Shopify sync. "
-                "Run `alembic upgrade head` to install it.",
+                "System user %s not found — skipping Shopify sync. This audit "
+                "principal is installed by alembic migration a1b2c3d4e5f6 and "
+                "re-created by seed.py. `alembic upgrade head` only helps if a "
+                "repair migration is pending; if the DB is already at head the "
+                "row was deleted post-migration and must be re-inserted "
+                "(INSERT ... ON CONFLICT DO NOTHING) before the next run.",
                 SYSTEM_USER_ID,
             )
             return
@@ -125,8 +129,12 @@ async def run_westernbid_poll():
         )
         if system_user_result.scalar_one_or_none() is None:
             logger.error(
-                "System user %s not found — skipping WesternBid poll. "
-                "Run `alembic upgrade head` to install it.",
+                "System user %s not found — skipping WesternBid poll. This audit "
+                "principal is installed by alembic migration a1b2c3d4e5f6 and "
+                "re-created by seed.py. `alembic upgrade head` only helps if a "
+                "repair migration is pending; if the DB is already at head the "
+                "row was deleted post-migration and must be re-inserted "
+                "(INSERT ... ON CONFLICT DO NOTHING) before the next run.",
                 SYSTEM_USER_ID,
             )
             return

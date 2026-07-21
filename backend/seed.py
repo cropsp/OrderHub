@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, func
 
+from constants import SYSTEM_USER_ID
 from database import async_session_factory
 from models import (
     User, UserRole,
@@ -28,6 +29,30 @@ from models import (
     UserShopAccess,
 )
 from services.auth_service import hash_password
+
+
+async def ensure_system_user(session) -> None:
+    """Guarantee the persistent system user exists (idempotent).
+
+    The system user is the audit actor for webhook/scheduler order_status_history
+    rows and is normally installed by alembic migration a1b2c3d4e5f6. Seeding a
+    rebuilt DB must re-assert the same invariant so the scheduler guards never
+    trip. Mirrors the migration's row exactly: OWNER, inactive, non-bcrypt
+    password (cannot authenticate). No UserShopAccess grant — OWNER is
+    unrestricted and the row is filtered out of GET /api/users.
+    """
+    if await session.get(User, SYSTEM_USER_ID) is not None:
+        return
+    session.add(
+        User(
+            id=SYSTEM_USER_ID,
+            email="system@orderhub.local",
+            hashed_password="!disabled-system-user-not-a-bcrypt-hash",
+            full_name="System (webhooks/scheduler)",
+            role=UserRole.OWNER,
+            is_active=False,
+        )
+    )
 
 
 async def is_db_empty() -> bool:
@@ -40,6 +65,11 @@ async def is_db_empty() -> bool:
 async def seed():
     """Populate the database with development data."""
     async with async_session_factory() as session:
+        # ─── System user (invariant) ───────────────────────────
+        # Re-assert the persistent audit principal before dev data, so a
+        # rebuilt/reseeded DB never leaves the scheduler guards tripping.
+        await ensure_system_user(session)
+
         # ─── Users ─────────────────────────────────────────────
         # Dev credentials: owner@orderhub.dev / owner123
         owner = User(
