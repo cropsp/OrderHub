@@ -41,3 +41,4 @@ scratch/
 
 # Internal audit / historical docs (kept locally, not pushed)
 docs/integrations/nova-poshta-audit-2026-05.md
+task.md

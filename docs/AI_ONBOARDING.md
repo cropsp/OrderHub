@@ -137,7 +137,7 @@ Used between work sessions.
 | `CLAUDE.md` | Invariant | Yes | Project rules, stack, conventions, gotchas |
 | `docs/AI_ONBOARDING.md` (this file) | Invariant | Yes | Workflow, tooling, path mapping |
 | `implementation_plan.md` | Slow-evolving (one closure entry per sprint) | Yes — sections **Active Roadmap** + **Explicitly deferred** + **Open Architectural Questions** | Sprint history + parked backlog + design questions |
-| `task.md` | Volatile (rewritten every sprint) | Yes if file exists | Current sprint spec for CC |
+| `task.md` | Volatile (rewritten every sprint) — **git-ignored, local only** | Yes if file exists | Current sprint spec for CC |
 | `docs/integrations/nova-poshta.md` | Slow-evolving | Only if sprint touches NP | NP API contract, gotchas, credentials, playbook |
 | Per-sprint reading suggestions | — | Sprint context | Find sprint ID in implementation_plan.md to read sprint history |
 
@@ -145,6 +145,32 @@ When in doubt about the current sprint, search
 `implementation_plan.md` for sprint IDs (`PKG-`, `NP-FIX-`, `BUG-`,
 etc.) — each has a closure entry with commit hash, tasks, post-fix
 notes, and smoke evidence.
+
+### 5.1 Two rules added 2026-07-21 (learned the hard way)
+
+**`task.md` is git-ignored and disappears at the next sprint.** Until
+2026-07-21 it was *tracked but never re-committed*, so `HEAD` held a spec
+frozen at the S005 era while ADDR-VAL-1/2, USERS-LIST-500, USER-ACCESS-1
+and USER-ACCESS-2 were each written in place and overwritten by the next
+sprint. That is the worst of both worlds: misleading archaeology in git
+plus a permanent `M task.md` in `git status`. It is now explicitly
+untracked.
+
+**Consequence — the closure entry is the only durable record.** A closure
+entry in `implementation_plan.md` must therefore carry the *reasoning*,
+not just the outcome: rejected alternatives, accepted trade-offs, and what
+remains unverified. If it only says what was built, the answer to "why
+capabilities and not roles?" exists nowhere three months later.
+
+**`CLAUDE.md` describes the state of `main`, never work in flight.** A
+sprint's rules go into CLAUDE.md when it is **merged**, not when the code
+is written. On 2026-07-21 CLAUDE.md described USER-ACCESS-2 in the past
+tense while its 32 files were still uncommitted on a feature branch; a
+planning agent read that as shipped, wrote "USER-ACCESS-2 is DONE, merged
++ deployed" into the next sprint's task.md, and the next sprint's commit
+collided with the uncommitted work. If a sprint is not on `main`, its
+status belongs in `implementation_plan.md` with an explicit
+"not merged, not deployed" line — not in CLAUDE.md.
 
 ## 6. Sprint workflow — happy path
 
