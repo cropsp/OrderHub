@@ -23,6 +23,13 @@ from models.base import Base, TimestampMixin
 # Setting keys. Add new global settings here rather than creating new tables.
 GOOGLE_ADDRESS_VALIDATION_API_KEY = "google_address_validation_api_key"
 
+# WesternBid credentials (WB-1). The WB account is one for all shops (unlike the
+# per-shop Shopify / Nova Poshta keys), so it lives here, app-scoped. Both values
+# are Fernet-encrypted: the `Login` header is equivalent to full account access,
+# so it is a secret too, not just an identifier (task rule 5).
+WESTERNBID_API_KEY = "westernbid_api_key"
+WESTERNBID_LOGIN = "westernbid_login"
+
 
 class AppSetting(Base, TimestampMixin):
     __tablename__ = "app_settings"

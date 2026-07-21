@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, MapPinCheck, Shield, UserCircle2, LogOut } from 'lucide-react';
+import { Mail, MapPinCheck, Shield, Truck, UserCircle2, LogOut } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useAddressValidationKey, useSetAddressValidationKey } from '@/hooks/useAppSettings';
+import {
+  useAddressValidationKey,
+  useSetAddressValidationKey,
+  useWesternBidCredentials,
+  useSetWesternBidCredentials,
+} from '@/hooks/useAppSettings';
 import { useAuth } from '@/hooks/useAuth';
 import { useUpdatePreferences } from '@/hooks/useUsers';
 
@@ -74,6 +79,29 @@ export default function SettingsPage() {
       window.setTimeout(() => setKeyMessage(null), 2000);
     } catch {
       setKeyMessage('Failed to save the API key.');
+    }
+  };
+
+  // WesternBid credentials — owner-only, same masking discipline as the Google
+  // key. Both the API key and login are secrets, so both are write-only.
+  const wbCreds = useWesternBidCredentials({ enabled: isOwner });
+  const setWbCreds = useSetWesternBidCredentials();
+  const [wbApiKey, setWbApiKey] = useState('');
+  const [wbLogin, setWbLogin] = useState('');
+  const [wbMessage, setWbMessage] = useState<string | null>(null);
+
+  const saveWbCredentials = async () => {
+    const apiKey = wbApiKey.trim();
+    const login = wbLogin.trim();
+    if (!apiKey || !login) return;
+    try {
+      await setWbCreds.mutateAsync({ api_key: apiKey, login });
+      setWbApiKey('');
+      setWbLogin('');
+      setWbMessage('WesternBid credentials saved.');
+      window.setTimeout(() => setWbMessage(null), 2000);
+    } catch {
+      setWbMessage('Failed to save WesternBid credentials.');
     }
   };
 
@@ -289,6 +317,74 @@ export default function SettingsPage() {
               </div>
 
               {keyMessage && <p className="text-xs text-teal-300">{keyMessage}</p>}
+            </CardContent>
+          </Card>
+        )}
+
+        {isOwner && (
+          <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-zinc-100">WesternBid</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex items-center gap-3">
+                <Truck className="h-5 w-5 text-zinc-400" />
+                {wbCreds.data?.api_key_is_set && wbCreds.data?.login_is_set ? (
+                  <Badge variant="outline" className="border-teal-800 bg-teal-950/40 text-teal-300">
+                    Configured ••••{wbCreds.data.api_key_last4}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="border-zinc-700 bg-zinc-800/40 text-zinc-400">
+                    Not configured
+                  </Badge>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  WesternBid Login
+                </p>
+                <Input
+                  className="border-zinc-700 bg-zinc-900/50"
+                  autoComplete="off"
+                  placeholder={
+                    wbCreds.data?.login_is_set ? 'Leave empty to keep existing' : 'WesternBid login'
+                  }
+                  value={wbLogin}
+                  onChange={(event) => setWbLogin(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  WesternBid API Key
+                </p>
+                <Input
+                  className="border-zinc-700 bg-zinc-900/50"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={
+                    wbCreds.data?.api_key_is_set ? 'Leave empty to keep existing' : 'WesternBid API key'
+                  }
+                  value={wbApiKey}
+                  onChange={(event) => setWbApiKey(event.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-zinc-400">
+                  Used to poll sent parcels. Both values are stored encrypted; never shown again.
+                </p>
+                <Button
+                  className="bg-teal-600 text-white hover:bg-teal-500"
+                  onClick={saveWbCredentials}
+                  disabled={setWbCreds.isPending || !wbApiKey.trim() || !wbLogin.trim()}
+                >
+                  {setWbCreds.isPending ? 'Saving...' : 'Save Credentials'}
+                </Button>
+              </div>
+
+              {wbMessage && <p className="text-xs text-teal-300">{wbMessage}</p>}
             </CardContent>
           </Card>
         )}

@@ -6,7 +6,12 @@ Imports all models so Alembic and SQLAlchemy can discover them.
 
 from models.base import Base
 from models.user import User, UserRole, Capability
-from models.app_setting import AppSetting, GOOGLE_ADDRESS_VALIDATION_API_KEY
+from models.app_setting import (
+    AppSetting,
+    GOOGLE_ADDRESS_VALIDATION_API_KEY,
+    WESTERNBID_API_KEY,
+    WESTERNBID_LOGIN,
+)
 from models.shop import Shop, ShopPlatform
 from models.customer import Customer
 from models.order import (
@@ -36,6 +41,7 @@ from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
 from models.user_shop_access import UserShopAccess
 from models.user_capability import UserCapability
 from models.access_audit import AccessAudit
+from models.wb_parcel import WbParcel
 
 __all__ = [
     "Base",
@@ -44,6 +50,8 @@ __all__ = [
     "Capability",
     "AppSetting",
     "GOOGLE_ADDRESS_VALIDATION_API_KEY",
+    "WESTERNBID_API_KEY",
+    "WESTERNBID_LOGIN",
     "Shop",
     "ShopPlatform",
     "Customer",
@@ -76,4 +84,5 @@ __all__ = [
     "UserShopAccess",
     "UserCapability",
     "AccessAudit",
+    "WbParcel",
 ]

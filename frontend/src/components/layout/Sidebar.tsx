@@ -1,4 +1,4 @@
-import { Archive, FileSpreadsheet, Layers, LayoutDashboard, Package, Settings, Shield, Store, Users, Wrench } from 'lucide-react'
+import { Archive, FileSpreadsheet, Layers, LayoutDashboard, Package, Settings, Shield, Store, Truck, Users, Wrench } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { NavLink } from 'react-router-dom'
 
@@ -119,6 +119,14 @@ const navItems: NavItem[] = [
     icon: Wrench,
     roles: [UserRole.OWNER, UserRole.MANAGER],
     inGroup: true,
+  },
+  {
+    key: 'westernbid',
+    label: 'WesternBid',
+    to: '/westernbid',
+    icon: Truck,
+    roles: [UserRole.OWNER, UserRole.MANAGER],
+    groupLabel: 'Shipping',
   },
 ]
 
