@@ -7,6 +7,10 @@
 
 import client from '@/api/client';
 import type { ApiKeyStatus } from '@/types/addressValidation';
+import type {
+  WesternBidCredentialsStatus,
+  WesternBidCredentialsUpdate,
+} from '@/types/westernbid';
 
 export const appSettingsApi = {
   getAddressValidationKey: async (): Promise<ApiKeyStatus> => {
@@ -18,6 +22,21 @@ export const appSettingsApi = {
     const { data } = await client.put<ApiKeyStatus>('/settings/address-validation', {
       api_key: apiKey,
     });
+    return data;
+  },
+
+  getWesternBidCredentials: async (): Promise<WesternBidCredentialsStatus> => {
+    const { data } = await client.get<WesternBidCredentialsStatus>('/settings/westernbid');
+    return data;
+  },
+
+  setWesternBidCredentials: async (
+    payload: WesternBidCredentialsUpdate,
+  ): Promise<WesternBidCredentialsStatus> => {
+    const { data } = await client.put<WesternBidCredentialsStatus>(
+      '/settings/westernbid',
+      payload,
+    );
     return data;
   },
 };

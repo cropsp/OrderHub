@@ -110,14 +110,31 @@ them. Source code is the inverse — CC owns it; Cowork only reads.
 The repo lives in WSL on Sergii's Windows box. Cowork reaches the
 filesystem through **two different paths** depending on the tool:
 
-| Path style | Used by | Example |
-|---|---|---|
-| **UNC** `\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub\...` | `Read`, `Write`, `Edit`, `Grep`, `Glob` | `\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub\CLAUDE.md` |
-| **Sandbox** `/sessions/<session-id>/mnt/OrderHub/...` | `Bash` (`mcp__workspace__bash`) | `/sessions/<your-id>/mnt/OrderHub/backend/`. The session ID is unique per chat — check the `<env>` block in the system prompt at session start. |
+Sergii mounts the repo in Cowork's folder picker using this exact
+UNC path (Cowork cannot request it programmatically — the folder
+picker will not accept a UNC path from `request_cowork_directory`):
 
-A file you edited via `Edit` at the UNC path is visible to `Bash`
-at the sandbox path, and vice versa — same file on disk, two
-mounts.
+```
+\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub
+```
+
+| Tool | Works over the WSL mount? |
+|---|---|
+| `Read`, `Write`, `Edit`, `Grep` | **Yes** |
+| `Glob` | Unreliable — times out on broad patterns over UNC. Prefer `Grep` with a narrow `path`. |
+| `Bash` (`mcp__workspace__bash`) | **No.** Returns `UNC paths are not supported`. |
+
+**Correction (2026-07-21):** an earlier version of this section
+claimed a file edited at the UNC path was also reachable by `Bash`
+at a `/sessions/<id>/mnt/` path. **That is false.** The Linux
+sandbox cannot mount UNC at all, so Cowork can read and write the
+repo but **cannot run anything in it** — no `pytest`, no `alembic`,
+no `npm`, no `git`. Those are run by Sergii in WSL, or by CC.
+Do not spend time looking for a workaround; there isn't one.
+
+Practical consequence: Cowork can never verify its own doc edits by
+running the test suite, and cannot inspect git state. When Cowork
+needs `git status` or a test result, it must ask.
 
 **Browser MCP** (`mcp__Claude_in_Chrome__*`) automates the
 frontend at `http://localhost:3000` (Vite dev server) backed by
@@ -130,6 +147,26 @@ exist yet. Other browser tools fail until a tab is registered.
 reminders for Sergii (e.g., "tomorrow 10:00, continue with X").
 Used between work sessions.
 
+### 4.1 Where the environments live
+
+Three distinct places — do not confuse them:
+
+| Environment | Where | Who touches it |
+|---|---|---|
+| **Dev** | Sergii's WSL, `/home/serhii/projects/OrderHub`. Vite on `:3000`, uvicorn on `:8000`, local Postgres. There is **no separate dev server** — "dev" is this laptop. | CC edits, Sergii runs, Cowork reads |
+| **Remote** | `github.com/cropsp/OrderHub` (**private**). Branches are local until Sergii pushes — a committed sprint is *not* automatically on GitHub. | Sergii pushes |
+| **Prod** | Home server `prorder@192.168.31.71` (`ssh orderhub`), Docker Compose, public at `https://orderhub.orderapp.uk` via Cloudflare Tunnel. | Sergii deploys |
+
+**Canonical prod reference is `CLAUDE.md` § "Server Deployment" plus
+`SERVER_DEPLOY_PLAN.md` §1–§10, and `BACKUP_PLAN.md` for backups and
+restore** — deliberately not duplicated here, so there is one place to
+keep correct. This table exists only so a new agent
+knows the three environments are distinct and which document to open.
+
+A sprint is on prod only after: commit → push → merge to `main` →
+deploy. A closure entry that says "not merged, not deployed" means the
+code exists **only in Sergii's working copy.**
+
 ## 5. Documentation hierarchy
 
 | File | Stability | Read on every session start? | Content |
@@ -137,7 +174,7 @@ Used between work sessions.
 | `CLAUDE.md` | Invariant | Yes | Project rules, stack, conventions, gotchas |
 | `docs/AI_ONBOARDING.md` (this file) | Invariant | Yes | Workflow, tooling, path mapping |
 | `implementation_plan.md` | Slow-evolving (one closure entry per sprint) | Yes — sections **Active Roadmap** + **Explicitly deferred** + **Open Architectural Questions** | Sprint history + parked backlog + design questions |
-| `task.md` | Volatile (rewritten every sprint) | Yes if file exists | Current sprint spec for CC |
+| `task.md` | Volatile (rewritten every sprint) — **git-ignored, local only** | Yes if file exists | Current sprint spec for CC |
 | `docs/integrations/nova-poshta.md` | Slow-evolving | Only if sprint touches NP | NP API contract, gotchas, credentials, playbook |
 | Per-sprint reading suggestions | — | Sprint context | Find sprint ID in implementation_plan.md to read sprint history |
 
@@ -145,6 +182,32 @@ When in doubt about the current sprint, search
 `implementation_plan.md` for sprint IDs (`PKG-`, `NP-FIX-`, `BUG-`,
 etc.) — each has a closure entry with commit hash, tasks, post-fix
 notes, and smoke evidence.
+
+### 5.1 Two rules added 2026-07-21 (learned the hard way)
+
+**`task.md` is git-ignored and disappears at the next sprint.** Until
+2026-07-21 it was *tracked but never re-committed*, so `HEAD` held a spec
+frozen at the S005 era while ADDR-VAL-1/2, USERS-LIST-500, USER-ACCESS-1
+and USER-ACCESS-2 were each written in place and overwritten by the next
+sprint. That is the worst of both worlds: misleading archaeology in git
+plus a permanent `M task.md` in `git status`. It is now explicitly
+untracked.
+
+**Consequence — the closure entry is the only durable record.** A closure
+entry in `implementation_plan.md` must therefore carry the *reasoning*,
+not just the outcome: rejected alternatives, accepted trade-offs, and what
+remains unverified. If it only says what was built, the answer to "why
+capabilities and not roles?" exists nowhere three months later.
+
+**`CLAUDE.md` describes the state of `main`, never work in flight.** A
+sprint's rules go into CLAUDE.md when it is **merged**, not when the code
+is written. On 2026-07-21 CLAUDE.md described USER-ACCESS-2 in the past
+tense while its 32 files were still uncommitted on a feature branch; a
+planning agent read that as shipped, wrote "USER-ACCESS-2 is DONE, merged
++ deployed" into the next sprint's task.md, and the next sprint's commit
+collided with the uncommitted work. If a sprint is not on `main`, its
+status belongs in `implementation_plan.md` with an explicit
+"not merged, not deployed" line — not in CLAUDE.md.
 
 ## 6. Sprint workflow — happy path
 

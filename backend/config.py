@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # ─── MCP ───────────────────────────────────────────────────
     MCP_SERVER_PORT: int = 3001
 
+    # ─── WesternBid (WB-1) ─────────────────────────────────────
+    # Base URL is configurable, defaulting to the sandbox (task rule 7). Switch
+    # to production `https://system.westernbid.com` via the env var once the
+    # production key (ticket #1048) arrives. The client appends `/api/v1/`.
+    WESTERNBID_BASE_URL: str = "https://wbdeveloper.systems"
+
     # ─── ID-Laser draft pipeline ───────────────────────────────
     # Paths default to the git submodule layout (S005):
     # backend/external/idlaser is COPYed into the image at

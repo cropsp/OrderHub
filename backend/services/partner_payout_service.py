@@ -365,6 +365,45 @@ async def compute_settlement_payment_progress(
     return progress
 
 
+async def find_settlements_overlapping_period(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    since: date,
+    until: date | None,
+) -> list[dict]:
+    """SHOPIFY-BACKFILL Q4 pre-import diagnostic: existing (immutable) settlements
+    whose [period_start, period_end] overlaps the backfill window [since, until].
+
+    Importing historical orders does NOT alter these frozen snapshots, but it
+    changes what a *future* settlement for the same period would compute — an
+    already-settled period may now be under-settled. Surfaced in the dry-run so
+    Sergii sees the affected periods before importing.
+    """
+    conditions = [
+        PartnerSettlement.shop_id == shop_id,
+        PartnerSettlement.period_end >= since,
+    ]
+    if until is not None:
+        conditions.append(PartnerSettlement.period_start <= until)
+    stmt = (
+        select(PartnerSettlement)
+        .where(*conditions)
+        .order_by(PartnerSettlement.period_start.desc())
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": str(s.id),
+            "partner_name": s.partner_name,
+            "period_start": s.period_start.isoformat(),
+            "period_end": s.period_end.isoformat(),
+            "computed_amount": str(s.computed_amount),
+            "base_currency": s.base_currency,
+        }
+        for s in rows
+    ]
+
+
 async def list_partner_names(
     db: AsyncSession,
     shop_id: uuid.UUID,

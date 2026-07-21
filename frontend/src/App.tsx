@@ -27,6 +27,7 @@ const OverheadMaterialDetailPage = lazy(
 )
 const ShopFinancePage = lazy(() => import('@/pages/ShopFinancePage'))
 const SettlementPage = lazy(() => import('@/pages/SettlementPage'))
+const WesternBidPage = lazy(() => import('@/pages/WesternBidPage'))
 
 function RouteLoadingFallback() {
   return (
@@ -174,6 +175,14 @@ function App() {
               </Suspense>
             }
             path="/inventory/overhead-materials/:id"
+          />
+          <Route
+            element={
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <WesternBidPage />
+              </Suspense>
+            }
+            path="/westernbid"
           />
         </Route>
 

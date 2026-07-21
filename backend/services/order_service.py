@@ -250,30 +250,51 @@ async def _apply_variant_snapshot(db: AsyncSession, item: OrderItem, variant_id:
     item.snapshot_title = variant.variant_name or variant.product.title
 
 
-async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order:
-    """Manual order creation."""
+async def create_order(
+    db: AsyncSession,
+    data: OrderCreate,
+    user: User,
+    *,
+    status: OrderStatus = OrderStatus.NEW,
+    shipped_at: datetime | None = None,
+    completed_at: datetime | None = None,
+    history_comment: str = "Order manually created",
+) -> Order:
+    """Create an order + its opening audit row.
+
+    Manual entry and the Shopify webhook use the defaults (status NEW, "Order
+    manually created"). The SHOPIFY-BACKFILL importer passes a mapped `status`
+    (+ optional shipped/completed timestamps and a descriptive `history_comment`)
+    so historical orders land in the right pipeline/finance bucket. The status is
+    set DIRECTLY here — the importer must NOT route through change_order_status,
+    which would fire the MAT-4 live-stock consumption hook, designer
+    auto-assignment, and timestamp mutation for orders that never moved through
+    those states in OrderHub.
+    """
     # Customupsert -> Create order -> Default History
     customer = await upsert_customer(
-        db, 
-        data.email, 
-        data.full_name, 
+        db,
+        data.email,
+        data.full_name,
         data.shipping_country,
         phone=data.shipping_phone,
         shipping_city=data.shipping_city,
         shipping_city_ref=data.shipping_city_ref,
         shipping_warehouse_ref=data.shipping_warehouse_ref
     )
-    
+
     order = Order(
         id=uuid.uuid4(),
         external_id=data.external_id,
         shop_id=data.shop_id,
         customer_id=customer.id,
-        status=OrderStatus.NEW,
+        status=status,
         title=data.title,
         total_price=data.total_price,
         currency=data.currency,
         ordered_at=data.ordered_at,
+        shipped_at=shipped_at,
+        completed_at=completed_at,
         shipping_name=data.shipping_name,
         shipping_phone=data.shipping_phone,
         shipping_street_1=data.shipping_street_1,
@@ -298,20 +319,23 @@ async def create_order(db: AsyncSession, data: OrderCreate, user: User) -> Order
             quantity=item_data.quantity,
             unit_price=item_data.unit_price,
             currency=item_data.currency,
-            variations=item_data.variations
+            variations=item_data.variations,
+            sku=item_data.sku,
         )
         if item_data.product_variant_id:
             await _apply_variant_snapshot(db, item, item_data.product_variant_id, order.shop_id)
         db.add(item)
     
-    # Initial history
+    # Initial history — one synthetic opening row. For backfilled orders this is
+    # the ONLY history entry; we never fabricate a transition chain for states the
+    # order never passed through here.
     history = OrderStatusHistory(
         id=uuid.uuid4(),
         order_id=order.id,
         changed_by_id=user.id,
         from_status="none",
-        to_status=OrderStatus.NEW.value,
-        comment="Order manually created"
+        to_status=status.value,
+        comment=history_comment
     )
     db.add(history)
     

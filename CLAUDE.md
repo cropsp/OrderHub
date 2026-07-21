@@ -56,8 +56,8 @@ npm run lint                            # eslint
 
 - All models use SQLAlchemy ORM with Alembic migrations. **Never** modify DB schema directly — always create a migration.
 - Enums in Python must match DB enum types exactly. When adding a new enum value, create an Alembic migration with `ALTER TYPE`.
-- Shop `source` field uses `ShopSource` enum: `SHOPIFY`, `ETSY`, `MANUAL`.
-- Order status mutations are logged in `order_audit_history` table.
+- Shop `platform` field uses the `ShopPlatform` enum (DB type `shop_platform`): `SHOPIFY`, `ETSY`, `MANUAL` (there is no `ShopSource` enum). See `models/shop.py`.
+- Order status changes AND field mutations are logged in the `order_status_history` table (`models/order.py`) — `update_order` writes a row with `from_status == to_status` and `comment="Fields updated: …"`. There is no `order_audit_history` table.
 - Product catalog: `products` → `product_variants` → `packaging_specs`. Order items link via SKU with atomic snapshots.
 
 ## Nova Poshta Integration
@@ -82,8 +82,11 @@ Sprints 1–10 + UI Modernization are complete. This includes: core architecture
 
 ## What's Pending
 
-Sprint 11 (Production & Deployment): DB backup jobs, Prometheus/Grafana monitoring.
-(SSL/remote access is DONE via Cloudflare Tunnel — see below.)
+Sprint 11 (Production & Deployment): Prometheus/Grafana monitoring.
+(SSL/remote access is DONE via Cloudflare Tunnel — see below.
+**DB backups are DONE** since 2026-07-13 — systemd timer → `age`-encrypted tarball → Cloudflare R2,
+daily, restore tested. Canonical reference: `BACKUP_PLAN.md`. One gap remains: no alerting if a
+backup fails or silently stops — tracked as `S11-2-followup-1` in `implementation_plan.md`.)
 Performance: route-level chunk splitting (frontend). Testing: smoke tests with Vitest + Playwright.
 
 ## Server Deployment (LAN + Cloudflare Tunnel)
@@ -131,8 +134,8 @@ as a Docker Compose stack. **Canonical reference: `SERVER_DEPLOY_PLAN.md` (§1�
 
 ## Gotchas
 
-- `ShopSource.MANUAL` enum was added via migration — if you see enum conflicts, check Alembic history first.
-- Order status changes MUST go through the audit logging path — never update status directly in DB.
+- The shop platform enum is `ShopPlatform` (`SHOPIFY|ETSY|MANUAL`, DB type `shop_platform`) — there is no `ShopSource` enum and no `ALTER TYPE … ADD VALUE` migration for it (corrected USER-ACCESS-2). No enum value has ever been added post-hoc; `ShopPlatform` shipped complete in the initial schema.
+- Order status changes MUST go through the audit logging path (`order_status_history`) — never update status directly in DB.
 - Frontend `OrderDetailPanel` was refactored into 8 sub-components in `detail/` — don't re-merge them.
 - Nova Poshta refs auto-clear on manual address input — this is intentional, not a bug.
 - Backend logs rotate at 25MB cap in `backend/logs/server.log`.
@@ -142,6 +145,7 @@ as a Docker Compose stack. **Canonical reference: `SERVER_DEPLOY_PLAN.md` (§1�
 - Historical correction: SEC-05's original guard (`get_shop_for_user`) reached only **4 catalog endpoints** and derived designer access from order assignments — it did NOT gate "all shop-level endpoints". USER-ACCESS-1 replaced derivation with explicit grants and swept enforcement across orders (list/detail/mutations/CSV export), dashboard aggregates, finance (closed the any-manager-reads-any-P&L hole), shops (list/detail), products (incl. by-id), partner_payouts, imports, overhead receipts, attachments, and shipping TTNs.
 - Deliberately unscoped (global, no `shop_id`): materials + packaging catalogs, dashboard low-stock packaging + unallocated (NULL-shop) overhead, and the NP city/warehouse lookup utilities. New shops auto-grant to effectively-unrestricted managers only; new managers default to all shops at creation. See `implementation_plan.md` USER-ACCESS-1 and `tests/test_route_scope_completeness.py` (the classification that fails if a new `{shop_id}` route is left unclassified).
 - System user UUID `00000000-0000-0000-0000-000000000001` (`backend/constants.py:SYSTEM_USER_ID`) is referenced by webhook/scheduler audit rows. Never delete; never reuse. Installed by alembic migration `a1b2c3d4e5f6_add_persistent_system_user`.
+- Money visibility (USER-ACCESS-2): **capability flags** compose with shop scope. `view_finance` (P&L / dashboard revenue / partner payouts) and `view_costs` (itemised costs: per-order `FINANCIAL_FIELDS` + `computed_production_cost`, product `cost_price` + BOM cost, material/overhead unit costs, finance COGS cards) live in `user_capability` (no row = role default; `models.user.Capability` is a plain String, NOT a PG enum). Resolved by `access_service.get_capabilities` → a `CapabilitySet` value object (`has(cap)`, never a None sentinel); enforced by `assert_capability` / `require_capability` in `routers/dependencies.py`. OWNER holds every capability (resolver short-circuit; no rows). **Backfill preserved today's incoherence:** existing MANAGERs → `view_finance=true, view_costs=false`; new non-owner users default deny-by-default (both false). **Cost censoring is null-in-200 on mixed surfaces** (orders list+detail share `order_service.censor_order_financials`; product `cost_price`/BOM cost nulled) and **403 on cost-only endpoints** (`/products/{id}/bom/cost`, materials/overhead routers). `view_finance`-without-`view_costs` sees revenue + net_profit but the itemised cost cards are stripped (dashboard + finance, OQ-3a: total cost stays inferable from net_profit — accepted). **Completeness is guarded by `tests/test_money_field_completeness.py`** — it fails if a new numeric response field or money route is left unclassified (this is how LEAK 1/2 would now be caught). Grant/revoke of both shop access and capabilities is recorded in the `access_audit` table (actor defaults to `SYSTEM_USER_ID` for automated writes).
 
 ## ID-Laser draft pipeline (S004-mcp-wrapper + S005-submodule-migrate)
 

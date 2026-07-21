@@ -3,11 +3,27 @@ OrderHub CRM — Shop Schemas
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from models.shop import ShopPlatform
+
+
+class ShopBackfillRequest(BaseModel):
+    """SHOPIFY-BACKFILL: bounded historical Shopify import for one shop."""
+
+    since: date
+    until: date | None = None
+    # dry_run defaults TRUE — the first approval gate. A real import must be an
+    # explicit dry_run=false (task rule 4 + workflow's second approval gate).
+    dry_run: bool = True
+
+    @model_validator(mode="after")
+    def _check_range(self) -> "ShopBackfillRequest":
+        if self.until is not None and self.until < self.since:
+            raise ValueError("until must be on or after since")
+        return self
 
 
 class ShopBase(BaseModel):

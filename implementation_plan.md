@@ -29,7 +29,7 @@
 - Sprint ADDR-VAL-1 status: `DONE` (Address validation backend + encrypted Google API-key Settings UI — Google; merged `bdb5866`, deployed to prod, migration `b8e2f5a91c34`; prod key set + verified live)
 - Sprint ADDR-VAL-2 status: `DONE` (Address-validation UI — order-detail Check button + status badge + diff/Apply; merged `2f94b28`, deployed to prod; closure commit `9f00154`)
 - Sprint USERS-LIST-500 status: `DONE` (Fix 500 on `GET /api/users` — the system user's reserved-TLD email broke `EmailStr` validation; merged `e44f6e2`, deployed to prod)
-- Sprint USER-ACCESS-1 status: `DONE` (Per-user shop access — explicit grants, enforcement sweep, closes the finance + shop-list holes; branch `feat/user-access-1`, migration `f9a1c3e5b7d2` — **awaiting merge/deploy**)
+- Sprint USER-ACCESS-1 status: `DONE` (Per-user shop access — explicit grants, enforcement sweep, closes the finance + shop-list holes; merged `8ed403d`, deployed to prod, migration `f9a1c3e5b7d2`)
 - Sprint 11 status: `NOT STARTED` (Production & Deployment)
 - **Active Roadmap (2026-05-08):** Bug-Hunt & Imports — see Unified Backlog → "Active Roadmap" section.
 
@@ -4062,7 +4062,9 @@ were unrestricted everywhere, and the single existing guard `get_shop_for_user`
 4. **Revocation actually revokes** — `PUT …/shop-access` returns **409** with
    `{shop_id, assigned_order_count}` when a removed grant still has assigned orders, unless
    `unassign_orders: true`, which nulls the assignments through the audited path and drops the
-   grant atomically.
+   grant atomically. *(Correction, 2026-07-18: the audit table is `order_status_history`, not
+   `order_audit_history` — the latter does not exist; CLAUDE.md's naming was wrong and is fixed in
+   USER-ACCESS-2.)*
 5. **Attachments DELETE** target rule stated exactly: OWNER, or (`uploaded_by_id == me` AND
    `assert_order_access` passes).
 6. **Grant/revoke emit a structured audit log line**; a persistent audit table is explicitly
@@ -4115,12 +4117,154 @@ has exactly **2 users, both OWNER**, so the backfill inserts **zero rows** and p
 unchanged on deploy — the feature stays dormant until the first MANAGER/DESIGNER exists. The
 correctness burden therefore sits on dev seeds and the automated tests, **not** on prod smoke.
 
+**Deployed to prod (merge `8ed403d`, 2026-07-18):** merged `--no-ff` (conflict-free — the branch
+was built directly on main); docs commit `ec0d9c7` went up with it; server fast-forwarded
+`e44f6e2`→`8ed403d`; backend + frontend rebuilt and recreated. Startup log confirms
+`Running upgrade b8e2f5a91c34 -> f9a1c3e5b7d2`. **Verified:** containers Up (postgres healthy);
+`alembic current` = `f9a1c3e5b7d2`; **`user_shop_access` created and empty (0 rows)** — the
+expected outcome, since the backfill only inserts for MANAGER/DESIGNER and prod has neither;
+`/api/health` 200; SPA + nginx→backend proxy 200 over the exact cloudflared route
+(`http://frontend:80`); public URL 302 to the Cloudflare Access gate. A `localhost` refusal seen
+inside the frontend container was a busybox-wget loopback quirk, not a fault.
+**Runbook correction:** prod has **3** users (not 2 as the runbook assumed) — all OWNER, so the
+zero-row expectation still holds and no manager/designer visibility was affected.
+
 **Closes:** GAP A + GAP B, the SEC-05 overstatement in CLAUDE.md, and the designer onboarding trap.
 Next: **USER-ACCESS-2** — capability flags (`view_finance`, `view_costs`, `manage_shop_settings`,
 `manage_users`, `manage_products`, `import_export_data`, `run_address_validation`,
 `delete_orders`), the ACCOUNTANT preset, a persistent grant audit table, and the
 `FINANCIAL_FIELDS`-vs-`/finance` cost-hiding inconsistency (a manager is denied
 `production_cost` on a single order yet can read aggregate COGS + net profit for the same shop).
+
+---
+
+### USER-ACCESS-2 — Capability flags for money visibility (closed 2026-07-21)
+
+**Commit:** `0496eba` on `feat/user-access-2` (32 files, migration `a2b3c4d5e6f7`).
+**Not merged, not deployed** as of closure.
+
+> **Note on this entry's depth.** `task.md` is no longer tracked in git (see AI_ONBOARDING §5),
+> so this closure entry is the *only* durable record of the sprint's reasoning. It therefore
+> records rejected alternatives and accepted trade-offs, not just outcomes.
+
+**Problem.** Money visibility was decided by a bare role check, and incoherently: a MANAGER was
+denied `production_cost` on a single order yet could read the whole shop's COGS and net profit.
+Two live cost leaks were found during design review.
+
+**What shipped.** Per-user **capability flags** composing with the shop scope from USER-ACCESS-1:
+`view_finance` (P&L, dashboard revenue, partner payouts) and `view_costs` (itemised costs —
+per-order `FINANCIAL_FIELDS` + `computed_production_cost`, product `cost_price` + BOM cost,
+material/overhead unit costs, finance COGS cards). Stored in `user_capability`; resolved by
+`access_service.get_capabilities` → a `CapabilitySet` value object; enforced by
+`assert_capability` / `require_capability` in `routers/dependencies.py`. OWNER short-circuits to
+all capabilities with no rows. Grant/revoke is recorded in `access_audit`.
+
+**Design decisions worth preserving:**
+
+- **`Capability` is a plain `String`, not a PG enum.** Adding a capability must not require an
+  `ALTER TYPE` migration — the set is expected to grow (`manage_users`, `manage_products`, … were
+  scoped out of this sprint precisely so the mechanism could land first).
+- **`CapabilitySet` is a value object with `has(cap)`, never a None sentinel** — mirroring
+  `ShopScope` from USER-ACCESS-1. A None sentinel is how authorization checks silently pass.
+- **The backfill deliberately preserves today's incoherence** rather than fixing it: existing
+  MANAGERs get `view_finance=true, view_costs=false`. Rejected alternative was making the backfill
+  coherent, which would have silently changed what current managers can see at deploy time. New
+  non-owner users default deny-by-default (both false).
+- **Two enforcement styles, deliberately.** Mixed surfaces censor **null-in-200**
+  (`order_service.censor_order_financials`; product `cost_price`/BOM nulled); cost-only endpoints
+  return **403** (`/products/{id}/bom/cost`, materials/overhead routers). Rejected: 403 everywhere,
+  which would have broken the orders list for cost-blind users.
+
+**Accepted trade-off (OQ-3a):** a user with `view_finance` but not `view_costs` sees revenue and
+net_profit, from which total cost is trivially inferable. Accepted knowingly — hiding it would
+require removing net_profit, which is the number `view_finance` exists to show.
+
+**Guard against regression:** `tests/test_money_field_completeness.py` fails if a new numeric
+response field or money route is left unclassified. This is the mechanism that would now catch
+LEAK 1 / LEAK 2 — the two leaks this sprint closed were both found by human review, not by tests,
+which is why the guard was written.
+
+**Process finding (not a code defect).** This sprint's code sat **uncommitted in the working tree**
+while `CLAUDE.md` already described it in the past tense. A planning agent read CLAUDE.md, took the
+feature to be merged and deployed, and wrote that into `task.md` for the next sprint — which then
+collided with the uncommitted work at commit time. See the AI_ONBOARDING §5 rule added as a result.
+
+---
+
+### WB-1 — WesternBid parcel mirror + poller (closed 2026-07-21)
+
+**Commit:** `012f380` on `feat/wb-1`, branched from `feat/user-access-2` (22 files, migration
+`d4e5f6a7b8c9`). **Not merged, not deployed. Not yet exercised against the live API.**
+
+**Context.** WesternBid is the international shipping provider. A manager creates each shipment in
+the WB web cabinet and copies the label URL into OrderHub by hand. Target end state: OrderHub polls
+WB, matches parcels to orders, downloads label PDFs, offers a print button. Phase 1 of 4.
+
+**Why read-only, and why it stays that way.** `POST /Shipping/CreateShipment/*` spends real money
+and WB documents **no idempotency key** — a network timeout is indistinguishable from a failure, so
+a blind retry can double-create a paid shipment. Shipment creation is therefore excluded from WB-1,
+WB-2 and WB-3 by design, not by scheduling.
+
+**Why polling.** WB exposes exactly two webhook subscription types, `FCShipmentCreateByRequest` and
+`FCShipmentCreate` — both Fulfillment Center only, which we do not use. There is no
+shipment-created event and no tracking-event endpoint. Polling is not a shortcut; it is the only
+mechanism WB offers.
+
+**What shipped.**
+
+- `wb_parcel` mirror table, PK `shipment_id` (WB's `Id`). Nullable `order_id` and
+  `label_attachment_id` FKs (`ON DELETE SET NULL`) added now, unused, so WB-2/WB-3 need no second
+  migration. `ix_wb_parcel_last_seen_at`.
+- `services/westernbid.py` — mirrors `nova_poshta.py`'s `tenacity @retry` rather than introducing a
+  third retry implementation; `HasNext` pagination; UTC normalization; redacted auth headers;
+  `load_westernbid_credentials`.
+- Second job in `scheduler.py` (`max_instances=1`, `coalesce=True`), 3-day overlapping window,
+  upsert on `shipment_id`, DISTINCT-based new-status detection, log-once when credentials absent.
+- OWNER-only credential endpoints (two encrypted `app_settings` rows); OWNER/MANAGER read-only
+  parcel list; Settings card + `/westernbid` page + sidebar nav.
+
+**Decisions worth preserving:**
+
+- **Credentials in `app_settings`, not on `Shop`.** The WB account is one for all shops, unlike the
+  per-shop Shopify and Nova Poshta keys.
+- **`Status` and `PaymentStatus` stored as raw text, never mapped.** WB documents neither value set;
+  `"Paid"` and `"Parcel created"` are examples in their docs, not a specification. Collecting the
+  real values over ~2 weeks of polling is an explicit deliverable of this sprint, and WB-2 must not
+  build logic on them before then.
+- **The 3-day window overlaps deliberately** so a transient failure self-heals on the next run
+  instead of leaving a permanent hole.
+- **Label PDFs will reuse `Attachment`** (new `attachment_type` value, `ALTER TYPE` migration) in
+  WB-3 — no separate `wb_label` table. An earlier draft proposed one; it was dropped once the
+  existing attachment storage, serving and access control were confirmed to cover the need.
+
+**Verification:** backend 427 pass (+12 in `tests/test_westernbid.py`); both completeness guards
+pass (the WB route has no `{shop_id}`, correctly not enumerated; the WB response exposes no numeric
+money field). Migration round-trip clean. Frontend: touched files clean under tsc and eslint (the
+25 pre-existing `TYPECHECK-1` errors remain).
+
+**Not verified, and cannot be yet:** no request has ever been made to the live WB API. Access is
+ticket-gated — tickets **#1047 (sandbox)** and **#1048 (production)** filed 2026-07-21 via the WB
+cabinet under Техпідтримка → «Підключення до API». The documentation's claim that the key is
+"generated in your user profile" is wrong; access is granted per ticket. Until a key arrives, the
+poller no-ops by design.
+
+**Blocking unknown for WB-2/WB-3.** `GetDocument` takes a `ShipmentId`; `parcels/sent` returns a
+field named `Id`. That they are the same identifier is a strong inference — `parcels/sent` accepts a
+`request.shipmentId` filter and `Id` is its only uuid — but it is **not confirmed**. If it is false,
+label fetching without `CreateShipment` is impossible and the whole approach needs rework. This is
+the first thing to test when the sandbox key arrives.
+
+**Also unconfirmed:** the sample label Sergii provided (102×102 mm) is a *domestic Nova Poshta
+waybill* to WB's Lviv consolidation warehouse — first mile, not the international label. It is not
+established that this PDF comes from `GetDocument` at all rather than WB's cabinet generating it via
+their own NP integration. Consequently the document-type routing rule is a hypothesis: `NpuLabel`
+for `Consolidation*` / `NovaPost` / `NovaPoshtaGlobal`, `Label` for direct UPS/FedEx/DPD. Do not
+encode it before testing both types against real shipments.
+
+**Next:** WB-2 (order↔parcel matching) is blocked on real parcel data, which is blocked on the API
+key. `parcels/sent` returns no street, city, email or order reference, so matching must be built on
+`RecipientName` + `RecipientPostalCode` + `RecipientCountryCode` with a manual-review queue; the
+`RecipientPhone` filter (accepted as input though never returned) is the tie-breaker.
 
 ---
 
@@ -4324,13 +4468,35 @@ Goal: Show order history and sales stats per product variant on the detail page.
 
 ### B. Production & Deployment
 
-**Sprint 11 — Production & Deployment** (Status: `NOT STARTED`)
+**Sprint 11 — Production & Deployment** (Status: `PARTIALLY DONE`)
 
 | ID | Task | Scope | Status |
 |---|---|---|---|
-| S11-1 | SSL & Domain Configuration | nginx | TODO |
-| S11-2 | Database Backup Jobs | cron | TODO |
+| S11-1 | SSL & Domain Configuration | Cloudflare Tunnel | **DONE** — `https://orderhub.orderapp.uk`, zero inbound ports. See `CLAUDE.md` § Server Deployment + `SERVER_DEPLOY_PLAN.md` |
+| S11-2 | Database Backup Jobs | systemd timer + age + R2 | **DONE 2026-07-13** — daily 03:30 UTC, age-encrypted to Cloudflare R2, restore tested. Canonical reference: **`BACKUP_PLAN.md`**. Not cron — systemd |
 | S11-3 | Performance Monitoring | prometheus/grafana | TODO |
+| S11-2-followup-1 | **Backup failure alerting** | ops | TODO — see below |
+
+> **S11-2 correction (2026-07-21).** This row read `TODO` for eight days after the work shipped,
+> and `CLAUDE.md` listed DB backup jobs under "What's Pending" for the same period. The only
+> description of the working system lived in a `BACKUP_PLAN.md` that sat **outside the repository**
+> and still said "ЗАПЛАНОВАНО, ще не впроваджено". A planning agent trusted the repo, told Sergii
+> the pre-deploy dump was the only copy, and was wrong. `BACKUP_PLAN.md` now lives in the repo and
+> describes the running configuration.
+>
+> **S11-2-followup-1 — the one real gap.** There is no alerting if the backup fails *or silently
+> stops*. Output goes to journald and a log file; the only configured notification is a Cloudflare
+> **billing** alert on storage approaching 8 GB — which fires on storage *growth*. If backups stop,
+> storage stops growing and that alert never fires, so the single existing signal is inversely
+> correlated with the failure it should catch. An error handler cannot help either: if the timer
+> never fires, there is no error to handle. The fix is a dead-man's-switch — the script pings an
+> external service on success, the service emails when the ping fails to arrive — which covers
+> script failure, timer removal and a powered-off server alike. Parked until the WesternBid work
+> is finished; see `BACKUP_PLAN.md` §5.
+>
+> Also open: the restore test (2026-07-13) ran against a near-empty DB with an empty uploads
+> volume, so it proved the *mechanism* but not data integrity, and the attachments leg has never
+> been exercised with real files. Worth re-running now that prod holds real orders.
 
 **Performance & Testing**
 

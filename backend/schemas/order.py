@@ -135,6 +135,7 @@ class OrderItemCreate(BaseModel):
     unit_price: float
     currency: str = "USD"
     variations: str | None = None
+    sku: str | None = None
     product_variant_id: uuid.UUID | None = None
 
 

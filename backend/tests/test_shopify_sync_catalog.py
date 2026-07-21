@@ -1,7 +1,7 @@
 """IMP-2 — Shopify sync auto-creates Products/Variants and ingests line items.
 
 Mirrors test_etsy_parser_catalog.py's mocking style: AsyncMock + MagicMock,
-patch services.shopify_sync.call_shopify_graphql with canned GraphQL payloads.
+patch services.shopify_sync._fetch_orders_page with canned GraphQL payloads.
 No real HTTP. Verifies the helper integration end-to-end through sync_shop_orders.
 """
 
@@ -139,12 +139,18 @@ def _line_item(*, title, quantity, price, sku, product_gid, variant_gid,
     }
 
 
-def _order_node(*, order_gid, name, line_items, customer_email="buyer@example.com"):
+def _order_node(*, order_gid, name, line_items, customer_email="buyer@example.com",
+                created_at="2026-05-01T10:00:00Z", fulfillment_status="UNFULFILLED",
+                financial_status="PAID", cancelled_at=None, closed_at=None):
     return {
         "node": {
             "id": order_gid,
             "name": name,
-            "createdAt": "2026-05-01T10:00:00Z",
+            "createdAt": created_at,
+            "closedAt": closed_at,
+            "cancelledAt": cancelled_at,
+            "displayFinancialStatus": financial_status,
+            "displayFulfillmentStatus": fulfillment_status,
             "totalPriceSet": {"shopMoney": {"amount": "100.00", "currencyCode": "USD"}},
             "note": None,
             "customer": {"firstName": "Test", "lastName": "Buyer", "email": customer_email},
@@ -158,8 +164,27 @@ def _order_node(*, order_gid, name, line_items, customer_email="buyer@example.co
     }
 
 
-def _graphql_payload(orders):
-    return {"orders": {"edges": orders}}
+def _graphql_payload(orders, *, has_next_page=False, end_cursor=None):
+    """Full-response shape returned by _fetch_orders_page: data + pageInfo (+ the
+    extensions.cost block is optional; sync only reads it for proactive backoff)."""
+    return {
+        "data": {
+            "orders": {
+                "pageInfo": {"hasNextPage": has_next_page, "endCursor": end_cursor},
+                "edges": orders,
+            }
+        },
+        "extensions": {
+            "cost": {
+                "requestedQueryCost": 10,
+                "throttleStatus": {
+                    "maximumAvailable": 1000.0,
+                    "currentlyAvailable": 990,
+                    "restoreRate": 50.0,
+                },
+            }
+        },
+    }
 
 
 # ---------- sync_shop_orders cases ----------
@@ -201,7 +226,7 @@ async def test_fresh_sync_creates_products_and_variants():
     fake_returned_order = MagicMock()
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock(return_value=fake_returned_order)) as mock_create:
         result = await sync_shop_orders(db, shop, user)
@@ -249,7 +274,7 @@ async def test_resync_creates_zero_catalog_rows():
     ])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         result = await sync_shop_orders(db, shop, user)
@@ -281,7 +306,7 @@ async def test_empty_sku_falls_back_to_shopify_pattern():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         await sync_shop_orders(db, shop, user)
@@ -313,7 +338,7 @@ async def test_blocked_sku_skips_variant_and_no_orphan_product():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         result = await sync_shop_orders(db, shop, user)
@@ -359,7 +384,7 @@ async def test_in_sync_dedup_same_product_two_orders():
     ])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         result = await sync_shop_orders(db, shop, user)
@@ -398,11 +423,11 @@ async def test_snapshot_via_real_create_order_flush_ordering():
     db.add = MagicMock(side_effect=lambda obj: call_order.append(("add", type(obj).__name__)))
     db.flush = AsyncMock(side_effect=lambda: call_order.append(("flush", None)))
 
-    async def fake_create(db_arg, payload_arg, user_arg):
+    async def fake_create(db_arg, payload_arg, user_arg, **kwargs):
         call_order.append(("create_order", payload_arg.external_id))
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock(side_effect=fake_create)):
         await sync_shop_orders(db, shop, user)
@@ -437,7 +462,7 @@ async def test_line_item_with_null_variant_creates_unlinked_order_item():
         order_gid="gid://shopify/Order/6000", name="#6000", line_items=[null_variant_li])])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         result = await sync_shop_orders(db, shop, user)
@@ -477,7 +502,7 @@ async def test_line_item_with_null_product_creates_unlinked_order_item():
         order_gid="gid://shopify/Order/6100", name="#6100", line_items=[li])])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         result = await sync_shop_orders(db, shop, user)
@@ -506,7 +531,7 @@ async def test_default_title_variant_stored_as_null_variant_name():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()):
         await sync_shop_orders(db, shop, user)
@@ -533,7 +558,7 @@ async def test_real_variant_title_preserved():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()):
         await sync_shop_orders(db, shop, user)
@@ -552,7 +577,7 @@ async def test_returns_import_result_shape():
     payload = _graphql_payload([])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc):
         result = await sync_shop_orders(db, shop, user)
 
@@ -592,7 +617,7 @@ async def test_per_order_error_isolation_with_bad_payload():
     payload = _graphql_payload([bad_order, good_order])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()):
         result = await sync_shop_orders(db, shop, user)
@@ -673,7 +698,7 @@ async def test_order_title_uses_first_line_item_for_single_item_order():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         await sync_shop_orders(db, shop, user)
@@ -708,7 +733,7 @@ async def test_order_title_uses_first_line_item_with_multiple_items():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         await sync_shop_orders(db, shop, user)
@@ -733,7 +758,7 @@ async def test_order_title_falls_back_to_node_name_when_no_line_items():
     )])
 
     with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
-         patch("services.shopify_sync.call_shopify_graphql", AsyncMock(return_value=payload)), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=payload)), \
          patch("services.shopify_sync.CatalogService", return_value=svc), \
          patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
         await sync_shop_orders(db, shop, user)
