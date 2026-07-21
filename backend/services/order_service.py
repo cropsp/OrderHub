@@ -20,10 +20,16 @@ from schemas.order import OrderCreate, OrderUpdate, OrderFilters, OrderItemCreat
 from services.customer_service import upsert_customer
 
 
-# Owner-only financial fields. Only OWNER may write these (see update_order), and
-# they are censored on the order response + redacted in audit-history comments for
-# every non-owner role (see routers/orders.get_order).
+# Owner-only financial fields. Only OWNER may WRITE these (see update_order).
 FINANCIAL_FIELDS = ("production_cost", "shipping_np_cost", "platform_fee")
+
+# Per-order cost fields hidden on READ from users without VIEW_COSTS
+# (USER-ACCESS-2). Superset of the write-gated FINANCIAL_FIELDS: it also carries
+# computed_production_cost (the MAT-4 BOM cost snapshot), a read-only cost
+# surface that previously leaked (LEAK 2). One list, used by BOTH the orders
+# list and detail via censor_order_financials, so the two paths cannot drift
+# (LEAK 1 existed because they did).
+ORDER_COST_FIELDS = FINANCIAL_FIELDS + ("computed_production_cost",)
 _FINANCIAL_COMMENT_RE = re.compile(r"\b(" + "|".join(FINANCIAL_FIELDS) + r"): [^,]+")
 
 
@@ -37,6 +43,25 @@ def redact_financial_comment(comment: str | None) -> str | None:
     if not comment:
         return comment
     return _FINANCIAL_COMMENT_RE.sub(lambda m: f"{m.group(1)}: [redacted]", comment)
+
+
+def censor_order_financials(data: dict, *, can_view_costs: bool) -> dict:
+    """Null per-order cost fields + redact costs leaking into audit comments,
+    unless the caller may view costs (USER-ACCESS-2 VIEW_COSTS).
+
+    Mutates and returns `data` (a serialized order dict). Shared by the orders
+    LIST and DETAIL endpoints so their censoring can never drift again — LEAK 1
+    (list uncensored) and LEAK 2 (computed_production_cost missed) were exactly
+    that drift. The status_history loop is a no-op for list rows (no such key).
+    """
+    if can_view_costs:
+        return data
+    for f in ORDER_COST_FIELDS:
+        if f in data:
+            data[f] = None
+    for entry in data.get("status_history") or []:
+        entry["comment"] = redact_financial_comment(entry.get("comment"))
+    return data
 
 
 # ─── Read ──────────────────────────────────────────────────

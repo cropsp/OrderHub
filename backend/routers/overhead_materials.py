@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models.material import OverheadMaterial, OverheadMaterialReceipt
 from models.shop import Shop
-from models.user import UserRole
-from routers.dependencies import require_role
+from models.user import Capability, UserRole
+from routers.dependencies import require_capability, require_role
 from services.access_service import get_shop_scope
 from schemas.material import (
     OverheadMaterialCreate,
@@ -31,7 +31,14 @@ from schemas.material import (
 )
 
 
-router = APIRouter(prefix="/api/overhead-materials", tags=["Overhead Materials"])
+# USER-ACCESS-2: overhead materials + receipts expose unit/total costs — an
+# itemised cost surface, gated by view_costs at the router level (on top of the
+# per-endpoint OWNER/MANAGER role gate).
+router = APIRouter(
+    prefix="/api/overhead-materials",
+    tags=["Overhead Materials"],
+    dependencies=[Depends(require_capability(Capability.VIEW_COSTS))],
+)
 
 
 @router.get("", response_model=List[OverheadMaterialRead])

@@ -24,8 +24,8 @@ from models.material import (
     MaterialReceipt,
 )
 from models.order import Order
-from models.user import UserRole
-from routers.dependencies import require_role
+from models.user import Capability, UserRole
+from routers.dependencies import require_capability, require_role
 from schemas.material import (
     MaterialCreate,
     MaterialMovementRead,
@@ -39,7 +39,14 @@ from schemas.material import (
 from services import material_stock_service
 
 
-router = APIRouter(prefix="/api/materials", tags=["Materials"])
+# USER-ACCESS-2: the materials catalog + receipts expose weighted-average unit
+# costs — an itemised cost surface, gated by view_costs at the router level (on
+# top of the per-endpoint OWNER/MANAGER role gate). Global catalog, no shop guard.
+router = APIRouter(
+    prefix="/api/materials",
+    tags=["Materials"],
+    dependencies=[Depends(require_capability(Capability.VIEW_COSTS))],
+)
 
 
 @router.get("", response_model=List[MaterialRead])

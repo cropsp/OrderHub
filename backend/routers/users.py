@@ -14,10 +14,11 @@ from constants import SYSTEM_USER_ID
 from database import get_db
 from models.order import Order
 from models.shop import Shop
-from models.user import User, UserRole
+from models.user import Capability, User, UserRole
 from schemas.user import (
     UserCreate, UserUpdate, UserResponse, UserWithPasswordResponse,
     UserPreferencesUpdate, ShopAccessResponse, ShopAccessUpdate,
+    MeResponse, CapabilitiesResponse, CapabilitiesUpdate,
 )
 from routers.dependencies import get_current_user, require_role
 from services import access_service
@@ -64,10 +65,16 @@ async def list_users(
     return result.scalars().all()
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)):
-    """Get current user profile."""
-    return current_user
+@router.get("/me", response_model=MeResponse)
+async def get_me(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current user profile plus resolved capabilities (USER-ACCESS-2)."""
+    caps = await access_service.get_capabilities(db, current_user)
+    data = UserResponse.model_validate(current_user).model_dump()
+    cap_names = [c.value for c in Capability if caps.has(c)]
+    return MeResponse(**data, capabilities=cap_names)
 
 
 @router.patch("/me/preferences", response_model=UserResponse)
@@ -265,3 +272,69 @@ async def set_user_shop_access(
 
     granted = await access_service.get_granted_shop_ids(db, user_id)
     return ShopAccessResponse(shop_ids=list(granted))
+
+
+# ─── Capabilities (USER-ACCESS-2) ──────────────────────────
+
+def _parse_capabilities(raw: dict[str, bool]) -> dict[Capability, bool]:
+    """Validate incoming capability names against the Capability enum (400 on
+    an unknown name — the domain is closed)."""
+    parsed: dict[Capability, bool] = {}
+    for name, value in raw.items():
+        try:
+            parsed[Capability(name)] = bool(value)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown capability: {name}",
+            )
+    return parsed
+
+
+@router.get("/{user_id}/capabilities", response_model=CapabilitiesResponse)
+async def get_user_capabilities(
+    user_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """A user's effective capabilities (owner only).
+
+    Reports every known capability → resolved boolean so the editor renders
+    reality. OWNER targets are unrestricted — reported all-true (shown disabled).
+    """
+    user = await _load_manageable_user(db, user_id)
+    caps = await access_service.get_capabilities(db, user)
+    return CapabilitiesResponse(
+        capabilities={c.value: caps.has(c) for c in Capability}
+    )
+
+
+@router.put("/{user_id}/capabilities", response_model=CapabilitiesResponse)
+async def set_user_capabilities(
+    user_id: uuid.UUID,
+    body: CapabilitiesUpdate,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace a user's capability overrides (owner only).
+
+    OWNER targets are a no-op (unrestricted) — reported all-true. For everyone
+    else, each supplied capability is written as an explicit override row and
+    audited. Capabilities not supplied are left untouched.
+    """
+    user = await _load_manageable_user(db, user_id)
+    if user.role == UserRole.OWNER:
+        return CapabilitiesResponse(
+            capabilities={c.value: True for c in Capability}
+        )
+
+    values = _parse_capabilities(body.capabilities)
+    await access_service.set_capabilities(
+        db, user_id, values, actor_id=current_user.id
+    )
+    await db.flush()
+
+    caps = await access_service.get_capabilities(db, user)
+    return CapabilitiesResponse(
+        capabilities={c.value: caps.has(c) for c in Capability}
+    )

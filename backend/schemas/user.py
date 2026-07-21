@@ -61,3 +61,29 @@ class UserResponse(UserBase):
 class UserWithPasswordResponse(UserResponse):
     """Returned only on user creation — shows the temporary password once."""
     temporary_password: str
+
+
+class MeResponse(UserResponse):
+    """Current-user profile plus resolved capability names (USER-ACCESS-2).
+
+    `capabilities` is the effective set (role default + explicit overrides;
+    every capability for an OWNER) so the frontend can gate money widgets
+    without re-deriving the rules.
+    """
+    capabilities: list[str] = []
+
+
+class CapabilitiesResponse(BaseModel):
+    """A user's explicit capability grants for the owner-facing editor.
+
+    `capabilities` maps every known capability name → effective boolean (the
+    resolved value, so the editor renders reality). OWNER targets report all
+    true and are shown disabled, exactly like Shop Access.
+    """
+    capabilities: dict[str, bool]
+
+
+class CapabilitiesUpdate(BaseModel):
+    """Replace a user's capability overrides (owner only). Maps capability name
+    → desired boolean; unknown names are rejected by the router."""
+    capabilities: dict[str, bool]

@@ -15,7 +15,19 @@ export interface User {
   preferences: Record<string, any>;
   created_at: string;
   updated_at: string;
+  // USER-ACCESS-2: effective money-visibility capabilities, populated on
+  // /users/me only (role default + explicit overrides; every capability for an
+  // owner). Absent on the users-list payload.
+  capabilities?: string[];
 }
+
+// USER-ACCESS-2 capability names (mirror backend models.user.Capability).
+export const Capability = {
+  VIEW_FINANCE: 'view_finance',
+  VIEW_COSTS: 'view_costs',
+} as const;
+
+export type CapabilityType = typeof Capability[keyof typeof Capability];
 
 export interface TokenResponse {
   access_token: string;

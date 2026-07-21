@@ -19,6 +19,8 @@ import RevenueChart from '@/components/dashboard/RevenueChart';
 import ShopDistributionChart from '@/components/dashboard/ShopChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useShops } from '@/hooks/useShops';
+import { useCapability } from '@/hooks/useCapability';
+import { Capability } from '@/types/user';
 import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -26,6 +28,7 @@ import { getShopTheme } from '@/utils/shopTheme';
 import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
+  const canViewFinance = useCapability(Capability.VIEW_FINANCE);
   const [selectedShopId, setSelectedShopId] = useState<string | undefined>(undefined);
   const [range, setRange] = useState<PeriodRange>(() => {
     const preset = loadLastPreset(DASHBOARD_PRESET_STORAGE_KEY);
@@ -146,7 +149,7 @@ export default function DashboardPage() {
         ) : (
           <>
             {/* 1. Stat Cards */}
-            <StatCards data={data} />
+            <StatCards data={data} canViewFinance={canViewFinance} />
 
             {/* PKG-2: low-stock packaging widget — hidden when count is 0. */}
             {data.low_stock_packaging_count > 0 && (

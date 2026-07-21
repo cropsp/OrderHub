@@ -55,6 +55,30 @@ export function useSetUserShopAccess() {
   });
 }
 
+export function useUserCapabilities(userId: string | null) {
+  return useQuery({
+    queryKey: ['users', userId, 'capabilities'],
+    queryFn: () => usersApi.getCapabilities(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
+export function useSetUserCapabilities() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      capabilities,
+    }: {
+      id: string;
+      capabilities: Record<string, boolean>;
+    }) => usersApi.setCapabilities(id, capabilities),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['users', variables.id, 'capabilities'] });
+    },
+  });
+}
+
 export function useUpdatePreferences() {
   const queryClient = useQueryClient();
   return useMutation({

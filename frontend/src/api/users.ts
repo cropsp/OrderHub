@@ -5,6 +5,11 @@ export interface ShopAccess {
   shop_ids: string[];
 }
 
+export interface Capabilities {
+  // capability name → effective boolean
+  capabilities: Record<string, boolean>;
+}
+
 export const usersApi = {
   getMe: async (): Promise<User> => {
     const { data } = await client.get<User>('/users/me');
@@ -21,6 +26,21 @@ export const usersApi = {
     payload: { shop_ids: string[]; unassign_orders?: boolean },
   ): Promise<ShopAccess> => {
     const { data } = await client.put<ShopAccess>(`/users/${id}/shop-access`, payload);
+    return data;
+  },
+
+  getCapabilities: async (id: string): Promise<Capabilities> => {
+    const { data } = await client.get<Capabilities>(`/users/${id}/capabilities`);
+    return data;
+  },
+
+  setCapabilities: async (
+    id: string,
+    capabilities: Record<string, boolean>,
+  ): Promise<Capabilities> => {
+    const { data } = await client.put<Capabilities>(`/users/${id}/capabilities`, {
+      capabilities,
+    });
     return data;
   },
   

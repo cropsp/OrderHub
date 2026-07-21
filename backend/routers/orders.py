@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.order import AddressValidationStatus, Order, OrderItem, OrderStatus
-from models.user import User, UserRole
+from models.user import Capability, User, UserRole
 from schemas.address_validation import AddressInput, AddressVerdict
 from schemas.order import (
     OrderFilters, OrderListResponse, OrderResponse,
@@ -25,12 +25,12 @@ from schemas.parcel import ParcelEstimate
 from routers.dependencies import (
     get_current_user, require_role, assert_order_access, assert_shop_access,
 )
-from services.access_service import get_shop_scope
+from services.access_service import get_shop_scope, get_capabilities
 from services.order_service import (
     get_orders_filtered, get_order_detail,
     create_order, update_order, change_order_status,
     add_order_item, update_order_item, delete_order_item,
-    redact_financial_comment
+    censor_order_financials,
 )
 from services.address_validation import validate_address
 from services.parcel_calculator import calculate_parcel_estimate
@@ -66,13 +66,28 @@ async def list_orders(
         filters.assigned_designer_id = current_user.id
     elif current_user.role != UserRole.OWNER:
         scope = await get_shop_scope(db, current_user)
+        # USER-ACCESS-2 (403-consistency): an explicitly-supplied non-granted
+        # shop_id is a 403, not a silent 200-empty — matches /finance, dashboard
+        # and products.
+        if shop_id is not None and not scope.can_access(shop_id):
+            # `status` here is the query param, not fastapi.status — use the literal.
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have access to this shop",
+            )
         if not scope.is_unrestricted:
             filters.shop_ids = list(scope.shop_ids)
+
+    # USER-ACCESS-2: per-order cost fields are hidden from users without
+    # VIEW_COSTS on the LIST too — the detail endpoint hid exactly what the list
+    # used to hand over raw (LEAK 1).
+    caps = await get_capabilities(db, current_user)
+    can_view_costs = caps.has(Capability.VIEW_COSTS)
 
     skip = (page - 1) * limit
     orders, total = await get_orders_filtered(db, skip, limit, filters)
     pages = (total + limit - 1) // limit
-    
+
     # Map to schema manually to include relationships without lazy-loading issues
     items = []
     for o in orders:
@@ -80,6 +95,7 @@ async def list_orders(
         data["shop_name"] = o.shop.name if o.shop else None
         data["platform"] = o.shop.platform.value if o.shop else None
         data["customer_name"] = o.customer.full_name if o.customer else None
+        censor_order_financials(data, can_view_costs=can_view_costs)
         items.append(OrderListResponse(**data))
         
     return PaginatedResponse[OrderListResponse](
@@ -108,16 +124,12 @@ async def get_order(
     data["shop_name"] = order.shop.name if order.shop else None
     data["platform"] = order.shop.platform.value if order.shop else None
     data["customer_name"] = order.customer.full_name if order.customer else None
-    
-    # Owner-only financial data: censor the body fields AND redact the values that
-    # leak into audit-history comments for every non-owner role (managers + assigned
-    # designers). Only OWNER writes these fields, so only OWNER sees the raw values.
-    if current_user.role != UserRole.OWNER:
-        data["production_cost"] = None
-        data["shipping_np_cost"] = None
-        data["platform_fee"] = None
-        for entry in data.get("status_history", []):
-            entry["comment"] = redact_financial_comment(entry.get("comment"))
+
+    # USER-ACCESS-2: cost fields (incl. computed_production_cost — LEAK 2) are
+    # nulled and audit-comment costs redacted unless the caller holds VIEW_COSTS.
+    # Same shared helper as the list endpoint, so the two cannot drift (LEAK 1).
+    caps = await get_capabilities(db, current_user)
+    censor_order_financials(data, can_view_costs=caps.has(Capability.VIEW_COSTS))
 
     return OrderResponse(**data)
 
@@ -424,6 +436,14 @@ async def export_orders_csv(
     # USER-ACCESS-1: a manager exports only orders from shops they can access.
     if current_user.role != UserRole.OWNER:
         scope = await get_shop_scope(db, current_user)
+        # USER-ACCESS-2 (403-consistency): explicit non-granted shop_id → 403,
+        # not a silent 200-empty export.
+        if shop_id is not None and not scope.can_access(shop_id):
+            # `status` here is the query param, not fastapi.status — use the literal.
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have access to this shop",
+            )
         if not scope.is_unrestricted:
             filters.shop_ids = list(scope.shop_ids)
     orders, _ = await get_orders_filtered(db, 0, 10000, filters)
