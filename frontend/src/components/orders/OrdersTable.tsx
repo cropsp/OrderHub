@@ -124,7 +124,7 @@ export default function OrdersTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-1">
-                    <span className="font-mono text-xs text-zinc-400">#{order.external_id}</span>
+                    <span className="font-mono text-xs text-zinc-400">{order.order_number ?? `#${order.external_id}`}</span>
                     <div className={cn("inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider w-fit", shopTheme.bg, shopTheme.text)}>
                       {order.shop_name}
                     </div>
