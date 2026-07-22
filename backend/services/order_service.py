@@ -64,6 +64,34 @@ def censor_order_financials(data: dict, *, can_view_costs: bool) -> dict:
     return data
 
 
+def order_item_image_ref(item: OrderItem) -> tuple[uuid.UUID | None, str | None]:
+    """Resolve an order item's linked-product image as (product_id, image_url).
+
+    Mirrors the products serializer convention (routers/products.py `_project_product`):
+    image_url is `/api/products/{id}/image` when the linked product has an image,
+    else None. Custom lines (no variant) and products without an image → (None, None).
+
+    Requires `item.variant.product` to be eager-loaded (get_order_detail does so).
+    """
+    variant = item.variant
+    product = variant.product if variant else None
+    if product and product.image_path:
+        return product.id, f"/api/products/{product.id}/image"
+    return None, None
+
+
+def attach_item_images(data: dict, order: Order) -> dict:
+    """Populate each serialized order item's `product_id` + `image_url` from the
+    eager-loaded ORM items (index-aligned with `data['items']`). Mutates + returns
+    `data`. Images are not cost-bearing, so this is independent of cost censoring.
+    """
+    for item_data, item_orm in zip(data.get("items") or [], order.items):
+        product_id, image_url = order_item_image_ref(item_orm)
+        item_data["product_id"] = product_id
+        item_data["image_url"] = image_url
+    return data
+
+
 # ─── Read ──────────────────────────────────────────────────
 
 async def get_orders_filtered(
@@ -126,7 +154,11 @@ async def get_order_detail(db: AsyncSession, order_id: uuid.UUID) -> Order | Non
     query = select(Order).where(Order.id == order_id).options(
         selectinload(Order.customer),
         selectinload(Order.shop),
-        selectinload(Order.items),
+        # ORDER-CARD-1 Part 2: eager-load item → variant → product so the response
+        # can carry each item's product image_url without an N+1 (2 extra queries).
+        selectinload(Order.items)
+        .selectinload(OrderItem.variant)
+        .selectinload(ProductVariant.product),
         selectinload(Order.status_history).selectinload(OrderStatusHistory.changed_by),
         selectinload(Order.attachments)
     )

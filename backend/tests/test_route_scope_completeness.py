@@ -36,6 +36,7 @@ CLASSIFIED: dict[str, str] = {
     "POST /api/shops/{shop_id}/sync": "guarded",
     "POST /api/shops/{shop_id}/backfill": "guarded",
     "POST /api/shops/{shop_id}/backfill-order-numbers": "guarded",
+    "POST /api/shops/{shop_id}/backfill-product-images": "guarded",
     "GET /api/shops/{shop_id}/finance": "guarded",
     "GET /api/shops/{shop_id}/products": "guarded",
     "POST /api/shops/{shop_id}/products": "guarded",

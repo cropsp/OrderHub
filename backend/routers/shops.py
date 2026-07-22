@@ -2,6 +2,7 @@
 OrderHub CRM — Shops Router
 """
 
+import asyncio
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
@@ -12,6 +13,7 @@ from database import get_db
 from logger import get_logger
 from models.shop import Shop
 from models.order import Order
+from models.product import Product
 from models.user import User, UserRole
 from schemas.shop import (
     ShopBackfillRequest,
@@ -27,6 +29,7 @@ from services.access_service import (
 )
 from services.partner_payout_service import find_settlements_overlapping_period
 from services.shopify_sync import sync_shop_orders, backfill_order_numbers
+from services.product_image_service import fetch_and_store_shopify_image
 from services.encryption_service import encrypt_value, decrypt_value
 from services.phone_normalization import normalize_ua_sender_phone
 
@@ -345,3 +348,69 @@ async def backfill_shop_order_numbers(
         )
 
     return {"status": "success", **summary}
+
+
+@router.post("/{shop_id}/backfill-product-images")
+async def backfill_shop_product_images(
+    shop_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pull Shopify featured images for this shop's products that lack one
+    (ORDER-CARD-1 Part 2).
+
+    Reuses the PC-F-1 single-product pull (product_image_service) for every
+    eligible product — Shopify `external_ref` present AND `image_path` still NULL.
+    Idempotent (already-imaged products are excluded by the filter), and each
+    product commits independently so a mid-batch failure keeps prior successes.
+    A listing with no featured image is counted as `no_image`, never fatal.
+    """
+    # Same access rule as manual /sync + /backfill: OWNER/MANAGER with access.
+    await assert_shop_access(db, shop_id, current_user)
+
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))  # noqa: E712
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+
+    result = await db.execute(
+        select(Product).where(
+            Product.shop_id == shop_id,
+            Product.external_ref.is_not(None),
+            Product.image_path.is_(None),
+        )
+    )
+    products = list(result.scalars().all())
+
+    updated = 0
+    no_image = 0
+    errors: list[dict] = []
+    for product in products:
+        try:
+            await fetch_and_store_shopify_image(db, shop, product)
+            updated += 1
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                no_image += 1
+            else:
+                errors.append({"product_id": str(product.id), "detail": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001 — one product must not abort the batch
+            logger.error(
+                f"[SHOPS] Product-image backfill failed for product {product.id}: {exc}",
+                exc_info=True,
+            )
+            errors.append({"product_id": str(product.id), "detail": str(exc)})
+        # Be polite to the Shopify cost bucket between calls.
+        await asyncio.sleep(0.2)
+
+    logger.info(
+        "Product-image backfill for shop %s: eligible=%d updated=%d no_image=%d errors=%d",
+        shop_id, len(products), updated, no_image, len(errors),
+    )
+    return {
+        "status": "success",
+        "eligible": len(products),
+        "updated": updated,
+        "no_image": no_image,
+        "errors": errors,
+    }

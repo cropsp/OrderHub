@@ -59,6 +59,11 @@ export interface OrderItem {
   currency: string
   variations: string | null
   product_variant_id: string | null
+  // ORDER-CARD-1 Part 2: linked-product image (PC-F-1). Both null for custom
+  // lines and products without an image. image_url is the presence flag +
+  // `/api/products/{id}/image`; product_id is the fetch key for useProductImage.
+  product_id: string | null
+  image_url: string | null
   snapshot_weight_g: number | null
   snapshot_length_mm: number | null
   snapshot_width_mm: number | null

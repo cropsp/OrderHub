@@ -23,6 +23,11 @@ class OrderItemResponse(BaseModel):
     currency: str
     variations: str | None
     product_variant_id: uuid.UUID | None
+    # ORDER-CARD-1 Part 2: linked-product image (PC-F-1). Derived in the order
+    # router from item → variant → product; both null for custom/unimaged lines.
+    # Defaults let model_validate(from_attributes) tolerate their absence on the ORM.
+    product_id: uuid.UUID | None = None
+    image_url: str | None = None
     snapshot_weight_g: int | None
     snapshot_length_mm: int | None
     snapshot_width_mm: int | None

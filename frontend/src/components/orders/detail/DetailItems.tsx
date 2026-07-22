@@ -1,6 +1,7 @@
 import { Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 
+import { OrderItemThumbnail } from '@/components/orders/detail/OrderItemThumbnail';
 import { ProductVariantSelector } from '@/components/orders/ProductVariantSelector';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -219,35 +220,38 @@ export function DetailItems({
                 {order.items?.map((item) => (
                   <tr key={item.id} className="group hover:bg-white/[0.01] transition-colors">
                     <td className="px-4 py-4">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-sm font-semibold text-zinc-200 group-hover:text-teal-400 transition-colors leading-tight flex items-center gap-2">
-                          {item.title}
-                          {!item.product_variant_id && (
-                            <span className="text-[10px] font-medium text-amber-500/80 bg-amber-500/5 px-1.5 py-0.5 rounded border border-amber-500/10">
-                              Unlinked
-                            </span>
-                          )}
-                        </span>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-tight">
-                            SKU: {item.sku || 'N/A'}
+                      <div className="flex items-center gap-3">
+                        <OrderItemThumbnail item={item} />
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-sm font-semibold text-zinc-200 group-hover:text-teal-400 transition-colors leading-tight flex items-center gap-2">
+                            {item.title}
+                            {!item.product_variant_id && (
+                              <span className="text-[10px] font-medium text-amber-500/80 bg-amber-500/5 px-1.5 py-0.5 rounded border border-amber-500/10">
+                                Unlinked
+                              </span>
+                            )}
                           </span>
-                          {item.snapshot_title && item.snapshot_title !== item.title && (
-                            <>
-                              <span className="text-zinc-800">·</span>
-                              <span className="text-[11px] text-teal-500/70 font-medium">
-                                 Ref: {item.snapshot_title}
-                              </span>
-                            </>
-                          )}
-                          {item.variations && (
-                            <>
-                              <span className="text-zinc-800">·</span>
-                              <span className="text-[11px] text-zinc-400 italic">
-                                {item.variations}
-                              </span>
-                            </>
-                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-tight">
+                              SKU: {item.sku || 'N/A'}
+                            </span>
+                            {item.snapshot_title && item.snapshot_title !== item.title && (
+                              <>
+                                <span className="text-zinc-800">·</span>
+                                <span className="text-[11px] text-teal-500/70 font-medium">
+                                   Ref: {item.snapshot_title}
+                                </span>
+                              </>
+                            )}
+                            {item.variations && (
+                              <>
+                                <span className="text-zinc-800">·</span>
+                                <span className="text-[11px] text-zinc-400 italic">
+                                  {item.variations}
+                                </span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </td>

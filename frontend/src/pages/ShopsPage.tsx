@@ -10,8 +10,9 @@ import {
   Package2,
   Truck,
   LineChart,
+  Images,
 } from 'lucide-react';
-import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop } from '@/hooks/useShops';
+import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop, useBackfillProductImages } from '@/hooks/useShops';
 import { shippingApi } from '@/api/shipping';
 import ShellPage from './ShellPage';
 import { Button } from '@/components/ui/button';
@@ -92,6 +93,7 @@ export default function ShopsPage() {
   const updateShop = useUpdateShop();
   const deleteShop = useDeleteShop();
   const syncShop = useSyncShop();
+  const backfillImages = useBackfillProductImages();
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingShop, setEditingShop] = useState(INITIAL_SHOP_STATE);
@@ -579,6 +581,21 @@ export default function ShopsPage() {
                                 onClick={() => syncShop.mutate(shop.id)}
                               >
                                 <RefreshCw className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {shop.platform?.toLowerCase() === 'shopify' && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title="Pull product images from Shopify"
+                                className={cn(
+                                  "h-9 w-9 text-teal-500 hover:text-teal-400 hover:bg-teal-500/10 rounded-xl",
+                                  backfillImages.isPending && "animate-pulse"
+                                )}
+                                disabled={backfillImages.isPending}
+                                onClick={() => backfillImages.mutate(shop.id)}
+                              >
+                                <Images className="h-4 w-4" />
                               </Button>
                             )}
                             <Button 
