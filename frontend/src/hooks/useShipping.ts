@@ -96,3 +96,26 @@ export function useGetWarehouses(cityRef: string, query: string = "", enabled: b
     staleTime: 1000 * 60 * 30, // 30 mins
   })
 }
+
+// WB-3 — candidate lookup is triggered on demand (a click), so a mutation fits
+// better than a query: it returns the ranked candidate list (or a cached hit).
+export function useWbLabelCandidates() {
+  return useMutation({
+    mutationFn: ({ orderId, broaden = false }: { orderId: string; broaden?: boolean }) =>
+      shippingApi.wbLabelCandidates(orderId, broaden),
+  })
+}
+
+// WB-3 — confirm the parcel and fetch/cache the label. Invalidate the order so
+// the ttn_printed flag refreshes; the caller handles printing + error toasts.
+export function useWbLabelFetch() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ orderId, shipmentId }: { orderId: string; shipmentId: string }) =>
+      shippingApi.wbLabelFetch(orderId, shipmentId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['order', variables.orderId] })
+      queryClient.invalidateQueries({ queryKey: ['attachments', variables.orderId] })
+    },
+  })
+}

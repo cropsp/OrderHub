@@ -28,6 +28,14 @@ export const shopsApi = {
     return data
   },
 
+  // ORDER-CARD-1 Part 2: pull Shopify featured images for products missing one.
+  backfillProductImages: async (
+    id: string,
+  ): Promise<{ status: string; eligible: number; updated: number; no_image: number; errors: unknown[] }> => {
+    const { data } = await client.post(`/shops/${id}/backfill-product-images`)
+    return data
+  },
+
   getShopFinance: async (
     shopId: string,
     startDate: string,

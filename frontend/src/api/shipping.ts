@@ -6,6 +6,31 @@ export interface CreateTTNResponse {
   warnings?: string[]
 }
 
+// WB-3 — WesternBid thermal label print.
+export interface WbLabelCandidate {
+  shipment_id: string
+  recipient_name: string | null
+  recipient_postal_code: string | null
+  recipient_country_code: string | null
+  created_date: string | null
+  shipping_type: string | null
+  carrier_type: string | null
+}
+
+export interface WbLabelCandidatesResponse {
+  status: 'cached' | 'linked' | 'candidates' | 'empty'
+  attachment_id?: string | null
+  file_name?: string | null
+  candidates: WbLabelCandidate[]
+}
+
+export interface WbLabelResponse {
+  status: 'success' | 'unsupported'
+  attachment_id?: string | null
+  file_name?: string | null
+  message?: string | null
+}
+
 export const shippingApi = {
   createTTN: async (orderId: string, data: {
     weight?: number;
@@ -35,6 +60,21 @@ export const shippingApi = {
   },
   getWarehouses: async (cityRef: string, query: string = "") => {
     const response = await client.get(`/shipping/warehouses/${cityRef}`, { params: { query } })
+    return response.data
+  },
+  // WB-3: find candidate WB parcels for an order (manager-confirmed match).
+  wbLabelCandidates: async (orderId: string, broaden = false): Promise<WbLabelCandidatesResponse> => {
+    const response = await client.get<WbLabelCandidatesResponse>(
+      `/shipping/wb-label/${orderId}/candidates`,
+      { params: { broaden } },
+    )
+    return response.data
+  },
+  // WB-3: confirm the parcel, fetch the correct label, cache it as an attachment.
+  wbLabelFetch: async (orderId: string, shipmentId: string): Promise<WbLabelResponse> => {
+    const response = await client.post<WbLabelResponse>(`/shipping/wb-label/${orderId}`, {
+      shipment_id: shipmentId,
+    })
     return response.data
   },
 }

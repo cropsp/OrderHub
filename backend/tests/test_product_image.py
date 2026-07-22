@@ -326,10 +326,12 @@ async def test_pull_from_shopify_rewraps_gid_and_sets_image(monkeypatch, tmp_pat
     db.get = AsyncMock(return_value=_shopify_shop())
     graphql = AsyncMock(return_value={"product": {"featuredImage": {"url": "https://cdn/x.png"}}})
 
+    # The fetch/download logic lives in product_image_service (shared with the
+    # bulk backfill); patch it there — the endpoint just delegates.
     with _mock_catalog(product), \
-            patch("routers.products.decrypt_value", return_value="tok"), \
-            patch("routers.products.call_shopify_graphql", graphql), \
-            patch("routers.products.httpx.AsyncClient", _FakeAsyncClient):
+            patch("services.product_image_service.decrypt_value", return_value="tok"), \
+            patch("services.product_image_service.call_shopify_graphql", graphql), \
+            patch("services.product_image_service.httpx.AsyncClient", _FakeAsyncClient):
         result = await pull_product_image_from_shopify(
             id=product.id, db=db, user=_owner()
         )
@@ -379,8 +381,8 @@ async def test_pull_from_shopify_404_when_listing_has_no_featured_image():
     db.get = AsyncMock(return_value=_shopify_shop())
 
     with _mock_catalog(product), \
-            patch("routers.products.decrypt_value", return_value="tok"), \
-            patch("routers.products.call_shopify_graphql",
+            patch("services.product_image_service.decrypt_value", return_value="tok"), \
+            patch("services.product_image_service.call_shopify_graphql",
                   AsyncMock(return_value={"product": {"featuredImage": None}})):
         with pytest.raises(HTTPException) as exc:
             await pull_product_image_from_shopify(id=product.id, db=db, user=_owner())
@@ -401,10 +403,10 @@ async def test_pull_from_shopify_415_when_remote_bytes_are_not_an_image(monkeypa
         content = HTML_BYTES
 
     with _mock_catalog(product), \
-            patch("routers.products.decrypt_value", return_value="tok"), \
-            patch("routers.products.call_shopify_graphql",
+            patch("services.product_image_service.decrypt_value", return_value="tok"), \
+            patch("services.product_image_service.call_shopify_graphql",
                   AsyncMock(return_value={"product": {"featuredImage": {"url": "https://cdn/x"}}})), \
-            patch("routers.products.httpx.AsyncClient", _HtmlClient):
+            patch("services.product_image_service.httpx.AsyncClient", _HtmlClient):
         with pytest.raises(HTTPException) as exc:
             await pull_product_image_from_shopify(id=product.id, db=db, user=_owner())
 

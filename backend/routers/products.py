@@ -2,7 +2,6 @@ import uuid
 from decimal import Decimal
 from typing import List, Optional
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +25,6 @@ from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVa
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
 from services import bom_service
 from services.catalog_service import CatalogService
-from services.encryption_service import decrypt_value
 from services.file_storage import (
     FileTooLargeError,
     PRODUCT_IMAGE_MAX_BYTES,
@@ -34,11 +32,10 @@ from services.file_storage import (
     delete_file,
     get_absolute_path,
     save_product_image,
-    save_product_image_bytes,
     sniff_image_mime,
 )
 from services.import_service import ImportService
-from services.shopify_sync import PRODUCT_IMAGE_QUERY, call_shopify_graphql
+from services.product_image_service import fetch_and_store_shopify_image
 
 logger = get_logger("routers.products")
 
@@ -275,66 +272,12 @@ async def pull_product_image_from_shopify(
 ):
     """Fetch the Shopify listing's featured image and store it as the product image.
 
-    On-demand only — order sync never pulls images.
+    On-demand only — order sync never pulls images. The fetch/download/store logic
+    lives in product_image_service (shared with the bulk backfill, ORDER-CARD-1).
     """
     product = await _load_product_checked(db, id, user)
-
     shop = await db.get(Shop, product.shop_id)
-    if not shop or shop.platform != ShopPlatform.SHOPIFY:
-        raise HTTPException(status_code=409, detail="Product is not from a Shopify shop")
-    if not product.external_ref:
-        raise HTTPException(status_code=409, detail="Product has no Shopify reference")
-    if not shop.shopify_store_url or not shop.shopify_access_token_encrypted:
-        raise HTTPException(status_code=409, detail="Shop is missing Shopify credentials")
-
-    token = decrypt_value(shop.shopify_access_token_encrypted)
-    # external_ref stores the numeric id (_parse_shopify_gid strips the GID at
-    # import time), so it must be re-wrapped to query Shopify by id.
-    gid = f"gid://shopify/Product/{product.external_ref}"
-
-    try:
-        data = await call_shopify_graphql(
-            str(shop.shopify_store_url), token, PRODUCT_IMAGE_QUERY, {"id": gid}
-        )
-    except Exception as e:
-        logger.error(f"[PRODUCTS] Shopify image fetch failed for product {id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail="Failed to reach Shopify")
-
-    image_url = ((data.get("product") or {}).get("featuredImage") or {}).get("url")
-    if not image_url:
-        raise HTTPException(status_code=404, detail="Shopify listing has no featured image")
-
-    # The remote URL is untrusted input — same cap and same sniff as a manual upload.
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream("GET", image_url) as response:
-                response.raise_for_status()
-                content = b""
-                async for chunk in response.aiter_bytes(1024 * 1024):
-                    content += chunk
-                    if len(content) > PRODUCT_IMAGE_MAX_BYTES:
-                        raise HTTPException(
-                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                            detail=(
-                                "Shopify image exceeds maximum size of "
-                                f"{PRODUCT_IMAGE_MAX_BYTES // (1024 * 1024)} MB"
-                            ),
-                        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[PRODUCTS] Shopify image download failed for product {id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail="Failed to download image from Shopify")
-
-    mime = sniff_image_mime(content[:32])
-    if mime is None:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Shopify image is not a supported type (JPEG, PNG, WebP).",
-        )
-
-    relative_path, _size = await save_product_image_bytes(content, id, PRODUCT_IMAGE_MIME[mime])
-    await _set_product_image(db, product, relative_path)
+    await fetch_and_store_shopify_image(db, shop, product)
     return _project_product(product, can_view_costs=await _can_view_costs(db, user))
 
 

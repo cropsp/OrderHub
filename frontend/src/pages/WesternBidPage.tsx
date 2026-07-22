@@ -90,7 +90,7 @@ export default function WesternBidPage() {
                     </TableCell>
                     <TableCell className="text-zinc-300">
                       {p.tracking_numbers.length > 0
-                        ? p.tracking_numbers.join(', ')
+                        ? p.tracking_numbers.map(t => t.TrackingNumber).join(', ')
                         : EM_DASH}
                     </TableCell>
                     <TableCell>

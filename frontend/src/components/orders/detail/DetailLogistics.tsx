@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils';
 import { countryName } from '@/lib/countries';
 import { useToastStore } from '@/components/ui/Toast';
 import { AddressValidation } from './AddressValidation';
+import { WbLabelButton } from './WbLabelButton';
 
 interface DetailLogisticsProps {
   order: OrderDetail;
@@ -702,6 +703,11 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
             <p className="text-[9px] text-zinc-600 text-center mt-1 font-medium">Select a department to enable label generation</p>
           )}
         </div>
+      )}
+
+      {/* WB-3: WesternBid thermal label for international (non-UA) shipments. */}
+      {!isEditing && canManageShipping && order.shipping_country !== 'UA' && (
+        <WbLabelButton order={order} />
       )}
     </div>
   );

@@ -16,6 +16,12 @@ export interface WesternBidCredentialsUpdate {
   login: string
 }
 
+/** One tracking entry WB reports per parcel — an object, not a bare string. */
+export interface WbTrackingNumber {
+  Identifier: string
+  TrackingNumber: string
+}
+
 /** One mirrored WesternBid parcel. Status fields are raw strings — WB's value
  *  sets are undocumented and observed as-is this sprint. */
 export interface WbParcel {
@@ -23,7 +29,7 @@ export interface WbParcel {
   shipping_type: string | null
   carrier_type: string | null
   shipping_service_type: string | null
-  tracking_numbers: string[]
+  tracking_numbers: WbTrackingNumber[]
   recipient_name: string | null
   recipient_postal_code: string | null
   recipient_country_code: string | null

@@ -19,6 +19,7 @@ from services.shopify_sync import (
     _count_items_without_sku,
     _fetch_orders_page,
     _line_item_sku,
+    backfill_order_numbers,
     map_shopify_status,
     sync_shop_orders,
 )
@@ -430,3 +431,83 @@ async def test_already_present_orders_excluded_from_status_and_sku_counts():
     assert result.by_status == {"new": 1}   # only order 70
     assert result.items_without_sku == 1    # only order 70's custom item
     assert result.skipped == 1
+
+
+# ---------- ORDER-CARD-1 Part 1: Shopify human order number ----------
+
+
+@pytest.mark.asyncio
+async def test_sync_captures_order_number():
+    """The synced order carries the Shopify human `name` as order_number on the
+    OrderCreate handed to create_order (not just as a title fallback)."""
+    shop = _make_shop()
+    db = _make_db()
+    page = _page([_order_node(order_id=40)])  # _order_node sets name="#40"
+    with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
+         patch("services.shopify_sync.CatalogService", return_value=MagicMock()), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=page)), \
+         patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
+        await sync_shop_orders(db, shop, MagicMock(), stop_on_existing=False)
+    payload = mock_create.await_args.args[1]  # the OrderCreate passed to create_order
+    assert payload.order_number == "#40"
+
+
+def _make_backfill_db(missing_ids):
+    """DB mock for backfill_order_numbers: the SELECT returns the external_ids
+    still missing a number; each UPDATE reports one affected row."""
+    db = MagicMock()
+    db.flush = AsyncMock()
+
+    async def execute(stmt):
+        result = MagicMock()
+        if str(stmt).strip().upper().startswith("SELECT"):
+            scalars = MagicMock()
+            scalars.all.return_value = list(missing_ids)
+            result.scalars.return_value = scalars
+            return result
+        result.rowcount = 1  # UPDATE
+        return result
+
+    db.execute = AsyncMock(side_effect=execute)
+    return db
+
+
+@pytest.mark.asyncio
+async def test_backfill_order_numbers_updates_existing_rows():
+    """Backfill maps id → name from Shopify and UPDATEs matching rows; it never
+    creates orders (the idempotent sync path is untouched)."""
+    shop = _make_shop()
+    db = _make_backfill_db(missing_ids=["40", "41"])
+    page = _page([_order_node(order_id=40), _order_node(order_id=41)])
+    with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
+         patch("services.shopify_sync._fetch_orders_page", AsyncMock(return_value=page)), \
+         patch("services.shopify_sync.create_order", AsyncMock()) as mock_create:
+        result = await backfill_order_numbers(db, shop)
+    mock_create.assert_not_awaited()
+    assert result == {"updated": 2, "examined": 2}
+    update_calls = [
+        c for c in db.execute.await_args_list
+        if str(c.args[0]).strip().upper().startswith("UPDATE")
+    ]
+    assert len(update_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_backfill_order_numbers_noop_when_none_missing():
+    """Idempotent: with no NULL order_number rows, no Shopify call is made."""
+    shop = _make_shop()
+    db = _make_backfill_db(missing_ids=[])
+    fetch = AsyncMock(return_value=_page([]))
+    with patch("services.shopify_sync.decrypt_value", return_value="tok"), \
+         patch("services.shopify_sync._fetch_orders_page", fetch):
+        result = await backfill_order_numbers(db, shop)
+    fetch.assert_not_awaited()
+    assert result == {"updated": 0, "examined": 0}
+
+
+@pytest.mark.asyncio
+async def test_backfill_order_numbers_skips_non_shopify():
+    shop = _make_shop()
+    shop.platform = ShopPlatform.ETSY
+    result = await backfill_order_numbers(MagicMock(), shop)
+    assert result == {"updated": 0, "examined": 0}

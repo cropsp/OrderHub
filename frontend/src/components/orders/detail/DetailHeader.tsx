@@ -1,33 +1,28 @@
 import { formatDateTime } from '@/lib/format';
 import {
   Tag,
-  Calendar, 
-  Hash, 
-  Check, 
-  Loader2, 
-  ChevronDown,
+  Calendar,
+  Hash,
+  Check,
+  Loader2,
   X
 } from 'lucide-react';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
-} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { cn } from '@/lib/utils';
-import { ORDER_STATUS } from '@/lib/order-status';
 import type { OrderDetail } from '@/types/order';
 
 interface DetailHeaderProps {
   order: OrderDetail;
   saveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  // Kept in the contract because both OrderDetailPanel and OrderDetailView pass
+  // it, but the header itself no longer renders a status control (WB-3 moved it
+  // out), so it is intentionally not destructured here.
   onStatusChange: (status: string) => void;
   onClose: () => void;
 }
 
-export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: DetailHeaderProps) {
+export function DetailHeader({ order, saveStatus, onClose }: DetailHeaderProps) {
   return (
     <header className="py-4 border-b border-zinc-900 bg-zinc-950/20 shrink-0">
       <div className="max-w-5xl mx-auto px-6 flex items-center justify-between gap-6">
@@ -35,7 +30,16 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
           <h1 className="text-xl font-bold text-white tracking-tight leading-none truncate">
             {order.title || 'Untitled Order'}
           </h1>
-          
+
+          {order.order_number && (
+            <div className="flex items-center gap-1.5">
+              <Hash size={13} className="text-teal-400" />
+              <span className="text-sm font-bold font-mono text-teal-300 tracking-tight">
+                {order.order_number}
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-teal-500/10 border border-teal-500/20 shadow-sm">
               <Tag size={10} className="text-teal-400" />

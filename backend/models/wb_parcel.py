@@ -41,8 +41,10 @@ class WbParcel(Base):
         String(64), nullable=True
     )
 
-    # WB returns an array of tracking numbers → JSONB (no ARRAY precedent in repo).
-    tracking_numbers: Mapped[list[str]] = mapped_column(
+    # WB returns an array of tracking-number OBJECTS, each
+    # {"Identifier": <carrier>, "TrackingNumber": <code>} — NOT bare strings. Kept
+    # whole in JSONB (no ARRAY precedent in repo); read elem["TrackingNumber"].
+    tracking_numbers: Mapped[list[dict]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
 

@@ -23,6 +23,11 @@ class OrderItemResponse(BaseModel):
     currency: str
     variations: str | None
     product_variant_id: uuid.UUID | None
+    # ORDER-CARD-1 Part 2: linked-product image (PC-F-1). Derived in the order
+    # router from item → variant → product; both null for custom/unimaged lines.
+    # Defaults let model_validate(from_attributes) tolerate their absence on the ORM.
+    product_id: uuid.UUID | None = None
+    image_url: str | None = None
     snapshot_weight_g: int | None
     snapshot_length_mm: int | None
     snapshot_width_mm: int | None
@@ -51,6 +56,8 @@ class StatusHistoryResponse(BaseModel):
 
 class OrderBase(BaseModel):
     external_id: str = Field(..., max_length=100)
+    # Human Shopify order name (e.g. "91890_1816"); null for Etsy/manual orders.
+    order_number: str | None = None
     status: OrderStatus
     title: str
     total_price: float
@@ -156,6 +163,8 @@ class OrderCreate(BaseModel):
     email: str  # We look up/create Customer by email
     full_name: str
     external_id: str
+    # Shopify human order name; populated by the sync mapper, blank on manual entry.
+    order_number: str | None = None
     title: str
     total_price: float
     currency: str = "USD"

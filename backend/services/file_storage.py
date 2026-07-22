@@ -151,6 +151,29 @@ async def save_product_image_bytes(
     return relative_path, len(content)
 
 
+async def save_order_bytes(
+    content: bytes,
+    order_id: uuid.UUID,
+    ext: str,
+) -> tuple[str, int]:
+    """Persist in-memory bytes under the order's upload dir (WB-3 cached label).
+
+    Mirrors ``save_file``'s ``{order_id}/{uuid}`` layout but for bytes already in
+    memory (a PDF fetched from WesternBid), with a generated filename.
+    Returns: (relative_file_path, file_size_in_bytes)
+    """
+    order_dir = UPLOADS_DIR / str(order_id)
+    order_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_filename = f"{uuid.uuid4()}.{ext}"
+    relative_path = str(Path(str(order_id)) / safe_filename)
+
+    async with aiofiles.open(order_dir / safe_filename, 'wb') as out_file:
+        await out_file.write(content)
+
+    return relative_path, len(content)
+
+
 def get_absolute_path(relative_path: str) -> Path | None:
     """Gets the absolute path for a file, validating it stays within UPLOADS_DIR."""
     try:

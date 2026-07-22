@@ -24,7 +24,9 @@ class WbParcelResponse(BaseModel):
     shipping_type: str | None = None
     carrier_type: str | None = None
     shipping_service_type: str | None = None
-    tracking_numbers: list[str] = []
+    # List of {"Identifier": <carrier>, "TrackingNumber": <code>} objects — NOT
+    # bare strings (declaring list[str] made model_validate 500 on real data).
+    tracking_numbers: list[dict] = []
     recipient_name: str | None = None
     recipient_postal_code: str | None = None
     recipient_country_code: str | None = None

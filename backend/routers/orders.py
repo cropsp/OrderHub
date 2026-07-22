@@ -30,7 +30,7 @@ from services.order_service import (
     get_orders_filtered, get_order_detail,
     create_order, update_order, change_order_status,
     add_order_item, update_order_item, delete_order_item,
-    censor_order_financials,
+    censor_order_financials, attach_item_images,
 )
 from services.address_validation import validate_address
 from services.parcel_calculator import calculate_parcel_estimate
@@ -124,6 +124,9 @@ async def get_order(
     data["shop_name"] = order.shop.name if order.shop else None
     data["platform"] = order.shop.platform.value if order.shop else None
     data["customer_name"] = order.customer.full_name if order.customer else None
+
+    # ORDER-CARD-1 Part 2: per-item product image_url (null for custom/unimaged lines).
+    attach_item_images(data, order)
 
     # USER-ACCESS-2: cost fields (incl. computed_production_cost — LEAK 2) are
     # nulled and audit-comment costs redacted unless the caller holds VIEW_COSTS.
