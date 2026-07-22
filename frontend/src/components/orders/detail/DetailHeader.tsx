@@ -35,7 +35,16 @@ export function DetailHeader({ order, saveStatus, onStatusChange, onClose }: Det
           <h1 className="text-xl font-bold text-white tracking-tight leading-none truncate">
             {order.title || 'Untitled Order'}
           </h1>
-          
+
+          {order.order_number && (
+            <div className="flex items-center gap-1.5">
+              <Hash size={13} className="text-teal-400" />
+              <span className="text-sm font-bold font-mono text-teal-300 tracking-tight">
+                {order.order_number}
+              </span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-teal-500/10 border border-teal-500/20 shadow-sm">
               <Tag size={10} className="text-teal-400" />

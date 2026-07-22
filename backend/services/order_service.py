@@ -289,6 +289,7 @@ async def create_order(
         shop_id=data.shop_id,
         customer_id=customer.id,
         status=status,
+        order_number=data.order_number,
         title=data.title,
         total_price=data.total_price,
         currency=data.currency,

@@ -15,7 +15,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from models.shop import Shop, ShopPlatform
 from models.order import Order, OrderStatus
@@ -446,6 +446,9 @@ async def _write_order_node(
     order_create_payload = OrderCreate(
         external_id=external_id,
         shop_id=shop.id,
+        # Human order name (e.g. "91890_1816"); stored dedicated now, not just a
+        # title fallback, so the card can cross-reference against Shopify (ORDER-CARD-1).
+        order_number=node.get("name"),
         title=(items_payload[0].title if items_payload
                else node.get("name") or f"Order #{external_id}"),
         total_price=float(money.get("amount", 0) or 0),
@@ -639,3 +642,83 @@ async def sync_shop_orders(
         by_status=by_status,
         items_without_sku=items_without_sku,
     )
+
+
+async def backfill_order_numbers(db: AsyncSession, shop: Shop) -> Dict[str, int]:
+    """Fill `orders.order_number` for existing Shopify orders that lack it
+    (ORDER-CARD-1 Part 1).
+
+    Reuses the same page fetch + throttle backoff as `sync_shop_orders`: paginate
+    the shop's Shopify orders, map numeric `id → name`, and UPDATE the matching
+    rows. Cheaper than one query per order (~1 GraphQL call / 50 orders). Only
+    touches `order_number` on rows that already exist — it never creates orders,
+    never writes status/history, so the idempotent sync path is undisturbed.
+
+    Idempotent: only rows with a NULL `order_number` are targeted, and paging
+    stops as soon as names for all of them are found.
+    """
+    if shop.platform != ShopPlatform.SHOPIFY:
+        return {"updated": 0, "examined": 0}
+    if not shop.shopify_store_url or not shop.shopify_access_token_encrypted:
+        return {"updated": 0, "examined": 0}
+
+    # Only rows still missing a number (idempotent re-runs do near-zero work).
+    result = await db.execute(
+        select(Order.external_id).where(
+            Order.shop_id == shop.id, Order.order_number.is_(None)
+        )
+    )
+    remaining = {eid for eid in result.scalars().all() if eid}
+    examined = len(remaining)
+    if not remaining:
+        return {"updated": 0, "examined": 0}
+
+    token = decrypt_value(shop.shopify_access_token_encrypted)
+    shop_url = str(shop.shopify_store_url)
+
+    id_to_name: Dict[str, str] = {}
+    after: Optional[str] = None
+    while remaining:
+        body = await _fetch_orders_page(
+            shop_url, token, {"first": ORDERS_PAGE_SIZE, "after": after, "query": None}
+        )
+        conn = (body.get("data") or {}).get("orders") or {}
+        edges = conn.get("edges") or []
+        page_info = conn.get("pageInfo") or {}
+
+        for edge in edges:
+            node = (edge.get("node") if edge else None) or {}
+            ext = _parse_shopify_gid(node.get("id"))
+            name = node.get("name")
+            if ext in remaining and name:
+                id_to_name[ext] = name
+                remaining.discard(ext)
+
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+
+        # Same proactive throttle backoff as sync_shop_orders.
+        cost = (body.get("extensions") or {}).get("cost") or {}
+        throttle = cost.get("throttleStatus") or {}
+        available = throttle.get("currentlyAvailable")
+        requested = float(cost.get("requestedQueryCost") or 0)
+        restore = float(throttle.get("restoreRate") or DEFAULT_RESTORE_RATE) or DEFAULT_RESTORE_RATE
+        if available is not None and float(available) < requested:
+            await asyncio.sleep((requested - float(available)) / restore)
+
+    updated = 0
+    for ext, name in id_to_name.items():
+        res = await db.execute(
+            update(Order)
+            .where(Order.external_id == ext, Order.shop_id == shop.id)
+            .values(order_number=name)
+        )
+        updated += res.rowcount or 0
+    await db.flush()
+
+    logger.info(
+        "Backfilled order_number for shop %s: updated=%d examined=%d",
+        shop.id, updated, examined,
+    )
+    return {"updated": updated, "examined": examined}

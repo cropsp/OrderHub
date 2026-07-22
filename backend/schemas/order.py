@@ -51,6 +51,8 @@ class StatusHistoryResponse(BaseModel):
 
 class OrderBase(BaseModel):
     external_id: str = Field(..., max_length=100)
+    # Human Shopify order name (e.g. "91890_1816"); null for Etsy/manual orders.
+    order_number: str | None = None
     status: OrderStatus
     title: str
     total_price: float
@@ -156,6 +158,8 @@ class OrderCreate(BaseModel):
     email: str  # We look up/create Customer by email
     full_name: str
     external_id: str
+    # Shopify human order name; populated by the sync mapper, blank on manual entry.
+    order_number: str | None = None
     title: str
     total_price: float
     currency: str = "USD"

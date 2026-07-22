@@ -26,7 +26,7 @@ from services.access_service import (
     propagate_new_shop_to_unrestricted_managers,
 )
 from services.partner_payout_service import find_settlements_overlapping_period
-from services.shopify_sync import sync_shop_orders
+from services.shopify_sync import sync_shop_orders, backfill_order_numbers
 from services.encryption_service import encrypt_value, decrypt_value
 from services.phone_normalization import normalize_ua_sender_phone
 
@@ -311,3 +311,37 @@ async def backfill_shop(
         "suspicious_external_ids": suspicious_external_ids,
         "overlapping_settlements": overlapping_settlements,
     }
+
+
+@router.post("/{shop_id}/backfill-order-numbers")
+async def backfill_shop_order_numbers(
+    shop_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fill `order_number` (Shopify human order name) for existing orders in this
+    shop that lack it (ORDER-CARD-1 Part 1).
+
+    Idempotent and cheap: reuses the sync's paginated fetch to map id → name and
+    only UPDATEs rows still missing a number. Never creates orders or touches
+    status/history — the idempotent order-sync path is undisturbed. Non-Shopify
+    shops are a no-op (updated=0).
+    """
+    # Same access rule as manual /sync + /backfill: OWNER/MANAGER with access.
+    await assert_shop_access(db, shop_id, current_user)
+
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))  # noqa: E712
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+
+    try:
+        summary = await backfill_order_numbers(db, shop)
+    except Exception as e:
+        logger.error(f"[SHOPS] Order-number backfill failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Order-number backfill failed: {str(e)}",
+        )
+
+    return {"status": "success", **summary}

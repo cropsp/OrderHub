@@ -122,6 +122,11 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         index=True,
     )
 
+    # Human Shopify order name (e.g. "91890_1816"). external_id above is the
+    # numeric Shopify id; this is the number the manager cross-references against
+    # Shopify / WesternBid. Nullable: Etsy + manual orders have no Shopify name.
+    order_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # Order summary
     title: Mapped[str] = mapped_column(Text, nullable=False)
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)

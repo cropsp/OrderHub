@@ -90,6 +90,8 @@ export interface Attachment {
 export interface Order {
   id: string
   external_id: string
+  // Human Shopify order name (e.g. "91890_1816"); null for Etsy/manual orders.
+  order_number: string | null
   shop_id: string
   customer_id: string
   status: OrderStatus
