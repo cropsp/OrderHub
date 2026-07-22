@@ -5,23 +5,37 @@ Handles interactions with postal services (e.g. Nova Poshta).
 
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from typing import List
 
+from config import get_settings
 from database import get_db
+from models.attachment import Attachment, AttachmentType
 from models.order import Order, OrderStatus
 from models.shop import Shop
 from models.stock_movement import StockMovementReason
 from models.user import User, UserRole
+from models.wb_parcel import WbParcel
 from routers.dependencies import assert_order_access, require_role
 from services import stock_service
+from services.file_storage import save_order_bytes
 from services.order_service import get_order_detail, change_order_status
 from services.nova_poshta import NovaPoshtaClient, NovaPoshtaAPIError
 from services.encryption_service import decrypt_value
+from services.westernbid import (
+    WesternBidClient,
+    WesternBidLabelNotReady,
+    find_candidate_parcels,
+    load_westernbid_credentials,
+    map_wb_item,
+    normalize_wb_datetime,
+    resolve_label_type,
+)
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -389,3 +403,261 @@ async def delete_np_ttn(
         await db.rollback()
         logger.error(f"[SHIPPING] FAILED TO DELETE TTN: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail="Failed to delete shipping label")
+
+
+# ── WB-3: WesternBid thermal label print ───────────────────────────────────
+#
+# Read-only against WB (GetDocument retrieves an already-generated document — no
+# CreateShipment, no money). WB exposes no order key on a parcel, so the manager
+# confirms the order→parcel link from a name-matched candidate list; the picked
+# parcel is mirrored + linked and its label PDF cached as an Attachment. See
+# CLAUDE.md "WB-3" and services/westernbid.py.
+
+# from_date margin before the order date for the live candidate search (rule 3).
+WB_SEARCH_LOOKBACK_DAYS = 30
+
+
+class WbLabelCandidate(BaseModel):
+    shipment_id: uuid.UUID
+    recipient_name: str | None = None
+    recipient_postal_code: str | None = None
+    recipient_country_code: str | None = None
+    created_date: datetime | None = None
+    shipping_type: str | None = None
+    carrier_type: str | None = None
+
+
+class WbLabelCandidatesResponse(BaseModel):
+    # cached → a label PDF is already stored (print attachment_id); linked → parcel
+    # already linked, no PDF yet (POST that shipment_id); candidates → manager must
+    # pick; empty → nothing matched.
+    status: str
+    attachment_id: uuid.UUID | None = None
+    file_name: str | None = None
+    candidates: List[WbLabelCandidate] = []
+
+
+class WbLabelConfirmRequest(BaseModel):
+    shipment_id: uuid.UUID
+
+
+class WbLabelResponse(BaseModel):
+    # success → attachment_id is a printable PDF; unsupported → NovaPoshtaGlobal /
+    # unknown carrier, message carries the cabinet-fallback text (rule 6).
+    status: str
+    attachment_id: uuid.UUID | None = None
+    file_name: str | None = None
+    message: str | None = None
+
+
+def _wb_client_or_400(credentials: tuple[str, str] | None) -> WesternBidClient:
+    if credentials is None:
+        raise HTTPException(
+            status_code=400,
+            detail="WesternBid is not configured. Set the API credentials in Settings.",
+        )
+    api_key, login = credentials
+    return WesternBidClient(api_key, login, get_settings().WESTERNBID_BASE_URL)
+
+
+def _candidate_from_item(item: dict) -> WbLabelCandidate:
+    return WbLabelCandidate(
+        shipment_id=uuid.UUID(str(item["Id"])),
+        recipient_name=item.get("RecipientName"),
+        recipient_postal_code=item.get("RecipientPostalCode"),
+        recipient_country_code=item.get("RecipientCountryCode"),
+        created_date=normalize_wb_datetime(item.get("CreatedDate")),
+        shipping_type=item.get("ShippingType"),
+        carrier_type=item.get("CarrierType"),
+    )
+
+
+@router.get("/wb-label/{order_id}/candidates", response_model=WbLabelCandidatesResponse)
+async def wb_label_candidates(
+    order_id: uuid.UUID,
+    broaden: bool = Query(False, description="Drop the country filter to widen the search"),
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find WB parcel candidates for an order (manager-confirmed match, rule 3)."""
+    order = await get_order_detail(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await assert_order_access(db, order, current_user)
+
+    # Already linked → skip the picker. Cached PDF present → print it directly.
+    linked = (
+        await db.execute(select(WbParcel).where(WbParcel.order_id == order_id))
+    ).scalars().first()
+    if linked is not None:
+        if linked.label_attachment_id is not None:
+            att = await db.get(Attachment, linked.label_attachment_id)
+            return WbLabelCandidatesResponse(
+                status="cached",
+                attachment_id=linked.label_attachment_id,
+                file_name=att.file_name if att else None,
+            )
+        return WbLabelCandidatesResponse(
+            status="linked",
+            candidates=[
+                WbLabelCandidate(
+                    shipment_id=linked.shipment_id,
+                    recipient_name=linked.recipient_name,
+                    recipient_postal_code=linked.recipient_postal_code,
+                    recipient_country_code=linked.recipient_country_code,
+                    created_date=linked.wb_created_at,
+                    shipping_type=linked.shipping_type,
+                    carrier_type=linked.carrier_type,
+                )
+            ],
+        )
+
+    if not order.shipping_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Order has no recipient name to match against WesternBid.",
+        )
+
+    client = _wb_client_or_400(await load_westernbid_credentials(db))
+    anchor = order.created_at or datetime.now(timezone.utc)
+    from_date = anchor - timedelta(days=WB_SEARCH_LOOKBACK_DAYS)
+    country = None if broaden else order.shipping_country
+    try:
+        parcels = await find_candidate_parcels(
+            client,
+            recipient_name=order.shipping_name,
+            recipient_country_code=country,
+            order_zip=order.shipping_zip,
+            order_created_at=order.created_at,
+            from_date=from_date,
+        )
+    except Exception as e:
+        logger.error(
+            f"[WB-LABEL] candidate search failed for order {order_id}: {e}",
+            exc_info=True,
+        )
+        raise HTTPException(status_code=502, detail="Failed to search WesternBid for parcels")
+
+    candidates = [_candidate_from_item(p) for p in parcels if p.get("Id")]
+    return WbLabelCandidatesResponse(
+        status="candidates" if candidates else "empty",
+        candidates=candidates,
+    )
+
+
+@router.post("/wb-label/{order_id}", response_model=WbLabelResponse)
+async def wb_label_fetch(
+    order_id: uuid.UUID,
+    body: WbLabelConfirmRequest,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Confirm the order→parcel link, fetch the correct label, and cache it (rules 2, 5)."""
+    order = await get_order_detail(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    await assert_order_access(db, order, current_user)
+    if not order.shipping_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Order has no recipient name to match against WesternBid.",
+        )
+
+    client = _wb_client_or_400(await load_westernbid_credentials(db))
+
+    # Authoritative record: re-fetch by the order's recipient name and locate the
+    # confirmed shipment. ShippingType (which label to fetch) is never trusted from
+    # the client.
+    anchor = order.created_at or datetime.now(timezone.utc)
+    from_date = anchor - timedelta(days=WB_SEARCH_LOOKBACK_DAYS)
+    try:
+        parcels = await client.search_sent_parcels(order.shipping_name, None, from_date)
+    except Exception as e:
+        logger.error(
+            f"[WB-LABEL] parcel re-fetch failed for order {order_id}: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=502, detail="Failed to reach WesternBid")
+    item = next(
+        (p for p in parcels if str(p.get("Id")) == str(body.shipment_id)), None
+    )
+    if item is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Selected WesternBid parcel not found. Refresh candidates and retry.",
+        )
+
+    # Concurrency (task reuse note): upsert the mirror row, then lock it. INSERT ON
+    # CONFLICT DO NOTHING makes the first-fetch race safe; FOR UPDATE serialises the
+    # fetch so two clicks can't double-call WB or orphan an Attachment.
+    await db.execute(
+        pg_insert(WbParcel)
+        .values(shipment_id=body.shipment_id, **map_wb_item(item))
+        .on_conflict_do_nothing(index_elements=["shipment_id"])
+    )
+    parcel = (
+        await db.execute(
+            select(WbParcel)
+            .where(WbParcel.shipment_id == body.shipment_id)
+            .with_for_update()
+        )
+    ).scalar_one()
+
+    # Re-check after the lock: a concurrent request may have just cached it.
+    if parcel.label_attachment_id is not None:
+        att = await db.get(Attachment, parcel.label_attachment_id)
+        if att is not None:
+            parcel.order_id = order_id
+            await db.commit()
+            return WbLabelResponse(
+                status="success", attachment_id=att.id, file_name=att.file_name
+            )
+
+    parcel.order_id = order_id
+
+    label_type = resolve_label_type(parcel.shipping_type)
+    if label_type is None:
+        # NovaPoshtaGlobal / unknown carrier — do NOT fetch a wrong document (rule 6).
+        await db.commit()
+        return WbLabelResponse(
+            status="unsupported",
+            message=(
+                f"No API thermal label for carrier '{parcel.shipping_type}'. "
+                "Print it from the WesternBid cabinet documents page."
+            ),
+        )
+
+    document_type, paper_size = label_type
+    try:
+        pdf_bytes = await client.get_document(body.shipment_id, document_type, paper_size)
+    except WesternBidLabelNotReady:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="The label is not ready yet on WesternBid. Try again shortly.",
+        )
+    except Exception as e:
+        await db.rollback()
+        logger.error(
+            f"[WB-LABEL] GetDocument failed for order {order_id}: {e}", exc_info=True
+        )
+        raise HTTPException(status_code=502, detail="Failed to fetch the label from WesternBid")
+
+    rel_path, size = await save_order_bytes(pdf_bytes, order_id, "pdf")
+    attachment = Attachment(
+        id=uuid.uuid4(),
+        order_id=order_id,
+        uploaded_by_id=current_user.id,
+        file_name=f"wb-label-{order.external_id or order_id}.pdf",
+        file_path=rel_path,
+        file_size=size,
+        mime_type="application/pdf",
+        attachment_type=AttachmentType.OTHER,
+    )
+    db.add(attachment)
+    await db.flush()
+    parcel.label_attachment_id = attachment.id
+    order.ttn_printed = True  # WB-3 Q5: mark on produce/serve (backend).
+    await db.commit()
+    return WbLabelResponse(
+        status="success", attachment_id=attachment.id, file_name=attachment.file_name
+    )

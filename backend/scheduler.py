@@ -20,7 +20,7 @@ from services.westernbid import (
     WB_MAX_PAGE_SIZE,
     WesternBidClient,
     load_westernbid_credentials,
-    normalize_wb_datetime,
+    map_wb_item as _map_wb_item,
 )
 import logging
 
@@ -92,24 +92,6 @@ async def run_shopify_sync():
             except Exception as e:
                 logger.error(f"Failed to sync shop {shop.name}: {e}")
                 await db.rollback()
-
-def _map_wb_item(item: dict) -> dict:
-    """Project a WB parcel item onto the mutable `wb_parcel` columns. Status
-    fields stay raw text (task rule 4); CreatedDate is UTC-normalized (rule 8)."""
-    return {
-        "shipping_type": item.get("ShippingType"),
-        "carrier_type": item.get("CarrierType"),
-        "shipping_service_type": item.get("ShippingServiceType"),
-        "tracking_numbers": item.get("TrackingNumbers") or [],
-        "recipient_name": item.get("RecipientName"),
-        "recipient_postal_code": item.get("RecipientPostalCode"),
-        "recipient_country_code": item.get("RecipientCountryCode"),
-        "package": item.get("Package"),
-        "payment_status": item.get("PaymentStatus"),
-        "wb_status": item.get("Status"),
-        "wb_created_at": normalize_wb_datetime(item.get("CreatedDate")),
-    }
-
 
 async def run_westernbid_poll():
     """Poll WesternBid for recently-sent parcels and upsert the local mirror.
