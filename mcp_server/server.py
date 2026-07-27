@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from client import OrderHubClient
 from config import Config
 from tools_read import register_read_tools
+from tools_write import register_write_tools
 
 INSTRUCTIONS = """\
 You manage the warehouse and product catalog of OrderHub, a CRM for a Ukrainian \
@@ -63,4 +64,5 @@ def build_server(
     client = OrderHubClient(config, transport=transport)
     mcp = FastMCP("orderhub-warehouse", instructions=INSTRUCTIONS)
     register_read_tools(mcp, client)
+    register_write_tools(mcp, client)
     return mcp, client

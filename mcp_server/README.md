@@ -73,7 +73,10 @@ prefer, but put the password in exactly one of them. Point `ORDERHUB_API_URL` at
 
 ## Tools
 
-All read-only in this release.
+Warehouse and catalog only. Orders, shipping, users, shops and finance are
+deliberately absent — every one has irreversible real-world side effects.
+
+**Read**
 
 | Tool | Reads |
 |---|---|
@@ -86,7 +89,52 @@ All read-only in this release.
 | `get_product_bom` | a product's recipe + per-line costs |
 | `compute_product_cost` | recompute a product's cost from current material prices |
 
-Writes (receipts, BOM editing, overhead expenses) land in the next step.
+**Write**
+
+| Tool | Does |
+|---|---|
+| `create_material` | new direct material (currency locked at creation) |
+| `update_material` | name, unit, supplier, notes, low-stock threshold, waste % |
+| `archive_material` | discontinue (soft delete; history preserved) |
+| `record_material_receipt` | book a purchase — **this is what sets cost** |
+| `adjust_material_stock` | stocktake correction or waste, no cost change |
+| `create_overhead_material` / `record_overhead_expense` | indirect costs |
+| `set_product_bom` | replace a whole recipe (guarded, see below) |
+| `add_bom_line` / `remove_bom_line` | change one recipe line, preserving the rest |
+
+Quantities and money are decimal **strings** ("5.00", "597.14") end to end —
+binary floats do not round-trip cents.
+
+### Safety rails
+
+- **BOM wipe protection.** `PUT /bom` is delete-all + reinsert with no audit and
+  no undo. `set_product_bom` refuses any call that would remove or change
+  existing lines unless `confirm_replace=True`, and the refusal shows exactly
+  what would be lost. `add_bom_line` / `remove_bom_line` read the current recipe
+  and change only the line you name, so they cannot wipe anything.
+- **Duplicate materials.** An exact name collision is refused with the existing
+  material's id — two rows for one real material split the weighted average
+  permanently. Override with `allow_duplicate_name=True`.
+- **Append-only reality.** Receipts and stock movements cannot be edited or
+  deleted. A mistake is corrected by another receipt or an adjustment, and both
+  stay in the ledger.
+
+### Action log
+
+Every write reports itself to `agent_action_log`: tool, arguments, outcome, and a
+human-readable summary ("Unit cost 10.0000 -> 15.0000; stock 100.00 -> 200.00").
+The domain tables record *what changed*; this records what the agent meant,
+which is what makes "undo what the agent did on Tuesday" answerable.
+
+Review it as the owner:
+
+```
+GET /api/agent-actions?ok=false        # everything the agent got rejected on
+GET /api/agent-actions?tool=set_product_bom
+```
+
+Rejected API calls are logged too. Calls stopped by the guards above are not —
+nothing was attempted, and you already saw the refusal in the conversation.
 
 ## Auth and revocation
 

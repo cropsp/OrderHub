@@ -63,7 +63,9 @@ async def test_all_read_tools_registered():
     mcp, client, _ = _build(lambda r: httpx.Response(200, json=[]))
     names = {tool.name for tool in await mcp.list_tools()}
     await client.aclose()
-    assert names == EXPECTED_TOOLS
+    # Subset, not equality — write tools share the same server. The exact
+    # registered surface is pinned in test_tools_write.py.
+    assert EXPECTED_TOOLS <= names
 
 
 @pytest.mark.asyncio
@@ -74,6 +76,17 @@ async def test_every_tool_has_a_description():
     await client.aclose()
     for tool in tools:
         assert tool.description and len(tool.description) > 40, tool.name
+
+
+@pytest.mark.asyncio
+async def test_read_tools_do_not_write_to_the_action_log():
+    """Only writes are logged — a read sweep must not spam the audit trail."""
+    mcp, client, seen = _build(lambda r: httpx.Response(200, json={}))
+    for name in sorted(EXPECTED_TOOLS):
+        tool = next(t for t in await mcp.list_tools() if t.name == name)
+        await mcp.call_tool(name, {a: "x" for a in tool.inputSchema.get("required", [])})
+    await client.aclose()
+    assert not [r for r in seen if r.url.path == "/api/agent-actions"]
 
 
 @pytest.mark.asyncio

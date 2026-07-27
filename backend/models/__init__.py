@@ -42,6 +42,7 @@ from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
 from models.user_shop_access import UserShopAccess
 from models.user_capability import UserCapability
 from models.access_audit import AccessAudit
+from models.agent_action_log import AgentActionLog
 from models.wb_parcel import WbParcel
 
 __all__ = [
@@ -86,5 +87,6 @@ __all__ = [
     "UserShopAccess",
     "UserCapability",
     "AccessAudit",
+    "AgentActionLog",
     "WbParcel",
 ]
