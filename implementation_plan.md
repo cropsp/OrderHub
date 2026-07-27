@@ -4309,6 +4309,34 @@ in this document where applicable, to avoid duplication.
 
 ---
 
+**Recent state (2026-07-22 … 07-27) — pointer for a new session**
+
+Shipped to prod: **WB-1 + WB-3** (read-only WesternBid parcel mirror + "Print WB Label" thermal-label
+fetch from the order card; label type by `ShippingType`; manager-confirm order↔parcel match); **ORDER-CARD-1**
+(Shopify order number `91890_XXXX` in card + list, product thumbnails); **SHOPIFY-REFUNDS** (Model 2 —
+refunds as dated `order_refunds` records netted in the refund's month; retro-fix ran, 3 rows on prod;
+reconciliation ties per complete month). WB is live on prod (creds + `WESTERNBID_BASE_URL`).
+
+Built but **NOT merged/deployed** — branch `feat/mcp-warehouse`: **MCP-WAREHOUSE**, a local **stdio**
+MCP server (`mcp_server/`) letting an agent populate materials/receipts/BOMs/overhead via the CRM's own
+REST API (loopback → all guards cover it) as a MANAGER agent user, writes audited in `agent_action_log`.
+Dev-verified live (agent connects, sees only granted shops, guards hold). Usage: `mcp_server/README.md`;
+connection + prod rollout + creds location: `docs/integrations/mcp-server.md`; locked decisions: `task.md`.
+
+**Currency wall (blocks the payoff):** `order_consumption_service.py` SKIPS COGS when material currency
+≠ order currency. Materials are UAH-only, main orders USD → the warehouse moves COGS for **KoraKlenu only**
+until **`FX-CONVERSION`** (single UAH→USD) lands — the next big sprint after warehouse data is entered.
+
+**Where we left off:** Sergii will trial real Google-Sheet → catalog population on dev (Opus for the
+judgment-heavy first pass, Sonnet for routine); then prod rollout per `docs/integrations/mcp-server.md`
+(the one manual owner step is a Cloudflare Access **service token** + a small `client.py` header change);
+then `FX-CONVERSION`, then historical COGS recompute. **Uncommitted docs to commit onto
+`feat/mcp-warehouse`:** `CLAUDE.md` + `docs/integrations/mcp-server.md` (both rewritten for the new MCP).
+Follow-ups filed in the deferred table above: SHOPIFY-REFUNDS-followup-1/2. Other open items live in the
+Cowork memory backlog.
+
+---
+
 **Open Architectural Questions (parking lot, no work in flight)**
 
 Discovered during BUG-10 / NP-FIX-1 review (2026-05-10). Not work items,

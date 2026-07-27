@@ -1,54 +1,112 @@
-# MCP Server — Vision & Status
+# MCP Server — operations & connection runbook
 
-## Purpose
+> **Status (2026-07-27): LIVE, superseded rewrite.** The old SSE server in
+> `backend/routers/mcp.py` was **deleted** — it never worked (three API mismatches vs its
+> pinned SDK, tool-layer auth absent). The current MCP server is a **separate local stdio
+> process** at `mcp_server/`, a warehouse/catalog agent. Built on branch `feat/mcp-warehouse`.
+>
+> **Primary usage + tool reference: `mcp_server/README.md`.** This file is the *ops runbook*
+> — how to connect on dev, how to roll out to prod, where credentials live. It does not
+> duplicate the README.
 
-OrderHub's MCP server enables external AI agents (Claude Desktop, OpenClaw, Hermes, or any MCP-compatible client) to operate as a virtual manager inside the CRM. The goal is full operational parity with a human manager:
+## What it is (one paragraph)
 
-- Create and print shipping labels (Nova Poshta TTN)
-- Monitor order pipeline and status changes
-- Manage product catalog and stock levels
-- Track inventory and alert when products are running low
-- Execute any action a human manager can perform in the UI
+A stdio MCP server, run locally on the operator's machine, spawned by the MCP client
+(Claude Code / Claude Desktop). It exposes ~21 warehouse+catalog tools (materials, receipts,
+stock adjust, overhead, BOMs, product cost compute). Every tool call travels the CRM's own
+REST API as a dedicated **MANAGER** agent user (`agent@orderhub.dev` on dev), so the existing
+shop-scope + capability + money-leak guards all keep covering it — there is deliberately no
+second write path. Reads/writes are audited in `agent_action_log`. Full rationale + tool list
++ safety rails: `mcp_server/README.md`.
 
-## Current State (as of this audit)
+## Where credentials live (NO secrets in this repo)
 
-- MCP server is implemented with SSE transport (`GET /api/mcp/sse`, `POST /api/mcp/messages`)
-- JWT auth guards are in place (SEC-1, completed in Sprint 6)
-- Basic tool exposure is functional
-- The server is NOT the current development priority
+- **Master copy → password manager.** The agent user's password (dev and, later, prod) and —
+  for prod only — the Cloudflare Access service-token id/secret live **only** in the password
+  manager, alongside `ENCRYPTION_KEY`, R2 tokens, etc. Never in git.
+- **Local working copy → `mcp_server/.env`** (git-ignored by the repo's global `.env` rule).
+  Holds `ORDERHUB_API_URL`, `ORDERHUB_AGENT_EMAIL`, `ORDERHUB_AGENT_PASSWORD` (+ the CF service
+  token headers for prod). Created from `mcp_server/.env.example`.
+- The password is printed **once** by `backend/scripts/provision_agent_user.py`. Re-issue with
+  `--reset-password`; inspect state with `--show` (no secret printed).
 
-## What Works
+## Connecting on DEV (the simple path — start here)
 
-- SSE connection with JWT authentication
-- Basic message exchange between agent and server
-- Auth protection on both `/sse` and `/messages` endpoints
+Dev backend is `http://localhost:8000` on the same machine → no Cloudflare Access, no service
+token. Use Claude Code in WSL (it spawns the binary directly).
 
-## Known Issues (Deferred)
+1. `./start-dev.sh` (backend must be reachable when the first tool call fires, not at launch).
+2. Agent user already provisioned on dev (`agent@orderhub.dev`, MANAGER, `view_costs`, granted
+   KoraKlenu + Lamamarka Shopify). Re-provision / narrow grants:
+   `cd backend && source venv/bin/activate && python scripts/provision_agent_user.py --shops KoraKlenu`
+3. `cp mcp_server/.env.example mcp_server/.env` → paste the agent password.
+4. Register with Claude Code — `.mcp.json` at repo root (carries no secret; safe to commit):
+   ```json
+   { "mcpServers": { "orderhub-dev": {
+       "command": "/home/serhii/projects/OrderHub/mcp_server/venv/bin/python",
+       "args": ["/home/serhii/projects/OrderHub/mcp_server/main.py"],
+       "env": { "ORDERHUB_API_URL": "http://localhost:8000",
+                "ORDERHUB_AGENT_EMAIL": "agent@orderhub.dev" } } } }
+   ```
+   (password from `mcp_server/.env`). Or: `claude mcp add orderhub-dev --scope project -- <venv-python> <main.py>`
+5. First session — three prompts: "list materials with unit cost + stock"; "record a purchase
+   against <material>: 20 dm² at 610 UAH, supplier X, invoice Y"; "what did that do to the
+   weighted-average cost?" Then check: `SELECT tool, ok, summary FROM agent_action_log ORDER BY created_at DESC LIMIT 5;`
+   Receipts are append-only — use a throwaway material for the very first run if unsure.
 
-- **SEC-06**: No session-keyed transports — concurrent SSE connections may experience cross-talk. Must be fixed before multi-user MCP usage.
-- `handle_post_message` has a mypy signature mismatch
-- No rate limiting on MCP endpoints (SEC-15, in TECH_DEBT)
+## PROD rollout runbook
 
-## Development Plan
+`mcp_server/` is **not deployed** — it stays on the laptop and is pointed at prod. Prod needs
+only the **backend changes** + a prod agent user + the Cloudflare Access path.
 
-MCP server development is paused until the core CRM is stable:
+**A. Deploy the backend** (13 files, no frontend; rides the image rebuild):
+1. Merge `feat/mcp-warehouse` → main, deploy as usual.
+2. `docker compose -f docker-compose.prod.yml build backend && up -d backend`, then
+   `exec backend alembic upgrade head` → **`f982a7258777`** (additive: `agent_action_log`, 3
+   indexes; round-trip verified).
+3. `mcp.py` deletion is zero-risk — `/api/mcp/sse` + `/api/mcp/messages` disappear, nothing
+   consumed them, they never worked. Reduces public surface.
+4. **`products.py` fix is the one user-facing change:** any prod user with `view_costs=false`
+   currently gets a **500 on every product read**; after, they get 200 with
+   `variants[].cost_price` nulled. Check who's affected:
+   `SELECT u.email, u.role, c.capability, c.granted FROM users u LEFT JOIN user_capability c ON c.user_id = u.id WHERE u.role != 'OWNER';`
+   If prod is owner-only, this is invisible.
 
-1. First: complete production deployment (Sprint 11)
-2. First: resolve all HIGH/CRITICAL items from security audit
-3. Then: resume MCP development with session isolation (SEC-06)
-4. Then: expand tool surface (order creation, TTN printing, inventory queries)
-5. Then: add rate limiting and audit logging for agent actions
+**B. Create the prod agent user** (doesn't exist there; WORKDIR `/app`):
+```
+docker compose -f docker-compose.prod.yml exec backend \
+  python scripts/provision_agent_user.py --shops KoraKlenu
+```
+Grant **KoraKlenu only** initially — it's the sole UAH shop, the only place data changes COGS
+before `FX-CONVERSION`. Prints the prod password once → password manager + `mcp_server/.env`
+(a **different** value from dev). `--shops` takes exact shop names (errors with the list if wrong).
 
-## Architecture Notes
+**C. Cloudflare Access** — prod is Access-gated (a `curl .../api/health` returns 302 to login).
+So the MCP client needs a **CF Access service token**:
+1. `curl -s -o /dev/null -w '%{http_code}\n' https://orderhub.orderapp.uk/api/health` — 200 =
+   open (skip this section); 302 = gated (expected).
+2. Create a service token in the Cloudflare dashboard for the orderhub app; add an Access policy
+   allowing that token to reach `/api/`.
+3. **`mcp_server/client.py` needs a small change** to send `CF-Access-Client-Id` +
+   `CF-Access-Client-Secret` headers (filed; ask CC to add when doing prod). The two values →
+   password manager + `.env`.
 
-- MCP router: `backend/routers/mcp.py`
-- Transport: SSE (Server-Sent Events)
-- Auth: JWT token in `Authorization` header
-- Protocol: Model Context Protocol specification
+**D. Register prod as a SEPARATE MCP server** (`orderhub-prod`, `ORDERHUB_API_URL=https://orderhub.orderapp.uk`),
+not by editing the dev URL — writes are append-only with no undo, so you never want to discover
+mid-session you were pointed at the wrong database.
 
-## How to Test (when development resumes)
+## Revocation
 
-1. Start the backend
-2. Connect via MCP client (e.g. Claude Desktop) with a valid JWT
-3. Send a test message to verify round-trip
-4. Check `backend/logs/server.log` for MCP-related entries
+`UPDATE users SET is_active = false WHERE email = 'agent@orderhub.dev';` — checked by both
+`get_current_user` and `/api/auth/refresh`, so access dies within 15 min. (An `api_keys` table
+with a real revocation list is filed as a precondition for any *remote* transport.)
+
+## Deliberately NOT done (see `task.md` MCP-WAREHOUSE + the memory backlog)
+
+- **Remote transport (Streamable HTTP).** Would let Cowork / phone / web drive it, but it's a
+  separate multi-day sprint (mcp ≥1.8 + pydantic collision, nginx `proxy_buffering off`,
+  `api_keys` auth, unproven prod streaming) with poor cost/benefit for single-operator warehouse
+  entry from the desk. stdio + service token covers the real use case.
+- **FX-CONVERSION (UAH→USD).** The sprint that makes populated warehouse data change COGS for the
+  3 USD shops (today: KoraKlenu only). The next big sprint after warehouse data is in.
+- Historical COGS recompute; product `cost_price` wiring (feeds nothing today).
