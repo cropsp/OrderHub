@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models.shop import Shop, ShopPlatform
-from models.order import Order, OrderStatus
+from models.order import Order, OrderRefund, OrderStatus
 from models.product import ProductVariant
 from schemas.common import ImportResult
 from schemas.order import OrderCreate, OrderItemCreate
@@ -127,6 +128,37 @@ query GetProductFeaturedImage($id: ID!) {
 }
 """
 
+# SHOPIFY-REFUNDS — refund capture (Model 2). Deliberately separate from ORDERS_QUERY:
+# refunds post long after the order, so this path windows by `updated_at` (a refund
+# bumps the order's updatedAt) rather than `created_at`, and asks only for what a refund
+# row needs. `Order.refunds` is a plain list (per-order refund counts are tiny), and each
+# refund carries its own `createdAt` (the Model-2 date anchor) + `totalRefundedSet`.
+REFUNDS_QUERY = """
+query GetOrderRefunds($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    edges {
+      node {
+        id
+        refunds {
+          id
+          createdAt
+          totalRefundedSet {
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 def _parse_shopify_gid(gid: Optional[str]) -> str:
     """Extract numeric tail from a Shopify GID like 'gid://shopify/Product/12345'."""
@@ -184,6 +216,19 @@ def _build_orders_query_filter(
     return " ".join(parts) or None
 
 
+def _build_refund_query_filter(updated_since: Optional[datetime]) -> Optional[str]:
+    """Build the Shopify `query:` search string for the refund sync.
+
+    Filters by `updated_at` (not `created_at`): a refund bumps its order's `updatedAt`,
+    so a rolling `updated_at:>=…` window catches refunds posted long after the order —
+    the case the order sync (windowed by `created_at`, skip-on-existing) never revisits.
+    Returns None for the full retro-fix (walk every order).
+    """
+    if updated_since is None:
+        return None
+    return f"updated_at:>={updated_since.isoformat()}"
+
+
 def _parse_shopify_dt(raw: Optional[str]) -> Optional[datetime]:
     """Parse a Shopify ISO-8601 timestamp (…Z) into an aware datetime."""
     if not raw:
@@ -210,10 +255,15 @@ class ShopifyThrottledError(Exception):
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
-async def _post_orders_page(shop_url: str, access_token: str, variables: dict) -> dict:
-    """POST one page of the orders query and return the FULL JSON body (data +
+async def _post_orders_page(
+    shop_url: str, access_token: str, variables: dict, query: str = ORDERS_QUERY
+) -> dict:
+    """POST one page of an orders-shaped query and return the FULL JSON body (data +
     extensions). Retries transient HTTP errors (tenacity); raises
     ShopifyThrottledError on a THROTTLED GraphQL error so the caller can back off.
+
+    `query` defaults to ORDERS_QUERY (order sync); the refund sync passes REFUNDS_QUERY.
+    Both are `orders(...)` connection queries, so the same page/throttle plumbing serves.
     """
     if not shop_url.startswith("http"):
         shop_url = f"https://{shop_url}"
@@ -222,7 +272,7 @@ async def _post_orders_page(shop_url: str, access_token: str, variables: dict) -
         "X-Shopify-Access-Token": access_token,
         "Content-Type": "application/json",
     }
-    payload = {"query": ORDERS_QUERY, "variables": variables}
+    payload = {"query": query, "variables": variables}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(url, headers=headers, json=payload)
@@ -246,12 +296,14 @@ async def _post_orders_page(shop_url: str, access_token: str, variables: dict) -
     return body
 
 
-async def _fetch_orders_page(shop_url: str, access_token: str, variables: dict) -> dict:
+async def _fetch_orders_page(
+    shop_url: str, access_token: str, variables: dict, query: str = ORDERS_QUERY
+) -> dict:
     """Fetch one page, transparently backing off on THROTTLED up to
     MAX_THROTTLE_RETRIES times (task rule 5 — do not retry blindly)."""
     for attempt in range(1, MAX_THROTTLE_RETRIES + 1):
         try:
-            return await _post_orders_page(shop_url, access_token, variables)
+            return await _post_orders_page(shop_url, access_token, variables, query)
         except ShopifyThrottledError as exc:
             if attempt == MAX_THROTTLE_RETRIES:
                 raise
@@ -722,3 +774,174 @@ async def backfill_order_numbers(db: AsyncSession, shop: Shop) -> Dict[str, int]
         shop.id, updated, examined,
     )
     return {"updated": updated, "examined": examined}
+
+
+async def sync_shop_refunds(
+    db: AsyncSession,
+    shop: Shop,
+    *,
+    updated_since: Optional[datetime] = None,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Capture Shopify refunds as dated events and upsert them into `order_refunds`
+    (SHOPIFY-REFUNDS, Model 2).
+
+    Pages the shop's Shopify orders requesting each order's `refunds` list and upserts
+    one row per Shopify refund, keyed by `shopify_refund_id`. Model 2: each refund is
+    stored with its own `createdAt` as `refunded_at`, independent of the order's date, so
+    finance nets it out in the period the refund occurred.
+
+    One path, two modes:
+      - Retro-fix / full backfill: `updated_since=None` → walks ALL orders (query=None).
+      - Daily ongoing poll: `updated_since=<ts>` → filters `updated_at:>=…`, so refunds
+        posted long after the order (which the order sync never revisits) are caught.
+
+    Idempotent: existing `shopify_refund_id`s are skipped in memory and guarded at the DB
+    by `uq_order_refund_shopify_id` (ON CONFLICT DO NOTHING), so re-runs write ~0 rows.
+    `dry_run=True` computes the tally (incl. a per-month reconciliation) without writing.
+
+    Reuses `_fetch_orders_page` (throttle backoff) and the `_bump_month` reconciliation
+    shape (found / already_present / created) exactly like `sync_shop_orders`. Refunds are
+    stored policy-free — the revenue-status filter is applied later, in finance.
+    """
+    zero = {
+        "dry_run": dry_run,
+        "refunds_found": 0,
+        "inserted": 0,
+        "already_present": 0,
+        "skipped_no_order": 0,
+        "by_month": {},
+        "amount_by_currency": {},
+    }
+    if shop.platform != ShopPlatform.SHOPIFY:
+        return zero
+    if not shop.shopify_store_url or not shop.shopify_access_token_encrypted:
+        return zero
+
+    token = decrypt_value(shop.shopify_access_token_encrypted)
+    shop_url = str(shop.shopify_store_url)
+    query_filter = _build_refund_query_filter(updated_since)
+
+    # Refund ids already stored for this shop — the in-memory idempotency guard (the DB
+    # unique constraint is the race-safe backstop). Cheap: refund rows are few.
+    existing_result = await db.execute(
+        select(OrderRefund.shopify_refund_id)
+        .join(Order, OrderRefund.order_id == Order.id)
+        .where(Order.shop_id == shop.id)
+    )
+    existing_ids: set[str] = {rid for rid in existing_result.scalars().all() if rid}
+
+    by_month: Dict[str, Dict[str, int]] = {}
+    amount_by_currency: Dict[str, Decimal] = {}
+    order_id_cache: Dict[str, Any] = {}  # external_id -> Order.id (UUID) or None
+    refunds_found = 0
+    inserted = 0
+    already_present = 0
+    skipped_no_order = 0
+
+    after: Optional[str] = None
+    while True:
+        body = await _fetch_orders_page(
+            shop_url,
+            token,
+            {"first": ORDERS_PAGE_SIZE, "after": after, "query": query_filter},
+            REFUNDS_QUERY,
+        )
+        conn = (body.get("data") or {}).get("orders") or {}
+        edges = conn.get("edges") or []
+        page_info = conn.get("pageInfo") or {}
+
+        for edge in edges:
+            node = (edge.get("node") if edge else None) or {}
+            refunds = node.get("refunds") or []
+            if not refunds:
+                continue
+            ext = _parse_shopify_gid(node.get("id"))
+
+            for refund in refunds:
+                shopify_refund_id = _parse_shopify_gid(refund.get("id"))
+                if not shopify_refund_id:
+                    continue
+                refunded_at = _parse_shopify_dt(refund.get("createdAt"))
+                if refunded_at is None:
+                    continue
+                money = (refund.get("totalRefundedSet") or {}).get("shopMoney") or {}
+                amount = _to_decimal(money.get("amount"))
+                if amount <= 0:
+                    continue  # restock-only / $0 refunds move no money — skip
+                currency = money.get("currencyCode") or "USD"
+
+                refunds_found += 1
+                month = refunded_at.isoformat()[:7]
+                _bump_month(by_month, month, "found")
+                amount_by_currency[currency] = (
+                    amount_by_currency.get(currency, Decimal("0")) + amount
+                )
+
+                if shopify_refund_id in existing_ids:
+                    already_present += 1
+                    _bump_month(by_month, month, "already_present")
+                    continue
+
+                # Resolve the local order lazily (only orders that actually have refunds).
+                if ext not in order_id_cache:
+                    res = await db.execute(
+                        select(Order.id).where(
+                            Order.external_id == ext, Order.shop_id == shop.id
+                        )
+                    )
+                    order_id_cache[ext] = res.scalar_one_or_none()
+                order_id = order_id_cache[ext]
+                if order_id is None:
+                    # Refund on an order we never imported — nothing to attach it to.
+                    skipped_no_order += 1
+                    continue
+
+                existing_ids.add(shopify_refund_id)  # dedup within this same run too
+                _bump_month(by_month, month, "created")
+                if dry_run:
+                    continue
+
+                await db.execute(
+                    pg_insert(OrderRefund)
+                    .values(
+                        order_id=order_id,
+                        shopify_refund_id=shopify_refund_id,
+                        refunded_at=refunded_at,
+                        amount=amount,
+                        currency=currency,
+                    )
+                    .on_conflict_do_nothing(constraint="uq_order_refund_shopify_id")
+                )
+                inserted += 1
+
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+
+        # Same proactive throttle backoff as sync_shop_orders / backfill_order_numbers.
+        cost = (body.get("extensions") or {}).get("cost") or {}
+        throttle = cost.get("throttleStatus") or {}
+        available = throttle.get("currentlyAvailable")
+        requested = float(cost.get("requestedQueryCost") or 0)
+        restore = float(throttle.get("restoreRate") or DEFAULT_RESTORE_RATE) or DEFAULT_RESTORE_RATE
+        if available is not None and float(available) < requested:
+            await asyncio.sleep((requested - float(available)) / restore)
+
+    if not dry_run:
+        await db.flush()
+
+    logger.info(
+        "Refund sync for shop %s: found=%d inserted=%d already_present=%d "
+        "skipped_no_order=%d dry_run=%s",
+        shop.id, refunds_found, inserted, already_present, skipped_no_order, dry_run,
+    )
+    return {
+        "dry_run": dry_run,
+        "refunds_found": refunds_found,
+        "inserted": inserted,
+        "already_present": already_present,
+        "skipped_no_order": skipped_no_order,
+        "by_month": by_month,
+        "amount_by_currency": {k: float(v) for k, v in amount_by_currency.items()},
+    }

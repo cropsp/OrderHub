@@ -261,3 +261,37 @@ async def test_no_dates_keeps_all_time_behaviour():
     assert "ordered_at as date" not in shop_sql, (
         f"Shop distribution gained a date filter without a period. SQL: {shop_sql}"
     )
+
+
+# ── SHOPIFY-REFUNDS (Model 2) ──────────────────────────────
+
+def _refund_sql(sqls: list[str]) -> str:
+    matches = [s for s in sqls if "sum(order_refunds.amount)" in s]
+    assert len(matches) == 1, f"Expected 1 refund query, got {len(matches)}: {sqls}"
+    return matches[0]
+
+
+@pytest.mark.asyncio
+async def test_dashboard_refunds_query_shape_and_dates_by_refunded_at():
+    """The dashboard refund aggregate mirrors finance: SUM(order_refunds.amount),
+    joined to orders, filtered to shipped/completed, grouped by currency, and dated by
+    the refund's own refunded_at (Model 2) within the period."""
+    sqls = await _capture_dashboard_sql(start_date=PERIOD_START, end_date=PERIOD_END)
+
+    refund = _refund_sql(sqls)
+    assert "join orders on order_refunds.order_id = orders.id" in refund
+    assert "orders.status in ('completed', 'shipped')" in refund
+    assert "group by order_refunds.currency" in refund
+    # Dated by refunded_at within the period — not the order's ship/order date.
+    assert "cast(order_refunds.refunded_at as date) >= '2026-03-01'" in refund
+    assert "cast(order_refunds.refunded_at as date) <= '2026-03-31'" in refund
+
+
+@pytest.mark.asyncio
+async def test_dashboard_refunds_all_time_has_no_date_filter():
+    """No period → all-time refunds (matches the all-time revenue behaviour)."""
+    sqls = await _capture_dashboard_sql()
+    refund = _refund_sql(sqls)
+    assert "order_refunds.refunded_at" not in refund, (
+        f"Refund summary gained a date filter without a period. SQL: {refund}"
+    )

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.user import Capability, User, UserRole
-from models.order import Order, OrderStatus
+from models.order import Order, OrderRefund, OrderStatus
 from models.shop import Shop
 from models.material import OverheadMaterialReceipt
 from models.packaging import PackagingBox
@@ -142,21 +142,56 @@ async def get_dashboard_stats(
             .group_by(Order.currency)
         )
         rev_result = await db.execute(rev_query)
-        
+        rev_by_currency: dict[str, dict] = {}
         for curr, rev, prod, fee, ship in rev_result.all():
-            # net_profit is computed from the true figures regardless; the
-            # itemised COGS/fees are zeroed on the wire when view_costs is absent
-            # (kept consistent with the finance page).
+            rev_by_currency[curr] = {
+                "revenue": float(rev or 0),
+                "prod": float(prod or 0),
+                "fee": float(fee or 0),
+                "ship": float(ship or 0),
+            }
+
+        # SHOPIFY-REFUNDS (Model 2): refunds summed by their own refunded_at within the
+        # period, joined to Order + filtered to the same shipped/completed population as
+        # revenue, so a refund nets only against sales that were actually booked. Mirrors
+        # finance_service._run_refunds_aggregate so the two pages reconcile.
+        refund_period_filter = []
+        if has_period:
+            refund_day_col = cast(OrderRefund.refunded_at, Date)
+            refund_period_filter = [
+                refund_day_col >= start_date,
+                refund_day_col <= end_date,
+            ]
+        refund_query = (
+            select(
+                OrderRefund.currency,
+                func.sum(OrderRefund.amount).label("tot_refund"),
+            )
+            .join(Order, OrderRefund.order_id == Order.id)
+            .where(Order.status.in_([OrderStatus.COMPLETED, OrderStatus.SHIPPED]))
+            .where(*base_filter)
+            .where(*refund_period_filter)
+            .group_by(OrderRefund.currency)
+        )
+        refund_result = await db.execute(refund_query)
+        refunds_by_currency: dict[str, float] = {
+            curr: float(amt or 0) for curr, amt in refund_result.all()
+        }
+
+        for curr in sorted({*rev_by_currency, *refunds_by_currency}):
+            r = rev_by_currency.get(curr, {"revenue": 0.0, "prod": 0.0, "fee": 0.0, "ship": 0.0})
+            refund_amt = refunds_by_currency.get(curr, 0.0)
+            # net_profit is computed from the true figures regardless; the itemised
+            # COGS/fees are zeroed on the wire when view_costs is absent (kept consistent
+            # with the finance page). Refunds are a revenue-side line — shown under
+            # view_finance like revenue/net_profit, not gated by view_costs.
             revenue_data.append(RevenueByCurrency(
                 currency=curr,
-                total_revenue=float(rev or 0),
-                total_production_cost=(
-                    float(prod or 0) if can_view_costs else 0.0
-                ),
-                total_fees=(
-                    float(fee or 0) + float(ship or 0) if can_view_costs else 0.0
-                ),
-                net_profit=float(rev or 0) - float(prod or 0) - float(fee or 0) - float(ship or 0)
+                total_revenue=r["revenue"],
+                total_production_cost=(r["prod"] if can_view_costs else 0.0),
+                total_fees=(r["fee"] + r["ship"] if can_view_costs else 0.0),
+                total_refunds=refund_amt,
+                net_profit=r["revenue"] - r["prod"] - r["fee"] - r["ship"] - refund_amt,
             ))
 
         # Daily Trend — the selected period, or the last 30 days when unscoped.

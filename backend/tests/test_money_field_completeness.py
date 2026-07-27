@@ -66,6 +66,11 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "balance_owed": "margin",
     # money (generic amounts)
     "amount": "money",
+    # SHOPIFY-REFUNDS: refunds returned to the customer — a revenue-side deduction,
+    # gated at the route level by view_finance (like revenue/net_profit), NOT an
+    # itemised view_costs cost. The finance page's `refunds` KpiCard is covered via
+    # its leaf `amount`/`change_percent` fields.
+    "total_refunds": "money",
     "base_amount": "money",
     "computed_amount": "money",
     "paid_amount": "money",

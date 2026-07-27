@@ -108,6 +108,13 @@ export default function ShopFinancePage() {
                 value={data.fees}
                 formatter={formatCount}
               />
+              {data.refunds.current.length > 0 && (
+                <FinanceKpiCard
+                  title="Refunds"
+                  value={data.refunds}
+                  formatter={formatCount}
+                />
+              )}
               <FinanceKpiCard
                 title="Net Profit"
                 value={data.net_profit}

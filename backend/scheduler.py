@@ -15,7 +15,7 @@ from database import async_session_factory
 from models.shop import Shop, ShopPlatform
 from models.user import User
 from models.wb_parcel import WbParcel
-from services.shopify_sync import sync_shop_orders
+from services.shopify_sync import sync_shop_orders, sync_shop_refunds
 from services.westernbid import (
     WB_MAX_PAGE_SIZE,
     WesternBidClient,
@@ -34,6 +34,12 @@ _wb_missing_creds_logged = False
 # The WB poll window overlaps deliberately so a transient failure self-heals on
 # the next run.
 WB_POLL_WINDOW_DAYS = 3
+
+# Refund sync (SHOPIFY-REFUNDS) lookback. A rolling `updated_at` window — a refund
+# bumps its order's updatedAt, so anything refunded in the last N days is re-read and
+# upserted idempotently. 35 days always covers a full calendar month + margin, so a
+# refund is never missed between daily runs, even across a month boundary.
+REFUND_SYNC_LOOKBACK_DAYS = 35
 
 async def run_shopify_sync():
     """Background task to sync all active Shopify stores."""
@@ -92,6 +98,52 @@ async def run_shopify_sync():
             except Exception as e:
                 logger.error(f"Failed to sync shop {shop.name}: {e}")
                 await db.rollback()
+
+
+async def run_shopify_refund_sync():
+    """Daily job: capture Shopify refunds as dated events (SHOPIFY-REFUNDS, Model 2).
+
+    Third scheduler job, same shape as run_shopify_sync. For each active Shopify shop it
+    upserts refunds on orders updated in the last REFUND_SYNC_LOOKBACK_DAYS days — the
+    window that catches refunds posted long after the order (which the 15-min order sync,
+    windowed by created_at + skip-on-existing, never revisits). Idempotent; the full
+    historical retro-fix runs once via the /backfill-refunds endpoint.
+    """
+    logger.info("Starting Shopify refund sync job...")
+
+    async with async_session_factory() as db:
+        # Migration guard, same as the other jobs: a missing system user means
+        # migrations have not run, so `order_refunds` may not exist — bail loudly.
+        system_user_result = await db.execute(
+            select(User).where(User.id == SYSTEM_USER_ID)
+        )
+        if system_user_result.scalar_one_or_none() is None:
+            logger.error(
+                "System user %s not found — skipping Shopify refund sync (migrations "
+                "not applied?).",
+                SYSTEM_USER_ID,
+            )
+            return
+
+        shops_result = await db.execute(
+            select(Shop).where(Shop.is_active == True, Shop.platform == ShopPlatform.SHOPIFY)
+        )
+        shops = shops_result.scalars().all()
+
+        updated_since = datetime.now(timezone.utc) - timedelta(days=REFUND_SYNC_LOOKBACK_DAYS)
+        for shop in shops:
+            try:
+                summary = await sync_shop_refunds(db, shop, updated_since=updated_since)
+                if summary.get("inserted"):
+                    logger.info(
+                        "Captured %d new refund(s) for shop %s",
+                        summary["inserted"], shop.name,
+                    )
+                await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to sync refunds for shop {shop.name}: {e}")
+                await db.rollback()
+
 
 async def run_westernbid_poll():
     """Poll WesternBid for recently-sent parcels and upsert the local mirror.
@@ -225,6 +277,16 @@ def start_scheduler():
         run_westernbid_poll,
         'interval',
         minutes=15,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Refund sync (SHOPIFY-REFUNDS) — third job, daily. Refunds settle into monthly
+    # partner payouts, so up-to-a-day latency is fine; a daily cadence keeps the
+    # per-shop refund re-scan cheap versus the 15-min order sync.
+    scheduler.add_job(
+        run_shopify_refund_sync,
+        'interval',
+        days=1,
         max_instances=1,
         coalesce=True,
     )

@@ -56,6 +56,10 @@ class ShopFinanceResponse(BaseModel):
     cogs: KpiCard
     fees: KpiCard
     allocated_overhead_expenses: KpiCard
+    # SHOPIFY-REFUNDS (Model 2): Shopify refunds summed by refund date, subtracted
+    # from net_profit. Its own line so the P&L is legible (never folded into revenue).
+    # current=[] when there are no refunds in the period — frontend auto-hides the card.
+    refunds: KpiCard
     net_profit: KpiCard
     pipeline_value: KpiCard
     order_count: OrderCountCard

@@ -1,9 +1,10 @@
 """
-OrderHub CRM — Order, OrderItem, OrderStatusHistory Models
+OrderHub CRM — Order, OrderItem, OrderStatusHistory, OrderRefund Models
 
 Order: main business entity with shipping address, financial fields, and status workflow.
 OrderItem: individual line items (Etsy CSV can have multiple rows per order).
 OrderStatusHistory: immutable audit log of status changes.
+OrderRefund: Shopify refunds booked as separate dated events (Model 2, SHOPIFY-REFUNDS).
 """
 
 import enum
@@ -233,6 +234,9 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     attachments = relationship(
         "Attachment", back_populates="order", cascade="all, delete-orphan", lazy="selectin"
     )
+    refunds = relationship(
+        "OrderRefund", back_populates="order", cascade="all, delete-orphan", lazy="selectin"
+    )
     packaging = relationship(
         "PackagingBox", foreign_keys=[packaging_id], lazy="selectin"
     )
@@ -325,3 +329,42 @@ class OrderStatusHistory(Base, UUIDPrimaryKeyMixin):
 
     def __repr__(self) -> str:
         return f"<StatusHistory {self.from_status} → {self.to_status}>"
+
+
+class OrderRefund(Base, UUIDPrimaryKeyMixin):
+    """A Shopify refund booked as a separate, dated event (SHOPIFY-REFUNDS, Model 2).
+
+    The order keeps its gross ``total_price``; each refund is recorded here with its
+    own ``refunded_at`` (the Shopify refund's ``createdAt``) so finance nets it out in
+    the period the refund occurred, not the order's original month. ``amount`` is stored
+    as a positive magnitude — finance subtracts it, mirroring how cogs/fees are handled.
+    """
+
+    __tablename__ = "order_refunds"
+    __table_args__ = (
+        UniqueConstraint("shopify_refund_id", name="uq_order_refund_shopify_id"),
+    )
+
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orders.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Shopify refund id (numeric tail of the GID) — globally unique, the idempotency key.
+    shopify_refund_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    # The refund's own createdAt — the Model-2 date anchor (indexed; finance filters on it).
+    refunded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True,
+    )
+    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default="now()",
+        nullable=False,
+    )
+
+    # Relationships
+    order = relationship("Order", back_populates="refunds")
+
+    def __repr__(self) -> str:
+        return f"<OrderRefund {self.shopify_refund_id} {self.amount} {self.currency}>"

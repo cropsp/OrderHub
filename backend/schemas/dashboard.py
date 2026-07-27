@@ -15,6 +15,9 @@ class RevenueByCurrency(BaseModel):
     total_revenue: float
     total_production_cost: float
     total_fees: float
+    # SHOPIFY-REFUNDS (Model 2): refunds booked by refund date, subtracted in net_profit.
+    # Defaults 0.0 so older serialised payloads/tests stay valid.
+    total_refunds: float = 0.0
     net_profit: float
 
 
