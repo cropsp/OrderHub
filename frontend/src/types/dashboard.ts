@@ -9,6 +9,8 @@ export interface RevenueByCurrency {
   total_revenue: number;
   total_production_cost: number;
   total_fees: number;
+  // SHOPIFY-REFUNDS (Model 2): refunds booked by refund date, subtracted in net_profit.
+  total_refunds: number;
   net_profit: number;
 }
 

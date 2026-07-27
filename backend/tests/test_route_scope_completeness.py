@@ -35,6 +35,7 @@ CLASSIFIED: dict[str, str] = {
     "DELETE /api/shops/{shop_id}": "owner-only",
     "POST /api/shops/{shop_id}/sync": "guarded",
     "POST /api/shops/{shop_id}/backfill": "guarded",
+    "POST /api/shops/{shop_id}/backfill-refunds": "guarded",
     "POST /api/shops/{shop_id}/backfill-order-numbers": "guarded",
     "POST /api/shops/{shop_id}/backfill-product-images": "guarded",
     "GET /api/shops/{shop_id}/finance": "guarded",

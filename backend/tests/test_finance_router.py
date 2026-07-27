@@ -245,3 +245,46 @@ async def test_compute_shipping_net_returns_empty_list_when_zero():
     assert isinstance(result, list)
     assert result == []  # no shipping data → empty list → KPI auto-hides
 
+
+# ── SHOPIFY-REFUNDS (Model 2) ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_finance_refunds_aggregate_shape():
+    """The refunds aggregate must SUM(order_refunds.amount), join to orders,
+    filter status IN ('shipped','completed') and GROUP BY the refund currency."""
+    db, captured, shop = _make_db_with_shop()
+
+    await get_shop_finance(
+        db=db, shop_id=shop.id,
+        start_date=date(2026, 7, 1), end_date=date(2026, 7, 31),
+    )
+
+    sqls = _compiled_sqls(captured)
+    refund_sql = next((s for s in sqls if "sum(order_refunds.amount)" in s), None)
+    assert refund_sql is not None, f"No refunds aggregate issued. SQL: {sqls}"
+    # Same order population as revenue (revenue-status netting), joined to orders.
+    assert "join orders on order_refunds.order_id = orders.id" in refund_sql
+    assert "orders.status in ('shipped', 'completed')" in refund_sql
+    assert "group by order_refunds.currency" in refund_sql
+
+
+@pytest.mark.asyncio
+async def test_finance_refunds_dated_by_refunded_at_not_order_date():
+    """Model-2 crux: refunds are filtered/dated by their OWN refunded_at, NOT by the
+    order's COALESCE(shipped_at, ordered_at). This is what makes a June order refunded
+    in July reduce July, not June."""
+    db, captured, shop = _make_db_with_shop()
+
+    await get_shop_finance(
+        db=db, shop_id=shop.id,
+        start_date=date(2026, 7, 1), end_date=date(2026, 7, 31),
+    )
+
+    sqls = _compiled_sqls(captured)
+    refund_sql = next((s for s in sqls if "sum(order_refunds.amount)" in s), None)
+    assert refund_sql is not None, f"No refunds aggregate issued. SQL: {sqls}"
+    # Dated by the refund's own date …
+    assert "cast(order_refunds.refunded_at as date)" in refund_sql
+    # … never by the order's ship/order date (that would be Model 1).
+    assert "coalesce(orders.shipped_at, orders.ordered_at)" not in refund_sql
+

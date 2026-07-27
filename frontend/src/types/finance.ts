@@ -38,6 +38,9 @@ export interface ShopFinanceResponse {
   cogs: KpiCard;
   fees: KpiCard;
   allocated_overhead_expenses: KpiCard;
+  // SHOPIFY-REFUNDS (Model 2): Shopify refunds summed by refund date, subtracted from
+  // net_profit. current=[] when there are no refunds in the period — frontend auto-hides.
+  refunds: KpiCard;
   net_profit: KpiCard;
   pipeline_value: KpiCard;
   order_count: OrderCountCard;

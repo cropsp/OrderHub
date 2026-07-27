@@ -17,6 +17,7 @@ from models.product import Product
 from models.user import User, UserRole
 from schemas.shop import (
     ShopBackfillRequest,
+    ShopRefundBackfillRequest,
     ShopCreate,
     ShopUpdate,
     ShopResponse,
@@ -28,7 +29,11 @@ from services.access_service import (
     propagate_new_shop_to_unrestricted_managers,
 )
 from services.partner_payout_service import find_settlements_overlapping_period
-from services.shopify_sync import sync_shop_orders, backfill_order_numbers
+from services.shopify_sync import (
+    sync_shop_orders,
+    backfill_order_numbers,
+    sync_shop_refunds,
+)
 from services.product_image_service import fetch_and_store_shopify_image
 from services.encryption_service import encrypt_value, decrypt_value
 from services.phone_normalization import normalize_ua_sender_phone
@@ -314,6 +319,45 @@ async def backfill_shop(
         "suspicious_external_ids": suspicious_external_ids,
         "overlapping_settlements": overlapping_settlements,
     }
+
+
+@router.post("/{shop_id}/backfill-refunds")
+async def backfill_shop_refunds(
+    shop_id: uuid.UUID,
+    body: ShopRefundBackfillRequest,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retro-fix: capture Shopify refunds for this shop's existing orders as dated
+    events (SHOPIFY-REFUNDS, Model 2).
+
+    Walks ALL of the shop's Shopify orders, reads each order's `refunds`, and upserts
+    them into `order_refunds` (dedup on `shopify_refund_id`). Idempotent — re-runs write
+    ~0 rows. `dry_run=true` (the default) reports a per-month refund reconciliation
+    (found / already_present / would-create + amount_by_currency) WITHOUT writing — the
+    second approval gate before touching prod. Non-Shopify shops are a no-op.
+    """
+    # Same access rule as manual /sync + /backfill: OWNER/MANAGER with access.
+    await assert_shop_access(db, shop_id, current_user)
+
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))  # noqa: E712
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+
+    try:
+        summary = await sync_shop_refunds(db, shop, updated_since=None, dry_run=body.dry_run)
+        # Real write commits via get_db on return; dry-run must persist nothing.
+        if body.dry_run:
+            await db.rollback()  # belt-and-suspenders: dry-run writes nothing
+    except Exception as e:
+        logger.error(f"[SHOPS] Refund backfill failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Refund backfill failed: {str(e)}",
+        )
+
+    return {"status": "success", **summary}
 
 
 @router.post("/{shop_id}/backfill-order-numbers")

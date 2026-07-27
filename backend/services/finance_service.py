@@ -23,7 +23,7 @@ from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.material import OverheadMaterialReceipt
-from models.order import Order, OrderItem, OrderStatus
+from models.order import Order, OrderItem, OrderRefund, OrderStatus
 from models.shop import Shop
 from schemas.finance import (
     CurrencyAmount,
@@ -180,6 +180,53 @@ async def _run_overhead_aggregate(
     return {
         row.currency: {"allocated_overhead": float(row.allocated_overhead or 0)}
         for row in result.all()
+    }
+
+
+async def _run_refunds_aggregate(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    start: date,
+    end: date,
+) -> dict[str, dict]:
+    """Per-currency SUM(OrderRefund.amount) booked in [start, end] by REFUND date.
+
+    SHOPIFY-REFUNDS / Model 2: refunds are dated by their own ``refunded_at`` (not the
+    order's ship/order date), so a June order refunded in July reduces July, not June.
+    Joined to Order and filtered to REVENUE_STATUSES so a refund nets only against the
+    same order population that produced revenue — a cancelled+refunded order (excluded
+    from revenue) is not double-subtracted.
+    """
+    stmt = (
+        select(
+            OrderRefund.currency.label("currency"),
+            func.coalesce(func.sum(OrderRefund.amount), 0).label("refunds"),
+        )
+        .join(Order, OrderRefund.order_id == Order.id)
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.in_(REVENUE_STATUSES))
+        .where(cast(OrderRefund.refunded_at, Date) >= start)
+        .where(cast(OrderRefund.refunded_at, Date) <= end)
+        .group_by(OrderRefund.currency)
+    )
+    result = await db.execute(stmt)
+    return {
+        row.currency: {"refunds": float(row.refunds or 0)}
+        for row in result.all()
+    }
+
+
+def _empty_kpi_row() -> dict:
+    """A zeroed per-currency kpi row — used when overhead or refunds introduce a
+    currency that had no orders in the period."""
+    return {
+        "revenue": 0.0,
+        "cogs": 0.0,
+        "fees": 0.0,
+        "order_count": 0,
+        "aov": 0.0,
+        "missing_cost_count": 0,
+        "with_computed_cost_count": 0,
     }
 
 
@@ -418,20 +465,60 @@ async def _run_time_series(
         .order_by(bucket)
     )
     result = await db.execute(stmt)
-    points: list[TimeSeriesPoint] = []
+    # Accumulate into a keyed map so refunds (dated by their own refunded_at) can be
+    # netted into the matching bucket+currency — SHOPIFY-REFUNDS Model 2. A bucket with
+    # only refunds (no orders) still surfaces, as a negative net_profit point.
+    points_by_key: dict[tuple[str, str], dict] = {}
     for row in result.all():
         bucket_val = row.bucket
         date_str = (
             bucket_val.isoformat() if hasattr(bucket_val, "isoformat") else str(bucket_val)
         )
-        points.append(
-            TimeSeriesPoint(
-                date=date_str,
-                currency=row.currency,
-                revenue=float(row.revenue or 0),
-                net_profit=float(row.net_profit or 0),
-            )
+        points_by_key[(date_str, row.currency)] = {
+            "revenue": float(row.revenue or 0),
+            "net_profit": float(row.net_profit or 0),
+        }
+
+    # Refunds bucketed by refunded_at at the same granularity, same order population.
+    refund_bucket = (
+        cast(OrderRefund.refunded_at, Date)
+        if granularity == "day"
+        else cast(func.date_trunc("month", OrderRefund.refunded_at), Date)
+    )
+    refund_stmt = (
+        select(
+            refund_bucket.label("bucket"),
+            OrderRefund.currency.label("currency"),
+            func.sum(OrderRefund.amount).label("refunds"),
         )
+        .join(Order, OrderRefund.order_id == Order.id)
+        .where(Order.shop_id == shop_id)
+        .where(Order.status.in_(REVENUE_STATUSES))
+        .where(cast(OrderRefund.refunded_at, Date) >= start)
+        .where(cast(OrderRefund.refunded_at, Date) <= end)
+        .group_by(refund_bucket, OrderRefund.currency)
+    )
+    refund_result = await db.execute(refund_stmt)
+    for row in refund_result.all():
+        bucket_val = row.bucket
+        date_str = (
+            bucket_val.isoformat() if hasattr(bucket_val, "isoformat") else str(bucket_val)
+        )
+        point = points_by_key.setdefault(
+            (date_str, row.currency), {"revenue": 0.0, "net_profit": 0.0}
+        )
+        point["net_profit"] -= float(row.refunds or 0)
+
+    points = [
+        TimeSeriesPoint(
+            date=date_str,
+            currency=currency,
+            revenue=data["revenue"],
+            net_profit=data["net_profit"],
+        )
+        for (date_str, currency), data in points_by_key.items()
+    ]
+    points.sort(key=lambda p: (p.date, p.currency))
     return points
 
 
@@ -469,33 +556,32 @@ async def get_shop_finance(
     previous_rows = await _run_kpi_aggregate(db, shop_id, prev_start, prev_end)
     overhead_current = await _run_overhead_aggregate(db, shop_id, start_date, end_date)
     overhead_previous = await _run_overhead_aggregate(db, shop_id, prev_start, prev_end)
+    refunds_current = await _run_refunds_aggregate(db, shop_id, start_date, end_date)
+    refunds_previous = await _run_refunds_aggregate(db, shop_id, prev_start, prev_end)
     pipeline_current = await _run_pipeline_aggregate(db, shop_id, start_date, end_date)
     pipeline_previous = await _run_pipeline_aggregate(db, shop_id, prev_start, prev_end)
     shipping_current = await _run_shipping_aggregate(db, shop_id, start_date, end_date)
     shipping_previous = await _run_shipping_aggregate(db, shop_id, prev_start, prev_end)
     time_series = await _run_time_series(db, shop_id, start_date, end_date, granularity)
 
-    # MAT-5: merge per-currency overhead into the kpi-row dicts so a currency
-    # that only has overhead (no orders) still appears in net_profit.
-    for source, target in (
-        (overhead_current, current_rows),
-        (overhead_previous, previous_rows),
+    # MAT-5 / SHOPIFY-REFUNDS: merge per-currency overhead + refunds into the kpi-row
+    # dicts so a currency that only has overhead or only has refunds (no orders in this
+    # period) still appears in net_profit. Refunds are dated by their own refunded_at
+    # (Model 2), so they land in the period they occurred, not the order's month.
+    for overhead_src, refunds_src, target in (
+        (overhead_current, refunds_current, current_rows),
+        (overhead_previous, refunds_previous, previous_rows),
     ):
-        for currency, row in source.items():
-            if currency not in target:
-                target[currency] = {
-                    "revenue": 0.0,
-                    "cogs": 0.0,
-                    "fees": 0.0,
-                    "order_count": 0,
-                    "aov": 0.0,
-                    "missing_cost_count": 0,
-                    "with_computed_cost_count": 0,
-                }
-            target[currency]["allocated_overhead"] = row["allocated_overhead"]
-        # Fill default 0 for currencies that have orders but no overhead.
+        for currency, row in overhead_src.items():
+            target.setdefault(currency, _empty_kpi_row())["allocated_overhead"] = row[
+                "allocated_overhead"
+            ]
+        for currency, row in refunds_src.items():
+            target.setdefault(currency, _empty_kpi_row())["refunds"] = row["refunds"]
+        # Fill default 0 for currencies missing either subtractive term.
         for row in target.values():
             row.setdefault("allocated_overhead", 0.0)
+            row.setdefault("refunds", 0.0)
         # Compute net_profit per-currency after all subtractive terms are known.
         for row in target.values():
             row["net_profit"] = (
@@ -503,6 +589,7 @@ async def get_shop_finance(
                 - row["cogs"]
                 - row["fees"]
                 - row["allocated_overhead"]
+                - row["refunds"]
             )
 
     revenue = _build_kpi(current_rows, previous_rows, "revenue")
@@ -511,6 +598,7 @@ async def get_shop_finance(
     allocated_overhead_expenses = _build_kpi(
         current_rows, previous_rows, "allocated_overhead"
     )
+    refunds = _build_kpi(current_rows, previous_rows, "refunds")
     net_profit = _build_kpi(current_rows, previous_rows, "net_profit")
     aov = _build_kpi(current_rows, previous_rows, "aov")
     pipeline_value = _build_kpi(pipeline_current, pipeline_previous, "pipeline_value")
@@ -542,6 +630,7 @@ async def get_shop_finance(
         cogs=cogs,
         fees=fees,
         allocated_overhead_expenses=allocated_overhead_expenses,
+        refunds=refunds,
         net_profit=net_profit,
         pipeline_value=pipeline_value,
         order_count=order_count,

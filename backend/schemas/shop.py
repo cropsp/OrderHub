@@ -26,6 +26,16 @@ class ShopBackfillRequest(BaseModel):
         return self
 
 
+class ShopRefundBackfillRequest(BaseModel):
+    """SHOPIFY-REFUNDS retro-fix: fetch + upsert Shopify refunds for existing orders."""
+
+    # dry_run defaults TRUE — the second approval gate (task workflow). A real write
+    # must be an explicit dry_run=false so refund rows never land on prod unreviewed.
+    # No date range: the retro-fix walks every order (the ongoing poll windows by
+    # `updated_at` in the scheduler instead).
+    dry_run: bool = True
+
+
 class ShopBase(BaseModel):
     name: str = Field(..., max_length=255)
     platform: ShopPlatform

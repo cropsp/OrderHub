@@ -61,6 +61,7 @@ function buildResponse(overrides: Partial<ShopFinanceResponse> = {}): ShopFinanc
     cogs: { current: [], previous: [], change_percent: null },
     fees: { current: [], previous: [], change_percent: null },
     allocated_overhead_expenses: { current: [], previous: [], change_percent: null },
+    refunds: { current: [], previous: [], change_percent: null },
     net_profit: { current: [], previous: [], change_percent: null },
     pipeline_value: { current: [], previous: [], change_percent: null },
     order_count: { current: 12, previous: 10, change_percent: 20.0 },
@@ -135,6 +136,33 @@ describe('ShopFinancePage', () => {
     renderPage();
     expect(screen.getByText('Allocated Overhead')).toBeInTheDocument();
     expect(screen.getByText(/450\.00 UAH/)).toBeInTheDocument();
+  });
+
+  it('renders the Refunds card when the API returns non-zero refunds (Model 2)', () => {
+    mockFinance.mockReturnValue({
+      data: buildResponse({
+        refunds: {
+          current: [{ currency: 'USD', amount: 29.99 }],
+          previous: [],
+          change_percent: null,
+        },
+      }),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.getByText('Refunds')).toBeInTheDocument();
+    expect(screen.getByText(/29\.99 USD/)).toBeInTheDocument();
+  });
+
+  it('hides the Refunds card when there are no refunds (auto-hide)', () => {
+    mockFinance.mockReturnValue({
+      data: buildResponse(),
+      isLoading: false,
+      error: null,
+    });
+    renderPage();
+    expect(screen.queryByText('Refunds')).not.toBeInTheDocument();
   });
 
   it('renders the BOM-computed-cost info line when orders_with_computed_cost > 0', () => {

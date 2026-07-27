@@ -1,7 +1,8 @@
 import {
   Layers,
   AlertTriangle,
-  DollarSign
+  DollarSign,
+  RotateCcw
 } from 'lucide-react';
 import { MetricCard } from './MetricCard';
 import { formatMoney } from '@/lib/format';
@@ -23,6 +24,13 @@ export default function StatCards({ data, canViewFinance = true }: StatCardsProp
     ? revenue_by_currency.map(r => `${formatMoney(r.net_profit)} ${r.currency}`).join(' / ')
     : '0 USD';
 
+  // SHOPIFY-REFUNDS (Model 2): refunds already reduce net_profit above; surface them
+  // as their own line so the figure is legible. Hidden when there are none.
+  const refundCurrencies = revenue_by_currency.filter(r => r.total_refunds > 0);
+  const refundsDisplay = refundCurrencies
+    .map(r => `${formatMoney(r.total_refunds)} ${r.currency}`)
+    .join(' / ');
+
   return (
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {canViewFinance && (
@@ -31,6 +39,14 @@ export default function StatCards({ data, canViewFinance = true }: StatCardsProp
           value={profitDisplay}
           icon={DollarSign}
           accentColor="text-emerald-400"
+        />
+      )}
+      {canViewFinance && refundCurrencies.length > 0 && (
+        <MetricCard
+          label="Refunds"
+          value={refundsDisplay}
+          icon={RotateCcw}
+          accentColor="text-rose-400"
         />
       )}
       <MetricCard

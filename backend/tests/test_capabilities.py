@@ -210,7 +210,7 @@ def test_finance_strip_blanks_cost_cards_keeps_margin():
         shop_id="s", shop_name="S", period_start_iso="", period_end_iso="",
         granularity="day",
         revenue=card(1000), cogs=card(400), fees=card(50),
-        allocated_overhead_expenses=card(20), net_profit=card(530),
+        allocated_overhead_expenses=card(20), refunds=card(30), net_profit=card(500),
         pipeline_value=card(0),
         order_count=OrderCountCard(current=1, previous=0, change_percent=None),
         aov=card(1000), time_series=[],
@@ -228,7 +228,10 @@ def test_finance_strip_blanks_cost_cards_keeps_margin():
     assert stripped.shipping_net.current == []
     # revenue + margin preserved
     assert stripped.revenue.current[0].amount == 1000
-    assert stripped.net_profit.current[0].amount == 530
+    assert stripped.net_profit.current[0].amount == 500
+    # SHOPIFY-REFUNDS: refunds are a revenue-side deduction (view_finance), NOT an
+    # itemised cost — they stay visible when view_costs is absent.
+    assert stripped.refunds.current[0].amount == 30
 
 
 # ── grant/revoke audit + source symmetry ───────────────────
