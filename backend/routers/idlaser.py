@@ -10,11 +10,12 @@ Role gates (master rule 10): OWNER/MANAGER always; DESIGNER only when
 they are this order's assigned_designer. Anonymous gets 401 via the
 shared Depends chain.
 
-First user-facing SSE endpoint in the codebase. Uses
-``sse_starlette.EventSourceResponse`` (auto-heartbeat) rather than
-``StreamingResponse(media_type="text/event-stream")`` (the latter is
-used in ``routers/mcp.py`` for the MCP-protocol-specific transport and
-is locked per CLAUDE.md gotcha).
+The codebase's only SSE endpoint. Uses
+``sse_starlette.EventSourceResponse`` (auto-heartbeat) rather than a raw
+``StreamingResponse(media_type="text/event-stream")``. (It used to share
+that distinction with ``routers/mcp.py``; that router was removed in
+MCP-WAREHOUSE — the MCP server is now a separate stdio process under
+``mcp_server/``, not a route on this app.)
 """
 
 import json

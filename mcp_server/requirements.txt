@@ -1,0 +1,18 @@
+# OrderHub MCP server — deliberately its own dependency set.
+#
+# This process imports nothing from backend/; it talks to OrderHub over REST
+# (MCP-WAREHOUSE §5.4). It therefore has its own venv, because the MCP SDK
+# requires pydantic>=2.11 and the backend app is pinned to pydantic==2.10.4.
+# Keeping them separate means the MCP server can track the SDK without forcing
+# a pydantic upgrade across every schema in the running app.
+#
+#   python3 -m venv mcp_server/venv
+#   mcp_server/venv/bin/pip install -r mcp_server/requirements.txt
+
+mcp==1.28.1
+httpx==0.28.1
+python-dotenv==1.2.2
+
+# ─── Dev / test ────────────────────────────────────────────
+pytest==8.4.2
+pytest-asyncio==1.3.0
