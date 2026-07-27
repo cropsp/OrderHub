@@ -49,14 +49,19 @@ _EXT_TO_MIME = {ext: mime for mime, ext in PRODUCT_IMAGE_MIME.items()}
 def _project_product(product: Product, *, can_view_costs: bool = True) -> ProductRead:
     """Serialize a Product, deriving image_url from image_path (PC-F-1).
 
-    USER-ACCESS-2: `cost_price` is a per-product cost input — nulled unless the
-    caller holds VIEW_COSTS. `price` (the selling price) is revenue-side and
-    stays visible.
+    USER-ACCESS-2: `cost_price` is a per-variant cost input — nulled on every
+    variant unless the caller holds VIEW_COSTS. `price` (the selling price) is
+    revenue-side and stays visible.
     """
     data = ProductRead.model_validate(product)
     data.image_url = f"/api/products/{product.id}/image" if product.image_path else None
     if not can_view_costs:
-        data.cost_price = None
+        # cost_price lives on ProductVariantRead, not on ProductRead — assigning
+        # it at the product level raised ValueError (Pydantic rejects unknown
+        # fields), 500-ing every product read for a caller without VIEW_COSTS
+        # while never censoring anything.
+        for variant in data.variants:
+            variant.cost_price = None
     return data
 
 
