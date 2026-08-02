@@ -4306,10 +4306,12 @@ in this document where applicable, to avoid duplication.
 | S005-followup-2 | Vite proxy SSE chunking on bare-metal: `/api/generate-draft` POST gets immediate `http.disconnect` with zero chunks delivered to frontend | Discovered during S005 smoke (2026-05-21). Backend `sse_starlette` log shows `Got event: http.disconnect. Stop streaming.` immediately after the POST route handler is entered, with **zero chunk events** logged — yet runner_task (per S004 fix `0cc6068` fire-and-forget pattern) survives and completes the pipeline + persists MOCKUP attachment. Frontend's `DraftGenerator` modal stays at "Running pipeline..." indefinitely because no SSE events ever arrive. Same setup was demonstrably working in S004 era (see PART-1-followup-1 / S004 closure entry; 11:21:46 logs include 10 chunk events per click). **NOT introduced by S005** — `frontend/vite.config.ts`, `frontend/src/hooks/useDraftJob.ts`, `backend/services/idlaser_service.py` SSE patterns are unchanged in S005. Suspected environmental drift between S004 and S005 sessions (Vite minor version bump? `http-proxy-middleware` SSE handling change? browser fetch streaming behavior?). Investigation path: (1) `curl -N -X POST http://localhost:8000/api/orders/{id}/generate-draft -H "Authorization: Bearer {jwt}" -H "Content-Type: application/json" -d '{...}'` directly to backend (bypassing Vite) — if SSE chunks stream cleanly here, the issue is squarely in the Vite layer. (2) Compare Vite + http-proxy-middleware versions between S004 and S005 git diffs in `frontend/package-lock.json`. (3) Try adding `selfHandleResponse: true` or `ws: true` to the proxy config to force connection upgrade semantics. Workaround for bare-metal operators: backend pipeline DOES complete and persist MOCKUP — refresh order detail page after ~5s and the DXF appears in Production Assets list. Docker mode (production target) was not full-walked through UI smoke during S005 — CC's Docker gate verified `import idlaser.api` resolves correctly and `docker compose up backend` reaches healthy, but UI click flow inside Docker may behave differently and was not separately exercised. |
 | SHOPIFY-REFUNDS-followup-1 | Shopify `test: true` orders are imported as real revenue; one such order is already in prod | Discovered during the SHOPIFY-REFUNDS reconciliation (2026-07-27). `services/shopify_sync.py:sync_shop_orders` does not filter the order node's `test` flag, so Shopify test orders land as ordinary revenue-bearing orders. Shopify's own analytics excludes them, so they can never reconcile. Evidence: order `91890_1559` (external_id `7076796924060`, $44.49, created 2026-04-13) is the **entire** 2026-04 delta when reconciling against the Shopify order feed — it is the only test order among the store's 831. **Currently latent on prod**: the order sits at status `NEW`, which is outside `REVENUE_STATUSES`, so 2026-04 reconciles to the cent today; if it is ever moved to SHIPPED/COMPLETED it silently adds $44.49 to April. Two parts: (a) skip `test: true` at the node level in the paging loop (the GraphQL `order` node already exposes `test` — no query change needed beyond adding the field); (b) remove/neutralise the one already-imported test order on prod. Deliberately left out of SHOPIFY-REFUNDS to keep that sprint surgical. Small; bundle with the next Shopify-sync-touching sprint. |
 | SHOPIFY-REFUNDS-followup-2 | Finance buckets months by UTC date while Shopify reports in `Europe/Kyiv` — month-boundary drift | Discovered during the SHOPIFY-REFUNDS reconciliation (2026-07-27). `finance_service` casts both the order date (`COALESCE(shipped_at, ordered_at)`) and `OrderRefund.refunded_at` to a **UTC** date (`cast(..., Date)`, `date_trunc('month', ...)`), but Shopify's analytics buckets in the **shop's** timezone (Lamamarka = `Europe/Kyiv`, UTC+2/+3). An order or refund timestamped late-UTC on the last day of a month therefore lands in the previous month in OrderHub and the next month in Shopify. **Measured, not theoretical:** UTC bucketing put 2024-12 off by **$39.99** and 2024-11 off by **$49.99**; re-bucketing in `Europe/Kyiv` took 2024-12 to exactly $0.00 and 2024-11 down to $10.00. Matters most for **partner payouts**, which settle at month-end — under Model 2 a refund is booked in its own period, so a boundary drift shifts money between two settlement periods. Fix is not a one-liner: `Shop` has no timezone column today, so a correct fix likely stores the shop timezone first (Shopify exposes `shop.ianaTimezone`) rather than hardcoding Kyiv — note the codebase already uses `Europe/Kiev` for Nova Poshta. Relates to the **Shop-level region / country** open architectural question below. |
+| MAT-7 | Money on `packaging_boxes` — packaging as a per-order direct cost | Split out of MAT-6 (2026-08-02). `packaging_boxes` has no cost model today (name/dims/weight/stock only), so packaging spend can only land in overhead with no link to the box catalog. Making it a per-order direct cost = the MAT-4 treatment for boxes: cost fields on the box, a costed receipt/ledger, consumption at the SHIPPED transition, coupled to the parcel calculator's box choice. Hits the **same currency wall** as materials (boxes bought UAH, main orders USD → COGS skipped for the 3 USD shops), so it only benefits KoraKlenu until `FX-CONVERSION` — sequence with/after FX, not before. Parked alongside and NOT built in MAT-6: an MCP packaging-restock tool, invoice **photo** attachment, and a real `Invoice` header entity (an invoice is implicit today — receipts sharing `invoice_no`). |
+| SETTINGS-TEST-1 | `SettingsPage.test.tsx` — 9 failing frontend tests on HEAD | Surfaced during MAT-6 (2026-08-02). CC stashed its changes and re-ran on HEAD: identical 9 failures → pre-existing, unrelated to MAT-6, so `npm run test` is not green today. Also seen in MAT-6: `npm run lint` reports 88 pre-existing errors across 32 untouched files (CC's own touched files are clean). Fix both in a dedicated frontend-health cleanup; bundle with TYPECHECK-1 (same area). |
 
 ---
 
-**Recent state (2026-07-22 … 07-27) — pointer for a new session**
+**Recent state (2026-07-22 … 08-02) — pointer for a new session**
 
 Shipped to prod: **WB-1 + WB-3** (read-only WesternBid parcel mirror + "Print WB Label" thermal-label
 fetch from the order card; label type by `ShippingType`; manager-confirm order↔parcel match); **ORDER-CARD-1**
@@ -4317,23 +4319,41 @@ fetch from the order card; label type by `ShippingType`; manager-confirm order�
 refunds as dated `order_refunds` records netted in the refund's month; retro-fix ran, 3 rows on prod;
 reconciliation ties per complete month). WB is live on prod (creds + `WESTERNBID_BASE_URL`).
 
-Built but **NOT merged/deployed** — branch `feat/mcp-warehouse`: **MCP-WAREHOUSE**, a local **stdio**
-MCP server (`mcp_server/`) letting an agent populate materials/receipts/BOMs/overhead via the CRM's own
-REST API (loopback → all guards cover it) as a MANAGER agent user, writes audited in `agent_action_log`.
-Dev-verified live (agent connects, sees only granted shops, guards hold). Usage: `mcp_server/README.md`;
-connection + prod rollout + creds location: `docs/integrations/mcp-server.md`; locked decisions: `task.md`.
+Built but **NOT merged/deployed** — branch `feat/mcp-warehouse`, now carrying **two** sprints:
+**MCP-WAREHOUSE** — a local **stdio** MCP server (`mcp_server/`) letting an agent populate
+materials/receipts/BOMs/overhead via the CRM's own REST API (loopback → all guards cover it) as a
+MANAGER agent user, writes audited in `agent_action_log`; dev-verified live (agent connects, sees only
+granted shops, guards hold). Usage: `mcp_server/README.md`; connection + prod rollout + creds location:
+`docs/integrations/mcp-server.md`; locked decisions were in `task.md` (since overwritten by MAT-6).
+Then **MAT-6** (2026-08-02) — surfaced by the first real invoice load: adds `supplier_sku` to `Material`
+(nullable `String(100)`, indexed; threaded through schemas/materials-router/MCP `create`+`update`+`list`/UI;
+`?search=` now matches article as well as name; MCP dedup guard fires on SKU collision even when names
+differ, overridable via `allow_duplicate_sku`), plus a read-only `GET /api/receipts/by-invoice`
+(own router, `view_costs`-gated wholesale → classified `view_costs-403` in `test_money_field_completeness`)
++ MCP `list_receipts_by_invoice`. Verified: migration round-trip clean, backend 512 / MCP 61 / frontend
+material 18 pass, `tsc` clean, live endpoint returns the right lines. Two commits, `feat/mcp-warehouse`.
+The one deviation (a new money-surface classification) was correct — the completeness guard requires every
+new cost-carrying route to carry a verdict; MAT-6 task.md's "no new classification" expectation was simply
+too strict. Pre-existing frontend-health debt surfaced (not MAT-6's): filed as SETTINGS-TEST-1 above.
 
 **Currency wall (blocks the payoff):** `order_consumption_service.py` SKIPS COGS when material currency
 ≠ order currency. Materials are UAH-only, main orders USD → the warehouse moves COGS for **KoraKlenu only**
 until **`FX-CONVERSION`** (single UAH→USD) lands — the next big sprint after warehouse data is entered.
 
-**Where we left off:** Sergii will trial real Google-Sheet → catalog population on dev (Opus for the
-judgment-heavy first pass, Sonnet for routine); then prod rollout per `docs/integrations/mcp-server.md`
+**Where we left off (2026-08-02):** the first real load is IN the dev DB — 8 supplier invoices →
+13 direct materials + 21 receipts + 7 overhead materials + 9 expenses (51 997,26 грн; verified to
+2 kopecks, only drift a 4-decimal rounding on Galaces S999; no duplicates, deduped by hand on the
+supplier article). MAT-6 then landed, and the 13 materials had their `supplier_sku` **back-filled**
+(agent-driven, metadata only — costs/stock byte-identical; `update_material` structurally cannot touch
+them; each `search=<article>` returns exactly one row). **Next:** (1) **BOM** is the natural next sprint —
+materials exist but no product has a recipe yet, so COGS still computes to nothing; (2) then merge
+`feat/mcp-warehouse` (MCP-WAREHOUSE + MAT-6 together) → main + deploy per `docs/integrations/mcp-server.md`
 (the one manual owner step is a Cloudflare Access **service token** + a small `client.py` header change);
-then `FX-CONVERSION`, then historical COGS recompute. **Uncommitted docs to commit onto
-`feat/mcp-warehouse`:** `CLAUDE.md` + `docs/integrations/mcp-server.md` (both rewritten for the new MCP).
-Follow-ups filed in the deferred table above: SHOPIFY-REFUNDS-followup-1/2. Other open items live in the
-Cowork memory backlog.
+(3) then `FX-CONVERSION` (unlocks USD-shop COGS) and MAT-7 (packaging cost); (4) then historical COGS
+recompute. Docs are fully committed on `feat/mcp-warehouse` — `CLAUDE.md` +
+`docs/integrations/mcp-server.md` (rewritten for the new MCP) landed in `7c7818e`; nothing doc-side is
+left uncommitted. Follow-ups in the deferred table above:
+SHOPIFY-REFUNDS-followup-1/2, MAT-7, SETTINGS-TEST-1. Other open items live in the Cowork memory backlog.
 
 ---
 
