@@ -298,7 +298,13 @@ export interface BomItem {
   material_unit: string;
   material_currency: string;
   material_current_unit_cost: string;
+  // BOM-WASTE-1: the material's waste allowance, denormalized so the editor can
+  // price a draft row whose material is soft-deleted (those are absent from the
+  // active-materials picker, so `fallback` is the only source).
+  material_waste_percent: string;
   material_is_active: boolean;
+  // Waste-inclusive, matching the cost a shipment books. Σ(line_cost) may
+  // differ from the recipe total by a kopeck — the total rounds once.
   line_cost: string;
 }
 

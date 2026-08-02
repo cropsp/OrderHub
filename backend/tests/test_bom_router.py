@@ -115,22 +115,52 @@ def test_replace_bom_rejects_duplicate_material_in_payload():
 
 
 @pytest.mark.asyncio
-async def test_compute_bom_cost_groups_by_currency():
-    """compute_bom_cost SELECT joins materials and groups by
-    materials.currency, with a SUM over qty_per_unit * current_unit_cost."""
+async def test_compute_bom_cost_selects_the_costing_columns():
+    """compute_bom_cost joins materials and projects the four columns its
+    Python fold needs — including waste_percent (BOM-WASTE-1)."""
     db, stmts, _adds = _make_db()
     await bom_service.compute_bom_cost(db, product_id=uuid.uuid4())
 
     assert len(stmts) == 1, f"expected exactly 1 statement, got {len(stmts)}"
     sql = _compiled(stmts[0])
     assert "join materials" in sql, f"must JOIN materials. SQL: {sql}"
-    assert "current_unit_cost" in sql, (
-        f"must reference materials.current_unit_cost. SQL: {sql}"
-    )
-    assert "group by materials.currency" in sql, (
-        f"must GROUP BY materials.currency. SQL: {sql}"
-    )
-    assert "sum(" in sql, f"must aggregate via SUM. SQL: {sql}"
+    for column in ("current_unit_cost", "waste_percent", "qty_per_unit", "currency"):
+        assert column in sql, f"must project materials.{column}. SQL: {sql}"
+
+
+@pytest.mark.asyncio
+async def test_compute_bom_cost_groups_by_currency():
+    """The fold buckets per material currency and rounds each bucket once.
+
+    Behavioural rather than SQL-shape: BOM-WASTE-1 moved the arithmetic out of
+    func.sum() into Python so it performs the same Decimal operations, in the
+    same order, as the consumption path (see test_bom_waste_parity.py).
+    """
+    db, _stmts, _adds = _make_db()
+    # (currency, qty_per_unit, current_unit_cost, waste_percent)
+    rows = [
+        ("UAH", Decimal("2.00"), Decimal("100.0000"), Decimal("10.00")),
+        ("UAH", Decimal("1.00"), Decimal("50.0000"), Decimal("0.00")),
+        ("USD", Decimal("3.00"), Decimal("10.0000"), Decimal("50.00")),
+    ]
+    result = MagicMock()
+    result.all.return_value = rows
+    db.execute = AsyncMock(return_value=result)
+
+    breakdown = await bom_service.compute_bom_cost(db, product_id=uuid.uuid4())
+
+    by_currency = {row.currency: row.amount for row in breakdown}
+    assert by_currency == {
+        "UAH": Decimal("270.00"),  # 2×1.10×100 + 1×1.00×50
+        "USD": Decimal("45.00"),  # 3×1.50×10
+    }
+
+
+@pytest.mark.asyncio
+async def test_compute_bom_cost_empty_recipe_returns_no_rows():
+    """A product with no BOM yields an empty breakdown, not a zero row."""
+    db, _stmts, _adds = _make_db()
+    assert await bom_service.compute_bom_cost(db, product_id=uuid.uuid4()) == []
 
 
 def test_project_bom_item_flags_inactive_material():
@@ -142,6 +172,7 @@ def test_project_bom_item_flags_inactive_material():
         unit="m2",
         currency="UAH",
         current_unit_cost=Decimal("0"),
+        waste_percent=Decimal("0"),
         is_active=False,
     )
     # MagicMock auto-creates a `name` attribute that shadows the kwarg —
@@ -160,3 +191,30 @@ def test_project_bom_item_flags_inactive_material():
     assert projection.material_is_active is False
     assert projection.material_name == "Фанера 4mm"
     assert projection.line_cost == Decimal("0.00")
+
+
+def test_project_bom_item_line_cost_includes_waste():
+    """BOM-WASTE-1: the per-line cost the operator reviews carries the same
+    waste allowance shipment books, and waste_percent rides along so the editor
+    can price a draft row whose material is soft-deleted."""
+    mat = MagicMock(
+        unit="dm2",
+        currency="UAH",
+        current_unit_cost=Decimal("580.0000"),
+        waste_percent=Decimal("15.00"),
+        is_active=True,
+    )
+    mat.name = "Шкіра італійська чорна"
+
+    bom_item = MagicMock()
+    bom_item.id = uuid.uuid4()
+    bom_item.product_id = uuid.uuid4()
+    bom_item.material_id = uuid.uuid4()
+    bom_item.qty_per_unit = Decimal("0.13")
+    bom_item.notes = None
+    bom_item.material = mat
+
+    projection = bom_service.project_bom_item(bom_item)
+    assert projection.material_waste_percent == Decimal("15.00")
+    # 0.13 × 1.15 × 580.00 = 86.71 — not the 75.40 the waste-free path gave.
+    assert projection.line_cost == Decimal("86.71")

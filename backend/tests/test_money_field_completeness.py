@@ -80,6 +80,10 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "change_percent": "neutral",
     "percent": "neutral",
     "waste_percent": "neutral",
+    # BOM-WASTE-1: the material's waste allowance, denormalized onto BomItemRead
+    # so line_cost can include it. A process parameter, not money — already
+    # exposed unstripped as `waste_percent` on the materials surface.
+    "material_waste_percent": "neutral",
     "qty": "neutral",
     "qty_per_unit": "neutral",
     "delta": "neutral",

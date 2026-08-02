@@ -4,14 +4,14 @@ OrderHub CRM — BOM Schemas
 MAT-3: request/response shapes for the Bill-of-Materials editor.
 
 `BomItemRead.line_cost` and `BomCostBreakdown` are denormalized at serialize
-time from the joined Material (current_unit_cost, currency). `material_*`
-fields are populated by the service layer when projecting BomItem into the
-read schema; pattern mirrors `MaterialReceiptRead.effective_unit_cost` in
-schemas/material.py:119-123.
+time from the joined Material (current_unit_cost, currency, waste_percent).
+`material_*` fields are populated by the service layer when projecting BomItem
+into the read schema; pattern mirrors `MaterialReceiptRead.effective_unit_cost`
+in schemas/material.py:119-123.
 """
 
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -61,14 +61,30 @@ class BomItemRead(BaseModel):
     material_unit: str = ""
     material_currency: str = ""
     material_current_unit_cost: Decimal = Decimal("0")
+    # BOM-WASTE-1: denormalized so line_cost can apply the same waste allowance
+    # shipment books, and so the editor can price an un-saved draft row whose
+    # material is soft-deleted (those are absent from the active-materials
+    # picker, so `fallback` is the frontend's only source — BomEditor.tsx:41-53).
+    # Not money: classified "neutral" in tests/test_money_field_completeness.py,
+    # and deliberately NOT stripped by routers/products.py:_strip_bom_costs.
+    material_waste_percent: Decimal = Decimal("0")
     material_is_active: bool = True
     line_cost: Decimal = Decimal("0")
 
     @model_validator(mode="after")
     def _compute_line_cost(self) -> "BomItemRead":
+        """Waste-inclusive, matching order_consumption_service.py:118-123.
+
+        ROUND_HALF_UP to agree with the booked-COGS path; the previous bare
+        `.quantize()` used the decimal context default (ROUND_HALF_EVEN), which
+        disagreed on exact-half kopecks (190.425 → 190.42 vs 190.43).
+        """
+        waste_factor = Decimal("1") + (
+            self.material_waste_percent / Decimal("100")
+        )
         self.line_cost = (
-            self.qty_per_unit * self.material_current_unit_cost
-        ).quantize(Decimal("0.01"))
+            self.qty_per_unit * waste_factor * self.material_current_unit_cost
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         return self
 
 

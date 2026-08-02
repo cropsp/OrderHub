@@ -15,11 +15,11 @@ historical recipes stay intact.
 """
 
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Iterable
 
 from fastapi import HTTPException, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -49,7 +49,23 @@ async def get_bom(
 async def compute_bom_cost(
     db: AsyncSession, *, product_id: uuid.UUID
 ) -> list[BomCostBreakdown]:
-    """SUM(qty_per_unit * material.current_unit_cost) grouped by material.currency.
+    """SUM(qty_per_unit * waste_factor * current_unit_cost) grouped by currency.
+
+    BOM-WASTE-1: each line carries the material's own waste allowance
+    (`1 + waste_percent/100`), exactly as order_consumption_service.py:118-123
+    does when it books COGS on shipment. Before this, the reviewed number and
+    the booked number diverged silently as soon as waste > 0.
+
+    Folded in Python rather than a DB-side SUM so the arithmetic is the *same
+    Decimal operations in the same order* as the consumption path — parity to
+    the kopeck is then structural, not a claim about Postgres numeric scale.
+    A BOM is 3-10 rows, so materialising them is free.
+
+    Rounding mirrors order_consumption_service.py:146-147,163-165: accumulate
+    un-rounded, quantize ONCE at the per-currency total, ROUND_HALF_UP. Note
+    this means the sum of the individually-rounded `BomItemRead.line_cost`
+    values may differ from this total by a kopeck. That is deliberate — the
+    total is authoritative because it is what shipment books.
 
     For the v1 UAH-only catalog this returns a single row; the schema permits
     multi-currency so MAT-5/FIN-* don't have to revisit the wire format.
@@ -57,20 +73,30 @@ async def compute_bom_cost(
     stmt = (
         select(
             Material.currency,
-            func.sum(BomItem.qty_per_unit * Material.current_unit_cost),
+            BomItem.qty_per_unit,
+            Material.current_unit_cost,
+            Material.waste_percent,
         )
         .join(Material, BomItem.material_id == Material.id)
         .where(BomItem.product_id == product_id)
-        .group_by(Material.currency)
+        .order_by(Material.currency)
     )
     result = await db.execute(stmt)
-    rows = result.all()
+
+    totals: dict[str, Decimal] = {}
+    for currency, qty_per_unit, unit_cost, waste_percent in result.all():
+        waste_factor = Decimal("1") + (waste_percent / Decimal("100"))
+        totals[currency] = (
+            totals.get(currency, Decimal("0"))
+            + qty_per_unit * waste_factor * unit_cost
+        )
+
     return [
         BomCostBreakdown(
             currency=currency,
-            amount=(amount or Decimal("0")).quantize(Decimal("0.01")),
+            amount=amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
         )
-        for currency, amount in rows
+        for currency, amount in totals.items()
     ]
 
 
@@ -146,5 +172,6 @@ def project_bom_item(item: BomItem) -> BomItemRead:
         material_unit=mat.unit,
         material_currency=mat.currency,
         material_current_unit_cost=mat.current_unit_cost,
+        material_waste_percent=mat.waste_percent,
         material_is_active=mat.is_active,
     )

@@ -29,8 +29,17 @@ type RowDraft = {
     unit: string
     currency: string
     current_unit_cost: string
+    waste_percent: string
     is_active: boolean
   }
+}
+
+// BOM-WASTE-1: the operator reviews this number and a shipment books it, so it
+// must carry the material's waste allowance the same way the backend does
+// (services/order_consumption_service.py) — `qty × (1 + waste%/100) × unit_cost`.
+function wasteFactor(wastePercent: string): number {
+  const w = Number(wastePercent)
+  return isFinite(w) ? 1 + w / 100 : 1
 }
 
 function nextKey() {
@@ -48,6 +57,7 @@ function toDraft(items: BomItem[]): RowDraft[] {
       unit: it.material_unit,
       currency: it.material_currency,
       current_unit_cost: it.material_current_unit_cost,
+      waste_percent: it.material_waste_percent,
       is_active: it.material_is_active,
     },
   }))
@@ -154,6 +164,7 @@ export default function BomEditor({ productId }: BomEditorProps) {
           unit: live.unit,
           currency: live.currency,
           current_unit_cost: live.current_unit_cost,
+          waste_percent: live.waste_percent,
           is_active: live.is_active,
         }
       }
@@ -171,7 +182,10 @@ export default function BomEditor({ productId }: BomEditorProps) {
       const qty = Number(row.qty_per_unit)
       const cost = Number(m.current_unit_cost)
       if (!isFinite(qty) || !isFinite(cost)) continue
-      buckets.set(m.currency, (buckets.get(m.currency) ?? 0) + qty * cost)
+      buckets.set(
+        m.currency,
+        (buckets.get(m.currency) ?? 0) + qty * wasteFactor(m.waste_percent) * cost,
+      )
     }
     return Array.from(buckets.entries()).map(([currency, amount]) => ({
       currency,
@@ -283,7 +297,9 @@ export default function BomEditor({ productId }: BomEditorProps) {
                   const qtyNum = Number(row.qty_per_unit)
                   const costNum = m ? Number(m.current_unit_cost) : NaN
                   const lineCost =
-                    isFinite(qtyNum) && isFinite(costNum) ? qtyNum * costNum : null
+                    isFinite(qtyNum) && isFinite(costNum) && m
+                      ? qtyNum * wasteFactor(m.waste_percent) * costNum
+                      : null
                   const inactive = m !== null && !m.is_active
                   return (
                     <TableRow
