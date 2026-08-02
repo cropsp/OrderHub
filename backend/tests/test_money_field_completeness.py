@@ -57,6 +57,18 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # publishing one beside a nulled other is incoherent.
     "cogs_fx_rate": "cost",
     "cogs_basis_amount": "cost",
+    # FX-CONVERSION: the BOM cost preview expressed in one target currency. NOT
+    # named `amount` on purpose — that bare name is already classified "money"
+    # here, and this map is keyed globally by field name, so reusing it would
+    # have inherited the wrong verdict with nobody making a decision.
+    "converted_cost": "cost",
+    # The rate carried INSIDE that converted block, to explain it. Classified
+    # `cost` rather than neutral because it is censored together with the figure
+    # it explains — routers/products.py drops the whole `converted` block without
+    # VIEW_COSTS. Contrast the `uah_per_usd_*` fields on /api/settings/fx below,
+    # which are neutral: there the rate is standalone owner config with no cost
+    # anywhere near it. Same number, different company.
+    "uah_per_usd": "cost",
     "cost_price": "cost",
     "current_unit_cost": "cost",
     "material_current_unit_cost": "cost",

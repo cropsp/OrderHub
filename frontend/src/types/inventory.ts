@@ -314,13 +314,36 @@ export interface BomItemCreate {
   notes?: string | null;
 }
 
+/** One row per distinct currency IN THE RECIPE — the un-converted basis.
+ *  A converted figure is never appended here: it would be indistinguishable
+ *  from a real same-currency material row and any consumer summing the list
+ *  would double-count. See BomCostConverted. */
 export interface BomCostBreakdown {
   currency: string;
   amount: string;
 }
 
+/** The recipe's whole cost in one target currency (FX-CONVERSION).
+ *  `uah_per_usd` is NBU's quote direction — UAH per 1 USD — so a UAH basis was
+ *  DIVIDED by it. */
+export interface BomCostConverted {
+  currency: string;
+  converted_cost: string;
+  uah_per_usd: string;
+  rate_date: string | null;
+  rate_source: string | null;
+}
+
+export interface BomCostEnvelope {
+  basis: BomCostBreakdown[];
+  /** Null when no target currency was asked for, the recipe is empty, or some
+   *  part of it cannot be converted — `basis` is still the whole truth. */
+  converted: BomCostConverted | null;
+}
+
 export interface BomReadResponse {
   items: BomItem[];
   cost: BomCostBreakdown[];
+  cost_converted: BomCostConverted | null;
   has_inactive_material: boolean;
 }

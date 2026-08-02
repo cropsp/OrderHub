@@ -2,7 +2,8 @@
 OrderHub CRM — BOM Service
 
 MAT-3: read + replace recipes; compute theoretical unit cost grouped by
-material currency.
+material currency. FX-CONVERSION: optionally also express that cost in one
+target currency, so a UAH recipe can be previewed in the USD a shop sells in.
 
 The router owns the commit boundary. `replace_bom` runs DELETE-all + bulk
 INSERT inside one transaction (no diff-patch — BOM size is small, 3-10 rows
@@ -25,7 +26,14 @@ from sqlalchemy.orm import joinedload
 
 from models.bom import BomItem
 from models.material import Material
-from schemas.bom import BomCostBreakdown, BomItemCreate, BomItemRead
+from schemas.bom import (
+    BomCostBreakdown,
+    BomCostConverted,
+    BomCostEnvelope,
+    BomItemCreate,
+    BomItemRead,
+)
+from services.fx_service import FxRates, normalize_currency
 
 
 async def get_bom(
@@ -47,29 +55,46 @@ async def get_bom(
 
 
 async def compute_bom_cost(
-    db: AsyncSession, *, product_id: uuid.UUID
-) -> list[BomCostBreakdown]:
-    """SUM(qty_per_unit * waste_factor * current_unit_cost) grouped by currency.
+    db: AsyncSession,
+    *,
+    product_id: uuid.UUID,
+    target_currency: str | None = None,
+    fx: FxRates | None = None,
+) -> BomCostEnvelope:
+    """SUM(qty_per_unit * waste_factor * current_unit_cost) grouped by currency,
+    plus — when `target_currency` is given — the whole recipe in that currency.
 
     BOM-WASTE-1: each line carries the material's own waste allowance
-    (`1 + waste_percent/100`), exactly as order_consumption_service.py:118-123
-    does when it books COGS on shipment. Before this, the reviewed number and
-    the booked number diverged silently as soon as waste > 0.
+    (`1 + waste_percent/100`), exactly as order_consumption_service.py does when
+    it books COGS on shipment. Before this, the reviewed number and the booked
+    number diverged silently as soon as waste > 0.
 
     Folded in Python rather than a DB-side SUM so the arithmetic is the *same
     Decimal operations in the same order* as the consumption path — parity to
     the kopeck is then structural, not a claim about Postgres numeric scale.
     A BOM is 3-10 rows, so materialising them is free.
 
-    Rounding mirrors order_consumption_service.py:146-147,163-165: accumulate
-    un-rounded, quantize ONCE at the per-currency total, ROUND_HALF_UP. Note
-    this means the sum of the individually-rounded `BomItemRead.line_cost`
-    values may differ from this total by a kopeck. That is deliberate — the
-    total is authoritative because it is what shipment books.
+    Rounding mirrors the consumption path: accumulate un-rounded, quantize ONCE,
+    ROUND_HALF_UP — for the per-currency basis rows AND for the converted total,
+    which is summed across converted-but-un-rounded buckets. Note this means the
+    sum of the individually-rounded `BomItemRead.line_cost` values may differ
+    from these totals by a kopeck. That is deliberate — the total is
+    authoritative because it is what shipment books.
 
-    For the v1 UAH-only catalog this returns a single row; the schema permits
-    multi-currency so MAT-5/FIN-* don't have to revisit the wire format.
+    FX-CONVERSION. `target_currency` is explicit rather than derived from the
+    product's shop: `Shop` has no currency column, and inventing one would key
+    the preview off a different source than the booking (which uses
+    `order.currency`), re-opening the preview-vs-booked divergence BOM-WASTE-1
+    just closed. `fx` is passed in by the caller for the same reason the
+    consumption service takes it — so one resolved rate can drive both sides and
+    the parity test can prove they agree.
+
+    Conversion is all-or-nothing, matching the booking path: if any basis
+    currency cannot be converted, `converted` is None and the caller sees the
+    honest per-currency basis instead of a partial total.
     """
+    fx = fx or FxRates.unavailable()
+
     stmt = (
         select(
             Material.currency,
@@ -86,18 +111,58 @@ async def compute_bom_cost(
     totals: dict[str, Decimal] = {}
     for currency, qty_per_unit, unit_cost, waste_percent in result.all():
         waste_factor = Decimal("1") + (waste_percent / Decimal("100"))
+        currency = normalize_currency(currency)
         totals[currency] = (
             totals.get(currency, Decimal("0"))
             + qty_per_unit * waste_factor * unit_cost
         )
 
-    return [
+    basis = [
         BomCostBreakdown(
             currency=currency,
             amount=amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
         )
         for currency, amount in totals.items()
     ]
+
+    return BomCostEnvelope(
+        basis=basis,
+        converted=_convert_totals(totals, target_currency, fx),
+    )
+
+
+def _convert_totals(
+    totals: dict[str, Decimal], target_currency: str | None, fx: FxRates
+) -> BomCostConverted | None:
+    """Fold the per-currency basis into one target currency, or None."""
+    target = normalize_currency(target_currency)
+    if not target or not totals:
+        return None
+    if not all(fx.can_convert(frm=c, to=target) for c in totals):
+        return None
+
+    converted_total = Decimal("0")
+    rate_used: Decimal | None = None
+    for currency, amount in totals.items():
+        converted_total += fx.convert(amount, frm=currency, to=target)
+        rate = fx.rate_for(frm=currency, to=target)
+        if rate is not None:
+            rate_used = rate
+
+    if rate_used is None:
+        # Everything was already in the target currency — reporting a "converted"
+        # figure with no rate would imply a conversion that never happened.
+        return None
+
+    return BomCostConverted(
+        currency=target,
+        converted_cost=converted_total.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        ),
+        uah_per_usd=rate_used,
+        rate_date=fx.rate_date,
+        rate_source=fx.source,
+    )
 
 
 async def replace_bom(

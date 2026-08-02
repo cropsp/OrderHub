@@ -210,15 +210,26 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         return dump(await client.get(f"/api/products/{product_id}/bom"))
 
     @mcp.tool()
-    async def compute_product_cost(product_id: str) -> str:
+    async def compute_product_cost(
+        product_id: str, in_currency: str | None = None
+    ) -> str:
         """Recompute a product's theoretical unit cost from its recipe, live.
 
-        Returns the summed `qty_per_unit * material.current_unit_cost` grouped by
-        material currency. Use this to check a recipe's cost after editing it, or
-        to answer "what does this product cost to make right now".
+        Returns `basis`: the summed
+        `qty_per_unit * (1 + waste_percent/100) * material.current_unit_cost`,
+        grouped by material currency. Use this to check a recipe's cost after
+        editing it, or to answer "what does this product cost to make right now".
 
-        Note: this is the *theoretical* cost from current material prices. The
-        cost actually booked against an order is snapshotted when that order
-        ships, so it reflects material prices at ship time, not today's.
+        Pass `in_currency` (e.g. "USD") to also get `converted`: the whole recipe
+        in that currency at the current UAH/USD rate, with the rate that produced
+        it. Materials are priced in UAH, so this is what a USD shop's order will
+        actually book. `converted` is null if no rate is configured or the
+        currency is anything other than UAH/USD — the `basis` is still correct.
+
+        Note: this is the *theoretical* cost from current material prices and
+        today's rate. The cost booked against an order is snapshotted when that
+        order ships, at the prices and rate in force then, not today's.
         """
-        return dump(await client.get(f"/api/products/{product_id}/bom/cost"))
+        # `in` is a Python keyword, so it cannot be written as a kwarg literal.
+        params = {"in": in_currency} if in_currency else {}
+        return dump(await client.get(f"/api/products/{product_id}/bom/cost", **params))

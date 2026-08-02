@@ -11,6 +11,7 @@ in schemas/material.py:119-123.
 """
 
 import uuid
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
@@ -89,16 +90,55 @@ class BomItemRead(BaseModel):
 
 
 class BomCostBreakdown(BaseModel):
-    """One row per distinct currency in the recipe. No FX conversion in v1
-    (Known Limitation #1 — material currency is UAH-only today)."""
+    """One row per distinct currency IN THE RECIPE — the un-converted basis.
+
+    FX-CONVERSION deliberately does NOT add a converted row to this list: a
+    converted USD row would be indistinguishable from a real USD-priced-material
+    row, so any consumer summing the list would double-count. The conversion is
+    reported separately, in BomCostConverted.
+    """
 
     currency: str
     amount: Decimal
 
 
+class BomCostConverted(BaseModel):
+    """The recipe's whole cost expressed in one target currency (FX-CONVERSION).
+
+    `uah_per_usd` is NBU's quote direction — UAH per 1 USD — so a UAH basis was
+    DIVIDED by it. Carried alongside the figure so the number can be checked
+    rather than merely trusted.
+
+    `converted_cost` is named so on purpose: `amount` is already classified
+    "money" in tests/test_money_field_completeness, whose field map is keyed by
+    bare name globally, and this is a cost that must be censored as one.
+    """
+
+    currency: str
+    converted_cost: Decimal
+    uah_per_usd: Decimal
+    rate_date: date | None = None
+    rate_source: str | None = None
+
+
+class BomCostEnvelope(BaseModel):
+    """Per-currency basis plus, optionally, the whole thing in one currency.
+
+    `converted` is None when no target currency was requested, when the recipe is
+    empty, or when some part of it cannot be converted — in which case `basis`
+    still tells the full truth.
+    """
+
+    basis: list[BomCostBreakdown] = []
+    converted: BomCostConverted | None = None
+
+
 class BomReadResponse(BaseModel):
     items: list[BomItemRead]
+    # The un-converted per-currency basis (FX-CONVERSION keeps this field's
+    # meaning unchanged; the conversion rides alongside in `cost_converted`).
     cost: list[BomCostBreakdown]
+    cost_converted: BomCostConverted | None = None
     # True if any BomItem references a soft-deleted Material. Frontend uses
     # it to render a recipe-level warning banner.
     has_inactive_material: bool

@@ -8,7 +8,7 @@ mock the joined Material relationship to drive the read projection.
 
 import uuid
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -147,9 +147,9 @@ async def test_compute_bom_cost_groups_by_currency():
     result.all.return_value = rows
     db.execute = AsyncMock(return_value=result)
 
-    breakdown = await bom_service.compute_bom_cost(db, product_id=uuid.uuid4())
+    envelope = await bom_service.compute_bom_cost(db, product_id=uuid.uuid4())
 
-    by_currency = {row.currency: row.amount for row in breakdown}
+    by_currency = {row.currency: row.amount for row in envelope.basis}
     assert by_currency == {
         "UAH": Decimal("270.00"),  # 2×1.10×100 + 1×1.00×50
         "USD": Decimal("45.00"),  # 3×1.50×10
@@ -160,7 +160,28 @@ async def test_compute_bom_cost_groups_by_currency():
 async def test_compute_bom_cost_empty_recipe_returns_no_rows():
     """A product with no BOM yields an empty breakdown, not a zero row."""
     db, _stmts, _adds = _make_db()
-    assert await bom_service.compute_bom_cost(db, product_id=uuid.uuid4()) == []
+    envelope = await bom_service.compute_bom_cost(db, product_id=uuid.uuid4())
+
+    assert envelope.basis == []
+    # FX-CONVERSION: nothing to convert, so no converted block either — a 0.00
+    # USD figure would read as "this recipe is free".
+    assert envelope.converted is None
+
+
+@pytest.mark.asyncio
+async def test_compute_bom_cost_without_a_target_currency_does_not_convert():
+    """Omitting ?in= keeps the pre-FX behaviour exactly: basis only."""
+    db, _stmts, _adds = _make_db()
+    result = MagicMock()
+    result.all.return_value = [
+        ("UAH", Decimal("2.00"), Decimal("100.0000"), Decimal("0.00")),
+    ]
+    db.execute = AsyncMock(return_value=result)
+
+    envelope = await bom_service.compute_bom_cost(db, product_id=uuid.uuid4())
+
+    assert envelope.basis[0].amount == Decimal("200.00")
+    assert envelope.converted is None
 
 
 def test_project_bom_item_flags_inactive_material():
@@ -218,3 +239,63 @@ def test_project_bom_item_line_cost_includes_waste():
     assert projection.material_waste_percent == Decimal("15.00")
     # 0.13 × 1.15 × 580.00 = 86.71 — not the 75.40 the waste-free path gave.
     assert projection.line_cost == Decimal("86.71")
+
+
+# ── USER-ACCESS-2 x FX-CONVERSION: censoring the converted block ──
+
+
+@pytest.mark.asyncio
+async def test_bom_response_nulls_the_converted_cost_without_view_costs():
+    """The FX conversion is a cost figure and must be censored like one.
+
+    _strip_bom_costs (routers/products.py) is a hardcoded two-field list covering
+    only per-line costs, which is exactly why no converted figure is ever placed
+    on BomItemRead — it would slip past that list. The envelope-level block is
+    dropped here instead, and this test is what keeps that true.
+    """
+    from routers import products as products_router
+
+    db = MagicMock()
+    with patch.object(
+        products_router, "_can_view_costs", AsyncMock(return_value=False)
+    ), patch.object(
+        products_router.bom_service, "compute_bom_cost", AsyncMock()
+    ) as compute, patch.object(
+        products_router.fx_service, "resolve", AsyncMock()
+    ):
+        response = await products_router._bom_response(
+            db, uuid.uuid4(), [], False, MagicMock(), target_currency="USD"
+        )
+
+    assert response.cost == []
+    assert response.cost_converted is None
+    # Not merely nulled after the fact — never computed for this caller.
+    compute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bom_response_passes_the_target_currency_through_with_view_costs():
+    from routers import products as products_router
+    from schemas.bom import BomCostConverted, BomCostEnvelope
+
+    converted = BomCostConverted(
+        currency="USD",
+        converted_cost=Decimal("60.10"),
+        uah_per_usd=Decimal("41.5"),
+    )
+    db = MagicMock()
+    with patch.object(
+        products_router, "_can_view_costs", AsyncMock(return_value=True)
+    ), patch.object(
+        products_router.bom_service,
+        "compute_bom_cost",
+        AsyncMock(return_value=BomCostEnvelope(basis=[], converted=converted)),
+    ) as compute, patch.object(
+        products_router.fx_service, "resolve", AsyncMock()
+    ):
+        response = await products_router._bom_response(
+            db, uuid.uuid4(), [], False, MagicMock(), target_currency="USD"
+        )
+
+    assert response.cost_converted is converted
+    assert compute.await_args.kwargs["target_currency"] == "USD"

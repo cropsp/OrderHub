@@ -234,3 +234,33 @@ async def test_permission_error_is_reported_to_the_agent():
     await client.aclose()
     assert "You do not have access to this shop" in str(exc.value)
     assert "403" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_compute_product_cost_passes_the_target_currency():
+    """FX-CONVERSION: `in_currency` reaches the backend as the `in` query param —
+    which is what lets the agent answer "what does this cost in USD"."""
+    mcp, client, seen = _build(
+        lambda r: httpx.Response(200, json={"basis": [], "converted": None})
+    )
+    await mcp.call_tool(
+        "compute_product_cost", {"product_id": "p1", "in_currency": "USD"}
+    )
+    await client.aclose()
+
+    cost_calls = [r for r in seen if r.url.path == "/api/products/p1/bom/cost"]
+    assert len(cost_calls) == 1
+    assert cost_calls[0].url.params.get("in") == "USD"
+
+
+@pytest.mark.asyncio
+async def test_compute_product_cost_omits_the_param_when_unset():
+    """No target currency means the pre-FX behaviour: basis only, no conversion."""
+    mcp, client, seen = _build(
+        lambda r: httpx.Response(200, json={"basis": [], "converted": None})
+    )
+    await mcp.call_tool("compute_product_cost", {"product_id": "p1"})
+    await client.aclose()
+
+    cost_calls = [r for r in seen if r.url.path == "/api/products/p1/bom/cost"]
+    assert "in" not in cost_calls[0].url.params

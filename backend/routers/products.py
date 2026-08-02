@@ -20,10 +20,15 @@ from routers.dependencies import (
     require_role,
 )
 from services.access_service import get_capabilities
-from schemas.bom import BomCostBreakdown, BomItemRead, BomReadResponse, BomReplaceRequest
+from schemas.bom import (
+    BomCostEnvelope,
+    BomItemRead,
+    BomReadResponse,
+    BomReplaceRequest,
+)
 from schemas.product import ProductCreate, ProductRead, ProductUpdate, ProductVariantRead
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
-from services import bom_service
+from services import bom_service, fx_service
 from services.catalog_service import CatalogService
 from services.file_storage import (
     FileTooLargeError,
@@ -374,19 +379,31 @@ async def _bom_response(
     items: list,
     has_inactive: bool,
     user,
+    *,
+    target_currency: str | None = None,
 ) -> BomReadResponse:
     """Build a BomReadResponse, nulling all cost numbers (per-line + the cost
-    preview) unless the caller holds VIEW_COSTS. Shared by the BOM read AND
-    replace endpoints so their cost censoring cannot drift (USER-ACCESS-2)."""
+    preview + the FX conversion) unless the caller holds VIEW_COSTS. Shared by
+    the BOM read AND replace endpoints so their cost censoring cannot drift
+    (USER-ACCESS-2)."""
     projected = [bom_service.project_bom_item(item) for item in items]
     if await _can_view_costs(db, user):
-        cost = await bom_service.compute_bom_cost(db, product_id=product_id)
+        fx = await fx_service.resolve(db)
+        envelope = await bom_service.compute_bom_cost(
+            db, product_id=product_id, target_currency=target_currency, fx=fx
+        )
+        cost, cost_converted = envelope.basis, envelope.converted
     else:
         projected = _strip_bom_costs(projected)
-        cost = []
+        # The converted total is a cost like any other — it must be nulled here
+        # too. _strip_bom_costs only covers the per-line fields, which is why no
+        # converted figure is ever put on BomItemRead: a new cost field there
+        # would slip past that hardcoded list.
+        cost, cost_converted = [], None
     return BomReadResponse(
         items=projected,
         cost=cost,
+        cost_converted=cost_converted,
         has_inactive_material=has_inactive,
     )
 
@@ -430,18 +447,36 @@ async def replace_product_bom(
 
 @router.get(
     "/products/{id}/bom/cost",
-    response_model=List[BomCostBreakdown],
+    response_model=BomCostEnvelope,
 )
 async def get_product_bom_cost(
     id: uuid.UUID,
+    in_currency: str | None = Query(
+        None,
+        alias="in",
+        max_length=3,
+        description=(
+            "Convert the whole recipe into this currency (e.g. 'USD'). Omit to "
+            "get only the per-currency basis. Only UAH<->USD is supported; any "
+            "other pair, or a missing rate, returns converted=null."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
     """Recompute recipe cost without fetching the full BOM. Cheap endpoint
     for a manual "Refresh cost" affordance in the editor.
 
+    FX-CONVERSION: `?in=USD` converts the UAH basis at the current rate, so the
+    preview can show what a USD shop's order will actually book. The target is
+    explicit rather than derived from the product's shop — see
+    bom_service.compute_bom_cost for why.
+
     USER-ACCESS-2: this endpoint returns ONLY cost, so it is 403 (not nulled)
     for a caller without VIEW_COSTS."""
     await _load_product_checked(db, id, user)
     await assert_capability(db, Capability.VIEW_COSTS, user)
-    return await bom_service.compute_bom_cost(db, product_id=id)
+    fx = await fx_service.resolve(db)
+    return await bom_service.compute_bom_cost(
+        db, product_id=id, target_currency=in_currency, fx=fx
+    )

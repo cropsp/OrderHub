@@ -1,6 +1,6 @@
 import client from './client'
 import type {
-  BomCostBreakdown,
+  BomCostEnvelope,
   BomItemCreate,
   BomReadResponse,
 } from '@/types/inventory'
@@ -21,9 +21,13 @@ export const bomApi = {
     return response.data
   },
 
-  cost: async (productId: string) => {
-    const response = await client.get<BomCostBreakdown[]>(
+  /** Recipe cost. Pass `inCurrency` (e.g. 'USD') to also get the whole recipe
+   *  converted at the current UAH/USD rate — materials are priced in UAH, so
+   *  that is what a USD shop's order will actually book. */
+  cost: async (productId: string, inCurrency?: string) => {
+    const response = await client.get<BomCostEnvelope>(
       `/products/${productId}/bom/cost`,
+      inCurrency ? { params: { in: inCurrency } } : undefined,
     )
     return response.data
   },
