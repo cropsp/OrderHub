@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, MapPinCheck, Shield, Truck, UserCircle2, LogOut } from 'lucide-react';
+import { ArrowLeftRight, Mail, MapPinCheck, Shield, Truck, UserCircle2, LogOut } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,10 @@ import {
 } from '@/components/ui/select';
 import {
   useAddressValidationKey,
+  useClearFxOverride,
+  useFxSettings,
   useSetAddressValidationKey,
+  useSetFxSettings,
   useWesternBidCredentials,
   useSetWesternBidCredentials,
 } from '@/hooks/useAppSettings';
@@ -102,6 +105,51 @@ export default function SettingsPage() {
       window.setTimeout(() => setWbMessage(null), 2000);
     } catch {
       setWbMessage('Failed to save WesternBid credentials.');
+    }
+  };
+
+  // FX rate (FX-CONVERSION) — owner-only, but NOT a secret: the rate and its
+  // source URL are read back in the clear, unlike the keys above.
+  const fx = useFxSettings({ enabled: isOwner });
+  const setFx = useSetFxSettings();
+  const clearFxOverride = useClearFxOverride();
+  const [fxOverride, setFxOverride] = useState('');
+  const [fxUrl, setFxUrl] = useState('');
+  const [fxMessage, setFxMessage] = useState<string | null>(null);
+
+  const saveFxOverride = async () => {
+    const trimmed = fxOverride.trim();
+    if (!trimmed) return;
+    try {
+      await setFx.mutateAsync({ uah_per_usd_override: trimmed });
+      setFxOverride('');
+      setFxMessage('Manual rate saved.');
+      window.setTimeout(() => setFxMessage(null), 2000);
+    } catch {
+      setFxMessage('Failed to save the manual rate.');
+    }
+  };
+
+  const saveFxUrl = async () => {
+    const trimmed = fxUrl.trim();
+    if (!trimmed) return;
+    try {
+      await setFx.mutateAsync({ source_url: trimmed });
+      setFxUrl('');
+      setFxMessage('Rate source updated.');
+      window.setTimeout(() => setFxMessage(null), 2000);
+    } catch {
+      setFxMessage('Failed to update the rate source. It must be an https bank.gov.ua URL.');
+    }
+  };
+
+  const revertFxToAuto = async () => {
+    try {
+      await clearFxOverride.mutateAsync();
+      setFxMessage('Reverted to the auto-fetched NBU rate.');
+      window.setTimeout(() => setFxMessage(null), 2500);
+    } catch {
+      setFxMessage('Failed to clear the manual rate.');
     }
   };
 
@@ -385,6 +433,120 @@ export default function SettingsPage() {
               </div>
 
               {wbMessage && <p className="text-xs text-teal-300">{wbMessage}</p>}
+            </CardContent>
+          </Card>
+        )}
+
+        {isOwner && (
+          <Card className="border-zinc-800/60 bg-zinc-900/40 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="text-zinc-100">Exchange Rate (UAH → USD)</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex flex-wrap items-center gap-3">
+                <ArrowLeftRight className="h-5 w-5 text-zinc-400" />
+                {fx.data?.uah_per_usd_effective ? (
+                  <Badge variant="outline" className="border-teal-800 bg-teal-950/40 text-teal-300">
+                    {fx.data.uah_per_usd_effective} UAH per $1
+                    {fx.data.source === 'manual' ? ' · manual' : ' · NBU'}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="border-amber-800 bg-amber-950/40 text-amber-300">
+                    No rate yet
+                  </Badge>
+                )}
+                {fx.data?.is_stale && (
+                  <Badge variant="outline" className="border-amber-800 bg-amber-950/40 text-amber-300">
+                    Stale
+                  </Badge>
+                )}
+                {fx.data?.rate_date && (
+                  <span className="text-xs text-zinc-500">NBU date {fx.data.rate_date}</span>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Manual Override
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    className="border-zinc-700 bg-zinc-900/50"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder={
+                      fx.data?.uah_per_usd_override
+                        ? `Currently ${fx.data.uah_per_usd_override}`
+                        : 'e.g. 41.5 (UAH per $1)'
+                    }
+                    value={fxOverride}
+                    onChange={(event) => setFxOverride(event.target.value)}
+                  />
+                  <Button
+                    className="shrink-0 bg-teal-600 text-white hover:bg-teal-500"
+                    onClick={saveFxOverride}
+                    disabled={setFx.isPending || !fxOverride.trim()}
+                  >
+                    {setFx.isPending ? 'Saving...' : 'Set'}
+                  </Button>
+                </div>
+                {fx.data?.uah_per_usd_override ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {/* Show what clearing reverts TO before it is clicked — the rate
+                        silently changes what every future shipment books at. */}
+                    <p className="text-xs text-zinc-400">
+                      Overriding the auto rate. Clearing reverts to{' '}
+                      {fx.data.uah_per_usd_cached
+                        ? `${fx.data.uah_per_usd_cached} UAH per $1 (NBU)`
+                        : 'no rate at all — nothing would convert'}
+                      .
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="shrink-0 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                      onClick={revertFxToAuto}
+                      disabled={clearFxOverride.isPending}
+                    >
+                      {clearFxOverride.isPending ? 'Clearing...' : 'Revert to auto'}
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-400">
+                    Leave unset to use the rate fetched daily from the National Bank.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                  Rate Source
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    className="border-zinc-700 bg-zinc-900/50"
+                    autoComplete="off"
+                    placeholder={fx.data?.source_url || 'https://bank.gov.ua/...'}
+                    value={fxUrl}
+                    onChange={(event) => setFxUrl(event.target.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    className="shrink-0 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                    onClick={saveFxUrl}
+                    disabled={setFx.isPending || !fxUrl.trim()}
+                  >
+                    Update
+                  </Button>
+                </div>
+                <p className="text-xs text-zinc-500 break-all">{fx.data?.source_url}</p>
+              </div>
+
+              <p className="text-xs text-zinc-400">
+                Material costs are recorded in UAH; the USD shops book their production cost
+                in USD. Rates are UAH per $1, refreshed daily from the National Bank.
+              </p>
+
+              {fxMessage && <p className="text-xs text-teal-300">{fxMessage}</p>}
             </CardContent>
           </Card>
         )}

@@ -84,6 +84,14 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # so line_cost can include it. A process parameter, not money — already
     # exposed unstripped as `waste_percent` on the materials surface.
     "material_waste_percent": "neutral",
+    # FX-CONVERSION: exchange rates, not amounts. UAH per 1 USD as published by
+    # NBU — a public number, and no part of it reveals a cost. Classified neutral
+    # so /api/settings/fx stays out of _money_routes() entirely; the CONVERTED
+    # figures derived from these (order cogs_*, BOM converted_cost) are classified
+    # `cost` and censored, which is where the money actually is.
+    "uah_per_usd_effective": "neutral",
+    "uah_per_usd_override": "neutral",
+    "uah_per_usd_cached": "neutral",
     "qty": "neutral",
     "qty_per_unit": "neutral",
     "delta": "neutral",

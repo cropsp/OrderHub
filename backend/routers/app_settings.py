@@ -1,20 +1,34 @@
 """
-OrderHub CRM — App Settings Router (ADDR-VAL-1)
+OrderHub CRM — App Settings Router (ADDR-VAL-1, WB-1, FX-CONVERSION)
 
-Owner-only management of global, app-level API keys. Currently just the Google
-Address Validation key, which is Fernet-encrypted at rest and only ever exposed as
-a masked `is_set` + `last4` status — the plaintext is write-only.
+Owner-only management of global, app-level configuration: the Google Address
+Validation key, the WesternBid credential pair, and the UAH/USD FX rate.
 
-Mirrors the Nova Poshta key handling on the shops router (encrypt on write, never
-return the secret), but app-scoped rather than shop-scoped.
+Two storage disciplines live side by side (models/app_setting.py):
+  * SECRETS (Google key, WB pair) — Fernet-encrypted at rest, exposed only as a
+    masked `is_set` + `last4`; the plaintext is write-only.
+  * NON-SECRET config (FX) — stored in the clear and returned as-is. An exchange
+    rate is public, and encrypting it would make COGS booking silently fail on an
+    ENCRYPTION_KEY rotation.
+
+Guard: every route here is `require_role(UserRole.OWNER)`. The FX rate re-prices
+every subsequent shipment globally, so it is owner business config — but note the
+deliberate read/write asymmetry: the rate PROVENANCE (which rate was applied, and
+when) travels with the cost on the order + BOM surfaces under VIEW_COSTS, so a
+manager who can see a converted COGS can also explain it without reaching here.
 """
 
-from fastapi import APIRouter, Depends
+from decimal import Decimal, InvalidOperation
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models.app_setting import (
+    FX_SOURCE_URL,
+    FX_UAH_PER_USD_CACHED,
+    FX_UAH_PER_USD_OVERRIDE,
     GOOGLE_ADDRESS_VALIDATION_API_KEY,
     WESTERNBID_API_KEY,
     WESTERNBID_LOGIN,
@@ -28,6 +42,8 @@ from schemas.app_setting import (
     WesternBidCredentialsStatus,
     WesternBidCredentialsUpdate,
 )
+from schemas.fx import FxSettingsResponse, FxSettingsUpdate
+from services import fx_service
 from services.encryption_service import encrypt_value
 from logger import get_logger
 
@@ -159,3 +175,121 @@ async def set_westernbid_credentials(
 
     logger.info(f"WesternBid credentials updated by {current_user.email}")
     return _wb_status(api_setting, login_setting)
+
+
+# ── FX rate (FX-CONVERSION) ────────────────────────────────────────────────
+
+
+async def _fx_response(db: AsyncSession) -> FxSettingsResponse:
+    """Effective state + both raw inputs, so the UI can show what clearing the
+    override would revert to BEFORE the owner clears it."""
+    settings = await fx_service.load_fx_settings(db)
+    resolved = await fx_service.resolve(db)
+    return FxSettingsResponse(
+        uah_per_usd_effective=resolved.uah_per_usd,
+        source=resolved.source,
+        uah_per_usd_override=_as_decimal(settings.get(FX_UAH_PER_USD_OVERRIDE)),
+        uah_per_usd_cached=_as_decimal(settings.get(FX_UAH_PER_USD_CACHED)),
+        rate_date=resolved.rate_date,
+        fetched_at=resolved.fetched_at,
+        is_stale=resolved.is_stale(),
+        source_url=fx_service.get_source_url(settings),
+    )
+
+
+def _as_decimal(raw: str | None):
+    """Render a stored value for display. A corrupted row shows as unset here and
+    is logged loudly by fx_service.resolve — it must not 500 the settings page."""
+    if raw is None:
+        return None
+    try:
+        return Decimal(raw)
+    except InvalidOperation:
+        logger.error("[FX] Unparseable stored value %r", raw)
+        return None
+
+
+@router.get("/fx", response_model=FxSettingsResponse)
+async def get_fx_settings(
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Current UAH/USD rate configuration (owner only).
+
+    `uah_per_usd_*` is NBU's quote direction — UAH per 1 USD — so converting a UAH
+    cost to USD divides by it. See services/fx_service.py.
+    """
+    return await _fx_response(db)
+
+
+@router.put("/fx", response_model=FxSettingsResponse)
+async def set_fx_settings(
+    body: FxSettingsUpdate,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set the FX source URL and/or the manual override (owner only).
+
+    Clearing the override is DELETE /fx/override, not an empty value here — see
+    that endpoint. Every change is recorded in fx_rate_audit.
+    """
+    if body.source_url is None and body.uah_per_usd_override is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide source_url and/or uah_per_usd_override",
+        )
+
+    if body.source_url is not None:
+        try:
+            url = fx_service.validate_source_url(body.source_url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            ) from exc
+        await fx_service.set_plain_setting(
+            db, FX_SOURCE_URL, url, actor_id=current_user.id, source="manual"
+        )
+
+    if body.uah_per_usd_override is not None:
+        rate = body.uah_per_usd_override
+        if not (
+            fx_service.FX_MIN_UAH_PER_USD <= rate <= fx_service.FX_MAX_UAH_PER_USD
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Rate must be between {fx_service.FX_MIN_UAH_PER_USD} and "
+                    f"{fx_service.FX_MAX_UAH_PER_USD} UAH per 1 USD"
+                ),
+            )
+        await fx_service.set_plain_setting(
+            db,
+            FX_UAH_PER_USD_OVERRIDE,
+            str(rate),
+            actor_id=current_user.id,
+            source="manual",
+        )
+
+    await db.commit()
+    logger.info(f"FX settings updated by {current_user.email}")
+    return await _fx_response(db)
+
+
+@router.delete("/fx/override", response_model=FxSettingsResponse)
+async def clear_fx_override(
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear the manual override, reverting to the auto-fetched NBU rate.
+
+    A distinct endpoint rather than a null in PUT: the DB CHECK forbids a row with
+    neither value column set, so clearing DELETEs the row — and "revert to auto"
+    silently changes the rate used by every future shipment, which deserves its own
+    audited operation rather than an empty-string special case.
+    """
+    await fx_service.clear_plain_setting(
+        db, FX_UAH_PER_USD_OVERRIDE, actor_id=current_user.id, source="clear"
+    )
+    await db.commit()
+    logger.info(f"FX manual override cleared by {current_user.email}")
+    return await _fx_response(db)

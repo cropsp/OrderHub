@@ -8,7 +8,14 @@ from models.base import Base
 from models.user import User, UserRole, Capability
 from models.app_setting import (
     AppSetting,
+    FX_FETCHED_AT,
+    FX_RATE_DATE,
+    FX_SOURCE_URL,
+    FX_UAH_PER_USD_CACHED,
+    FX_UAH_PER_USD_OVERRIDE,
     GOOGLE_ADDRESS_VALIDATION_API_KEY,
+    PLAINTEXT_SETTING_KEYS,
+    SECRET_SETTING_KEYS,
     WESTERNBID_API_KEY,
     WESTERNBID_LOGIN,
 )
@@ -42,6 +49,7 @@ from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
 from models.user_shop_access import UserShopAccess
 from models.user_capability import UserCapability
 from models.access_audit import AccessAudit
+from models.fx_rate_audit import FxRateAudit
 from models.agent_action_log import AgentActionLog
 from models.wb_parcel import WbParcel
 
@@ -51,7 +59,14 @@ __all__ = [
     "UserRole",
     "Capability",
     "AppSetting",
+    "FX_FETCHED_AT",
+    "FX_RATE_DATE",
+    "FX_SOURCE_URL",
+    "FX_UAH_PER_USD_CACHED",
+    "FX_UAH_PER_USD_OVERRIDE",
     "GOOGLE_ADDRESS_VALIDATION_API_KEY",
+    "PLAINTEXT_SETTING_KEYS",
+    "SECRET_SETTING_KEYS",
     "WESTERNBID_API_KEY",
     "WESTERNBID_LOGIN",
     "Shop",
@@ -87,6 +102,7 @@ __all__ = [
     "UserShopAccess",
     "UserCapability",
     "AccessAudit",
+    "FxRateAudit",
     "AgentActionLog",
     "WbParcel",
 ]

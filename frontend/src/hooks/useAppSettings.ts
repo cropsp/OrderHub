@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import { appSettingsApi } from '@/api/appSettings'
+import type { FxSettingsUpdate } from '@/types/fx'
 import type { WesternBidCredentialsUpdate } from '@/types/westernbid'
 
 const ADDRESS_VALIDATION_KEY = ['app-settings', 'address-validation']
 const WESTERNBID_CREDENTIALS_KEY = ['app-settings', 'westernbid']
+const FX_SETTINGS_KEY = ['app-settings', 'fx']
 
 type UseAddressValidationKeyOptions = {
   enabled?: boolean
@@ -55,6 +57,42 @@ export function useSetWesternBidCredentials() {
       appSettingsApi.setWesternBidCredentials(payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: WESTERNBID_CREDENTIALS_KEY })
+    },
+  })
+}
+
+type UseFxSettingsOptions = {
+  enabled?: boolean
+}
+
+/** UAH/USD rate configuration. Owner-only endpoint — pass `enabled: false` for
+ *  non-owners so it doesn't fire and 403. */
+export function useFxSettings(options: UseFxSettingsOptions = {}) {
+  const { enabled = true } = options
+
+  return useQuery({
+    queryKey: FX_SETTINGS_KEY,
+    queryFn: appSettingsApi.getFxSettings,
+    enabled,
+  })
+}
+
+export function useSetFxSettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: FxSettingsUpdate) => appSettingsApi.setFxSettings(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: FX_SETTINGS_KEY })
+    },
+  })
+}
+
+export function useClearFxOverride() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => appSettingsApi.clearFxOverride(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: FX_SETTINGS_KEY })
     },
   })
 }

@@ -4,6 +4,7 @@ Uses APScheduler to periodically run sync tasks.
 """
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import uuid
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -12,9 +13,11 @@ from sqlalchemy import select
 from config import get_settings
 from constants import SYSTEM_USER_ID
 from database import async_session_factory
+from models.app_setting import FX_FETCHED_AT, FX_UAH_PER_USD_CACHED
 from models.shop import Shop, ShopPlatform
 from models.user import User
 from models.wb_parcel import WbParcel
+from services import fx_service
 from services.shopify_sync import sync_shop_orders, sync_shop_refunds
 from services.westernbid import (
     WB_MAX_PAGE_SIZE,
@@ -40,6 +43,10 @@ WB_POLL_WINDOW_DAYS = 3
 # upserted idempotently. 35 days always covers a full calendar month + margin, so a
 # refund is never missed between daily runs, even across a month boundary.
 REFUND_SYNC_LOOKBACK_DAYS = 35
+
+# Log "FX refresh failed" at ERROR the first time and then stay quiet until it
+# succeeds again — an NBU outage should not fill the log with one line per run.
+_fx_fetch_failure_logged = False
 
 async def run_shopify_sync():
     """Background task to sync all active Shopify stores."""
@@ -266,6 +273,71 @@ async def run_westernbid_poll():
             await db.rollback()
 
 
+async def run_fx_rate_refresh():
+    """Refresh the cached UAH/USD rate from NBU (FX-CONVERSION).
+
+    Scheduled rather than lazy-on-read on purpose: the read path for the rate
+    includes order_consumption_service, which runs INSIDE the SHIPPED transaction
+    (services/order_service.py) and, via routers/shipping.py, sits between the Nova
+    Poshta TTN write and the commit. A lazy fetch would let an NBU hiccup roll back
+    a transition whose TTN already exists at NP. Task rule 4: the fetch must never
+    block a shipment.
+
+    Failure is always non-fatal: the cached rate stays, and conversion carries on
+    with it. Only a successful fetch writes fx_fetched_at.
+    """
+    global _fx_fetch_failure_logged
+
+    async with async_session_factory() as db:
+        try:
+            settings_map = await fx_service.load_fx_settings(db)
+
+            # Startup fires this job immediately (see below), so a crash-restart
+            # loop would otherwise hammer NBU once per boot.
+            raw_fetched = settings_map.get(FX_FETCHED_AT)
+            if raw_fetched:
+                try:
+                    last = datetime.fromisoformat(raw_fetched)
+                    age_h = (datetime.now(timezone.utc) - last).total_seconds() / 3600
+                    if age_h < fx_service.FX_MIN_REFETCH_HOURS:
+                        logger.debug(
+                            "FX rate fetched %.1fh ago (< %sh) — skipping refresh",
+                            age_h,
+                            fx_service.FX_MIN_REFETCH_HOURS,
+                        )
+                        return
+                except ValueError:
+                    logger.warning("Unparseable fx_fetched_at %r — refetching", raw_fetched)
+
+            url = fx_service.get_source_url(settings_map)
+            rate, rate_date = await fx_service.fetch_nbu_rate(url)
+
+            # Drift guard: a misplaced decimal point must not silently re-price
+            # every subsequent shipment. Keep the cached value and shout.
+            cached_raw = settings_map.get(FX_UAH_PER_USD_CACHED)
+            fx_service.check_drift(
+                rate, Decimal(cached_raw) if cached_raw else None
+            )
+
+            await fx_service.store_fetched_rate(
+                db, rate=rate, rate_date=rate_date, actor_id=SYSTEM_USER_ID
+            )
+            await db.commit()
+            _fx_fetch_failure_logged = False
+            logger.info(
+                "FX rate refreshed: %s UAH per 1 USD (NBU date %s)", rate, rate_date
+            )
+        except Exception as e:
+            await db.rollback()
+            if not _fx_fetch_failure_logged:
+                logger.error(
+                    "FX rate refresh failed: %s. The last cached rate stays in use; "
+                    "set a manual override in Settings if this persists.",
+                    e,
+                )
+                _fx_fetch_failure_logged = True
+
+
 def start_scheduler():
     scheduler = AsyncIOScheduler()
     # Run every 15 minutes
@@ -289,6 +361,22 @@ def start_scheduler():
         days=1,
         max_instances=1,
         coalesce=True,
+    )
+    # FX rate refresh (FX-CONVERSION) — fourth job, daily. NBU publishes one
+    # official rate per banking day, so anything more frequent is wasted.
+    #
+    # next_run_time is the one deviation from the jobs above, and it is deliberate:
+    # an 'interval' job first fires AFTER the interval, so a daily job would leave
+    # a fresh database with no rate — and therefore no COGS on USD orders — for 24
+    # hours after deploy. FX_MIN_REFETCH_HOURS inside the job keeps that startup
+    # fetch idempotent across restarts.
+    scheduler.add_job(
+        run_fx_rate_refresh,
+        'interval',
+        days=1,
+        max_instances=1,
+        coalesce=True,
+        next_run_time=datetime.now(timezone.utc),
     )
     scheduler.start()
     logger.info("Background scheduler started")

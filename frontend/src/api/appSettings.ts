@@ -7,6 +7,7 @@
 
 import client from '@/api/client';
 import type { ApiKeyStatus } from '@/types/addressValidation';
+import type { FxSettings, FxSettingsUpdate } from '@/types/fx';
 import type {
   WesternBidCredentialsStatus,
   WesternBidCredentialsUpdate,
@@ -37,6 +38,24 @@ export const appSettingsApi = {
       '/settings/westernbid',
       payload,
     );
+    return data;
+  },
+
+  getFxSettings: async (): Promise<FxSettings> => {
+    const { data } = await client.get<FxSettings>('/settings/fx');
+    return data;
+  },
+
+  setFxSettings: async (payload: FxSettingsUpdate): Promise<FxSettings> => {
+    const { data } = await client.put<FxSettings>('/settings/fx', payload);
+    return data;
+  },
+
+  /** Revert to the auto-fetched NBU rate. A DELETE rather than a null in the PUT:
+   *  clearing silently changes the rate every future shipment books at, so it is
+   *  its own audited operation. */
+  clearFxOverride: async (): Promise<FxSettings> => {
+    const { data } = await client.delete<FxSettings>('/settings/fx/override');
     return data;
   },
 };
