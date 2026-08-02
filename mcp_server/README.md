@@ -81,9 +81,10 @@ deliberately absent — every one has irreversible real-world side effects.
 | Tool | Reads |
 |---|---|
 | `list_shops` | shops the agent may access |
-| `list_materials` / `get_material` | direct materials + weighted-average unit cost + stock |
+| `list_materials` / `get_material` | direct materials + weighted-average unit cost + stock + supplier article (`search` matches name **or** article) |
 | `list_material_receipts` | purchase history (what moves the weighted average) |
 | `list_material_movements` | the append-only stock ledger |
+| `list_receipts_by_invoice` | every line of one supplier invoice — direct materials **and** overhead, no total |
 | `list_overhead_materials` / `list_overhead_expenses` | indirect costs |
 | `list_products` / `get_product` | catalog + variants |
 | `get_product_bom` | a product's recipe + per-line costs |
@@ -93,8 +94,8 @@ deliberately absent — every one has irreversible real-world side effects.
 
 | Tool | Does |
 |---|---|
-| `create_material` | new direct material (currency locked at creation) |
-| `update_material` | name, unit, supplier, notes, low-stock threshold, waste % |
+| `create_material` | new direct material (currency locked at creation; refuses a duplicate article or name) |
+| `update_material` | name, unit, supplier, supplier article, notes, low-stock threshold, waste % |
 | `archive_material` | discontinue (soft delete; history preserved) |
 | `record_material_receipt` | book a purchase — **this is what sets cost** |
 | `adjust_material_stock` | stocktake correction or waste, no cost change |

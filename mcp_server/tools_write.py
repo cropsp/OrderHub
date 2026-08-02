@@ -18,8 +18,11 @@ things are layered on top, and only three:
    unless it is confirmed, and `add_bom_line` / `remove_bom_line` exist so the
    agent never has to send a full replacement to make a small change.
 3. **Duplicate-material guard.** Creating a second "Шкіра чорна" fragments the
-   weighted average across two rows permanently. An exact name collision is
-   refused with the existing id, overridable in one argument.
+   weighted average across two rows permanently. An exact collision on the
+   supplier's article (MAT-6) or on the name is refused with the existing id,
+   each overridable in one argument. The article is checked first and reported
+   even when the name differs: it is the supplier's own key, so it catches the
+   case the name check cannot — one material spelled two ways across invoices.
 
 Quantities and money are passed as decimal *strings* ("5.00", "597.14") end to
 end. Binary floats do not round-trip cents, and these values land in Numeric
@@ -180,8 +183,10 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         unit: str,
         currency: str,
         supplier_name: str | None = None,
+        supplier_sku: str | None = None,
         notes: str | None = None,
         allow_duplicate_name: bool = False,
+        allow_duplicate_sku: bool = False,
     ) -> str:
         """Create a direct material.
 
@@ -189,18 +194,52 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         to give it both. **Currency is locked at creation and cannot be changed
         afterwards**; every receipt for this material must match it.
 
-        Refuses if an active material already has this exact name, because two
-        rows for one real material split the weighted average permanently. Search
-        first with `list_materials`; pass allow_duplicate_name=True only when the
-        collision is genuinely two different things.
+        Two duplicate guards, because two rows for one real material split the
+        weighted average permanently:
+
+        - an active material with this exact `supplier_sku` — the stronger signal,
+          checked first, and reported **even if the name differs**, since that is
+          exactly the "same material spelled differently on two invoices" case;
+        - an active material with this exact name.
+
+        Search first with `list_materials` (which matches the article as well as
+        the name). Pass the matching override only when the collision really is
+        two different things.
 
         Args:
             name: e.g. "Шкіра італійська чорна".
             unit: the unit purchases and recipes are measured in — "dm2", "m2",
                 "pcs", "m". Pick the unit the supplier invoices in.
             currency: ISO 4217, e.g. "UAH".
+            supplier_sku: the supplier's article (артикул) from the invoice, e.g.
+                "027515". This is what ties one material across invoices — always
+                set it when the invoice shows one.
         """
-        args = {"name": name, "unit": unit, "currency": currency}
+        args = {
+            "name": name, "unit": unit, "currency": currency,
+            "supplier_sku": supplier_sku,
+        }
+
+        if supplier_sku and not allow_duplicate_sku:
+            by_sku = await client.get("/api/materials", search=supplier_sku)
+            clash = [
+                m
+                for m in by_sku
+                if (m.get("supplier_sku") or "").strip().lower()
+                == supplier_sku.strip().lower()
+            ]
+            if clash:
+                raise ToolError(
+                    f"Article {supplier_sku!r} already belongs to "
+                    f"{clash[0]['name']!r} (id {clash[0]['id']}, "
+                    f"{clash[0]['current_unit_cost']} {clash[0]['currency']}/"
+                    f"{clash[0]['unit']}). The article is the supplier's own key, "
+                    "so this is very likely the same material under a different "
+                    "name — record a receipt against it instead of creating a "
+                    "second row. Pass allow_duplicate_sku=True only if the "
+                    "supplier genuinely reuses this code for a different item."
+                )
+
         if not allow_duplicate_name:
             existing = await client.get("/api/materials", search=name)
             clash = [m for m in existing if m["name"].strip().lower() == name.strip().lower()]
@@ -222,6 +261,7 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
                     "unit": unit,
                     "currency": currency,
                     "supplier_name": supplier_name,
+                    "supplier_sku": supplier_sku,
                     "notes": notes,
                 },
             ),
@@ -234,6 +274,7 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         name: str | None = None,
         unit: str | None = None,
         supplier_name: str | None = None,
+        supplier_sku: str | None = None,
         notes: str | None = None,
         low_stock_threshold: str | None = None,
         waste_percent: str | None = None,
@@ -245,6 +286,9 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         or adjustments, so the ledger always explains the numbers.
 
         Args:
+            supplier_sku: the supplier's article (артикул), e.g. "027515". Set it
+                on an older material that predates the field — it is what lets a
+                later invoice match this row instead of creating a duplicate.
             low_stock_threshold: decimal string; the material is flagged when
                 stock falls to or below it.
             waste_percent: decimal string 0-100; extra material consumed per unit
@@ -256,6 +300,7 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
                 "name": name,
                 "unit": unit,
                 "supplier_name": supplier_name,
+                "supplier_sku": supplier_sku,
                 "notes": notes,
                 "low_stock_threshold": low_stock_threshold,
                 "waste_percent": waste_percent,

@@ -50,12 +50,16 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         """List direct materials — the leather, thread, hardware consumed by BOMs.
 
         Returns each material's `current_unit_cost` (a weighted average, in the
-        material's own currency), `stock_quantity`, `unit`, and `waste_percent`.
-        Always check here for an existing material before creating a new one:
-        near-duplicate rows fragment the weighted average and the stock ledger.
+        material's own currency), `stock_quantity`, `unit`, `waste_percent` and
+        `supplier_sku` (the supplier's article). Always check here for an
+        existing material before creating a new one: near-duplicate rows
+        fragment the weighted average and the stock ledger. Searching by the
+        article from the invoice is the most reliable check — it is the
+        supplier's own key, and survives the material being named differently.
 
         Args:
-            search: case-insensitive substring match on the material name.
+            search: case-insensitive substring match on the material name **or**
+                its supplier article.
             include_inactive: include soft-deleted (discontinued) materials.
         """
         return dump(
@@ -111,6 +115,29 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
                 page=page,
                 limit=limit,
             )
+        )
+
+    @mcp.tool()
+    async def list_receipts_by_invoice(invoice_no: str) -> str:
+        """Show every line booked under one supplier invoice, in entry order.
+
+        Use this to check a whole invoice at once instead of walking materials
+        one at a time.
+
+        Returns two blocks, because a real invoice mixes both kinds of line:
+        `material_receipts` (direct materials, each with `material_name`, `qty`
+        and `unit_cost`) and `overhead_receipts` (indirect lines such as a
+        cutting service or a finishing compound, each with a flat `total_cost`).
+        An invoice with no lines booked returns both blocks empty.
+
+        There is no total — add the lines up yourself, and watch for lines in
+        different currencies, which must not be summed together.
+
+        Args:
+            invoice_no: exactly as recorded on the receipts, e.g. "1996637412".
+        """
+        return dump(
+            await client.get("/api/receipts/by-invoice", invoice_no=invoice_no)
         )
 
     # ── overhead materials (indirect — flat expenses) ──────

@@ -21,6 +21,7 @@ EXPECTED_TOOLS = {
     "get_material",
     "list_material_receipts",
     "list_material_movements",
+    "list_receipts_by_invoice",
     "list_overhead_materials",
     "list_overhead_expenses",
     "list_products",
@@ -106,6 +107,11 @@ async def test_read_tools_do_not_write_to_the_action_log():
             {"material_id": "m1"},
             "/api/materials/m1/movements",
         ),
+        (
+            "list_receipts_by_invoice",
+            {"invoice_no": "1996637412"},
+            "/api/receipts/by-invoice",
+        ),
         ("list_overhead_materials", {}, "/api/overhead-materials"),
         (
             "list_overhead_expenses",
@@ -161,6 +167,52 @@ async def test_search_filter_is_forwarded():
     await mcp.call_tool("list_materials", {"search": "шкіра"})
     await client.aclose()
     assert captured["search"] == "шкіра"
+
+
+@pytest.mark.asyncio
+async def test_invoice_no_is_forwarded_as_a_query_param():
+    """MAT-6 — the invoice number selects the lines; dropping it would silently
+    return whatever the endpoint defaults to."""
+    captured = {}
+
+    def handler(request):
+        captured["invoice_no"] = request.url.params.get("invoice_no")
+        return httpx.Response(
+            200,
+            json={
+                "invoice_no": "1996637412",
+                "material_receipts": [],
+                "overhead_receipts": [],
+            },
+        )
+
+    mcp, client, _ = _build(handler)
+    await mcp.call_tool("list_receipts_by_invoice", {"invoice_no": "1996637412"})
+    await client.aclose()
+    assert captured["invoice_no"] == "1996637412"
+
+
+@pytest.mark.asyncio
+async def test_invoice_view_passes_both_blocks_through_untouched():
+    """A real invoice mixes direct materials with overhead lines. Both blocks must
+    reach the agent verbatim — no merging, no totalling (tools are passthroughs)."""
+    body = {
+        "invoice_no": "1996637412",
+        "material_receipts": [
+            {"material_name": "Шкіра Крейзі Хорс AN чорна", "qty": "100.00",
+             "unit_cost": "12.7539", "currency": "UAH"}
+        ],
+        "overhead_receipts": [
+            {"overhead_material_name": "Послуга порізки шкіри",
+             "total_cost": "80.00", "currency": "UAH"}
+        ],
+    }
+    mcp, client, _ = _build(lambda r: httpx.Response(200, json=body))
+    result = await mcp.call_tool(
+        "list_receipts_by_invoice", {"invoice_no": "1996637412"}
+    )
+    await client.aclose()
+    assert _payload(result) == body
 
 
 @pytest.mark.asyncio

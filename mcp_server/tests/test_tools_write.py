@@ -17,7 +17,8 @@ from tools_write import _diff_bom, BomLine
 
 READ_TOOLS = {
     "list_shops", "list_materials", "get_material", "list_material_receipts",
-    "list_material_movements", "list_overhead_materials", "list_overhead_expenses",
+    "list_material_movements", "list_receipts_by_invoice",
+    "list_overhead_materials", "list_overhead_expenses",
     "list_products", "get_product", "get_product_bom", "compute_product_cost",
 }
 WRITE_TOOLS = {
@@ -30,6 +31,7 @@ WRITE_TOOLS = {
 MATERIAL = {
     "id": "m1", "name": "Шкіра італійська чорна", "unit": "dm2", "currency": "UAH",
     "current_unit_cost": "500.0000", "stock_quantity": "10.00",
+    "supplier_sku": "027515",
 }
 
 
@@ -269,6 +271,136 @@ async def test_duplicate_guard_is_overridable():
     )
     await client.aclose()
     assert [r for r in seen if r.method == "POST" and r.url.path == "/api/materials"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_supplier_sku_refused_even_when_the_name_differs():
+    """MAT-6, the case the name guard cannot catch: one material spelled two ways
+    across two invoices. The article is the supplier's own key, so it wins."""
+    routes = {("GET", "/api/materials"): httpx.Response(200, json=[MATERIAL])}
+    mcp, client, seen = _build(routes)
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool(
+            "create_material",
+            {
+                "name": "Шкіра чорна італ.",  # deliberately not MATERIAL["name"]
+                "unit": "dm2", "currency": "UAH",
+                "supplier_sku": MATERIAL["supplier_sku"],
+            },
+        )
+    await client.aclose()
+    assert "m1" in str(exc.value)  # tells the agent what to use instead
+    assert MATERIAL["supplier_sku"] in str(exc.value)
+    assert MATERIAL["name"] in str(exc.value)  # names the row it collided with
+    assert not [r for r in seen if r.method == "POST" and r.url.path == "/api/materials"]
+
+
+@pytest.mark.asyncio
+async def test_supplier_sku_guard_searches_by_the_article():
+    """The lookup must go out as search=<sku>. The REST search matches
+    supplier_sku server-side (MAT-6); searching by name here would never find the
+    collision."""
+    captured = []
+
+    def on_get(request):
+        captured.append(request.url.params.get("search"))
+        return httpx.Response(200, json=[])
+
+    routes = {
+        ("GET", "/api/materials"): on_get,
+        ("POST", "/api/materials"): httpx.Response(201, json={**MATERIAL, "id": "m2"}),
+    }
+    mcp, client, _ = _build(routes)
+    await mcp.call_tool(
+        "create_material",
+        {"name": "Нова шкіра", "unit": "dm2", "currency": "UAH", "supplier_sku": "032053"},
+    )
+    await client.aclose()
+    assert "032053" in captured, f"expected a search by article, got {captured}"
+
+
+@pytest.mark.asyncio
+async def test_supplier_sku_guard_is_overridable():
+    """Suppliers may genuinely reuse a code for an unrelated item."""
+    routes = {
+        ("GET", "/api/materials"): httpx.Response(200, json=[MATERIAL]),
+        ("POST", "/api/materials"): httpx.Response(201, json={**MATERIAL, "id": "m2"}),
+    }
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool(
+        "create_material",
+        {
+            "name": "Зовсім інша шкіра", "unit": "dm2", "currency": "UAH",
+            "supplier_sku": MATERIAL["supplier_sku"],
+            "allow_duplicate_sku": True,
+        },
+    )
+    await client.aclose()
+    assert [r for r in seen if r.method == "POST" and r.url.path == "/api/materials"]
+
+
+@pytest.mark.asyncio
+async def test_a_different_article_is_allowed():
+    routes = {
+        ("GET", "/api/materials"): httpx.Response(200, json=[MATERIAL]),
+        ("POST", "/api/materials"): httpx.Response(201, json={**MATERIAL, "id": "m2"}),
+    }
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool(
+        "create_material",
+        {
+            "name": "Шкіра Крейзі Хорс рожева", "unit": "dm2", "currency": "UAH",
+            "supplier_sku": "032053",
+        },
+    )
+    await client.aclose()
+    assert [r for r in seen if r.method == "POST" and r.url.path == "/api/materials"]
+
+
+@pytest.mark.asyncio
+async def test_supplier_sku_reaches_the_payload_and_the_action_log():
+    captured = {}
+
+    def on_post(request):
+        captured.update(json.loads(request.content))
+        return httpx.Response(201, json={**MATERIAL, "id": "m2"})
+
+    routes = {
+        ("GET", "/api/materials"): httpx.Response(200, json=[]),
+        ("POST", "/api/materials"): on_post,
+    }
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool(
+        "create_material",
+        {
+            "name": "Шкіра Крейзі Хорс рожева", "unit": "dm2", "currency": "UAH",
+            "supplier_sku": "032053",
+        },
+    )
+    await client.aclose()
+    assert captured["supplier_sku"] == "032053"
+    assert _logged(seen)[0]["arguments"]["supplier_sku"] == "032053"
+
+
+@pytest.mark.asyncio
+async def test_update_material_can_set_the_supplier_sku():
+    """The back-fill path for the materials that predate the column."""
+    captured = {}
+
+    def on_patch(request):
+        captured.update(json.loads(request.content))
+        return httpx.Response(200, json=MATERIAL)
+
+    routes = {("PATCH", "/api/materials/m1"): on_patch}
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool(
+        "update_material", {"material_id": "m1", "supplier_sku": "027515"}
+    )
+    await client.aclose()
+    assert captured == {"supplier_sku": "027515"}, (
+        f"only the named field may be patched, got {captured}"
+    )
+    assert _logged(seen)[0]["arguments"]["supplier_sku"] == "027515"
 
 
 @pytest.mark.asyncio
