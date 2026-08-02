@@ -107,6 +107,13 @@ export interface Order {
   // MAT-4: BOM-driven cost snapshot, populated when the order transitions to
   // SHIPPED. Coexists with manual `production_cost` (Phase A — design §6.2).
   computed_production_cost: number | null
+  /** FX-CONVERSION: how computed_production_cost was derived, frozen at ship.
+   *  The rate is UAH per 1 USD, so cost = basis / rate. A null rate beside a
+   *  non-null cost means no conversion was needed (same-currency order). All
+   *  three are censored with the cost for callers without view_costs. */
+  cogs_fx_rate: number | null
+  cogs_basis_amount: number | null
+  cogs_basis_currency: string | null
   shipping_np_cost: number | null
   platform_fee: number | null
   shipping_name: string | null

@@ -137,7 +137,27 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     production_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     # MAT-3 forward-compat: populated by MAT-4's consumption hook on SHIPPED.
     # No service-layer writes in MAT-3.
+    # FX-CONVERSION: stored in THIS ORDER'S currency. Materials are priced in UAH,
+    # so for a USD order this is the converted figure; the three columns below
+    # record how it was derived.
     computed_production_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # FX-CONVERSION — provenance for computed_production_cost, frozen at ship.
+    #
+    # cogs_fx_rate is UAH per 1 USD (NBU's quote direction), so
+    #   computed_production_cost = cogs_basis_amount / cogs_fx_rate   (UAH -> USD)
+    #
+    # Decoding NULLs, which is unambiguous only when read as a pair:
+    #   cost NOT NULL, rate NULL     -> same-currency order, no conversion applied
+    #   cost NOT NULL, rate NOT NULL -> converted at that rate
+    #   cost NULL                    -> no BOM, or no usable rate (nothing booked)
+    #
+    # The basis is recorded because a rate alone cannot decompose a recipe that
+    # mixes material currencies. It is populated only when the order's materials
+    # share one currency (always true today — every material is UAH); NULL for a
+    # mixed-currency recipe, where no single basis figure is meaningful.
+    cogs_fx_rate: Mapped[float | None] = mapped_column(Numeric(12, 6), nullable=True)
+    cogs_basis_amount: Mapped[float | None] = mapped_column(Numeric(12, 4), nullable=True)
+    cogs_basis_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     shipping_np_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     platform_fee: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 

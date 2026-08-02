@@ -29,7 +29,17 @@ FINANCIAL_FIELDS = ("production_cost", "shipping_np_cost", "platform_fee")
 # surface that previously leaked (LEAK 2). One list, used by BOTH the orders
 # list and detail via censor_order_financials, so the two paths cannot drift
 # (LEAK 1 existed because they did).
-ORDER_COST_FIELDS = FINANCIAL_FIELDS + ("computed_production_cost",)
+# FX-CONVERSION adds the provenance of computed_production_cost. The basis is a
+# cost figure outright (the same money, pre-conversion), and the rate is censored
+# with it: showing "44.6395" next to a nulled cost invites reconstruction and is
+# incoherent besides — a caller who may not see the cost has no use for its rate.
+# Classified `cost` in test_money_field_completeness, which then requires exactly
+# this list to match, so the censor set cannot drift from the classification.
+ORDER_COST_FIELDS = FINANCIAL_FIELDS + (
+    "computed_production_cost",
+    "cogs_fx_rate",
+    "cogs_basis_amount",
+)
 _FINANCIAL_COMMENT_RE = re.compile(r"\b(" + "|".join(FINANCIAL_FIELDS) + r"): [^,]+")
 
 
@@ -249,11 +259,26 @@ async def change_order_status(
         # Runs inside this transaction; caller owns the commit. Idempotent on
         # repeat SHIPPED transitions (ledger lookup); leaves existing computed
         # cost untouched on the no-op path.
+        from services import fx_service
         from services.order_consumption_service import consume_materials_for_order
 
-        result = await consume_materials_for_order(db, order, user.id)
+        # FX-CONVERSION: resolve the rate HERE, at the transaction boundary, and
+        # pass it down. Keeping the lookup out of the consumption fold means that
+        # path issues no extra queries, and lets the parity test drive booking and
+        # preview with one identical rate. resolve() never calls NBU — a fetch on
+        # this path could roll back a transition whose TTN already exists at NP.
+        fx = await fx_service.resolve(db)
+
+        result = await consume_materials_for_order(db, order, user.id, fx=fx)
         if not result.idempotent_skip:
+            # All four move together. Writing the rate outside this guard would
+            # stamp today's rate onto a cost booked months ago whenever an order
+            # goes SHIPPED -> IN_PROGRESS -> SHIPPED, and the resulting
+            # (cost, rate) pair would look like data rather than a bug.
             order.computed_production_cost = result.computed_production_cost
+            order.cogs_fx_rate = result.fx_rate_used
+            order.cogs_basis_amount = result.basis_amount
+            order.cogs_basis_currency = result.basis_currency
             warnings = result.warnings
 
     return order, warnings

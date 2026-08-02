@@ -155,12 +155,12 @@ precondition for ever exposing this remotely.
 
 ## Known limits
 
-- **UAH materials do not cost USD orders.** The production-cost snapshot written
-  when an order ships is skipped when the material currency differs from the
-  order currency, so today's UAH materials produce a booked cost for KoraKlenu
-  only. Lamamarka and the Etsy shops keep their manual per-order cost until the
-  planned `FX-CONVERSION` work lands. Accepted knowingly — the warehouse data is
-  the value here.
+- **UAH → USD conversion needs a rate.** Since `FX-CONVERSION`, UAH material
+  costs are converted into the order's currency when it ships, using the single
+  UAH/USD rate in Settings › Exchange Rate (auto-fetched daily from the National
+  Bank, manual override wins). The rate used is frozen onto the order. If no rate
+  is configured — or the order is in a currency other than UAH/USD — the snapshot
+  is skipped with a warning and stock is still consumed. Only UAH↔USD is built.
 - **Costing is forward-only.** The snapshot is written at the SHIPPED transition,
   so orders already shipped keep a null computed cost even after recipes exist.
 - **Product `cost_price` is not exposed.** It feeds no cost computation anywhere

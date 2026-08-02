@@ -18,6 +18,9 @@ function makeOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
     currency: 'UAH',
     production_cost: null,
     computed_production_cost: null,
+    cogs_fx_rate: null,
+    cogs_basis_amount: null,
+    cogs_basis_currency: null,
     shipping_np_cost: null,
     platform_fee: null,
     shipping_name: null,
@@ -127,5 +130,52 @@ describe('DetailFinance — MAT-4 cost display', () => {
     const badge = screen.getByTestId('variance-badge')
     expect(badge).toBeInTheDocument()
     expect(badge.className).not.toMatch(/amber/)
+  })
+})
+
+describe('DetailFinance — FX-CONVERSION provenance', () => {
+  it('explains a converted cost with its basis and rate', () => {
+    // A USD order whose materials are priced in UAH: 500 UAH / 41.5 = 12.05.
+    render(
+      <DetailFinance
+        order={makeOrder({
+          currency: 'USD',
+          total_price: 60,
+          computed_production_cost: 12.05,
+          cogs_fx_rate: 41.5,
+          cogs_basis_amount: 500,
+          cogs_basis_currency: 'UAH',
+        })}
+      />,
+    )
+    const note = screen.getByTestId('fx-provenance')
+    expect(note).toHaveTextContent('500.00 UAH')
+    expect(note).toHaveTextContent('41.5 UAH per $1')
+    // The operator must know the number is frozen, not live.
+    expect(note).toHaveTextContent('fixed when this order shipped')
+  })
+
+  it('shows no FX note for a same-currency order', () => {
+    // KoraKlenu: UAH materials in a UAH order — no conversion happened, so a
+    // rate line would be a fiction.
+    render(
+      <DetailFinance
+        order={makeOrder({
+          currency: 'UAH',
+          computed_production_cost: 500,
+          cogs_fx_rate: null,
+        })}
+      />,
+    )
+    expect(screen.queryByTestId('fx-provenance')).toBeNull()
+  })
+
+  it('shows no FX note when no cost was booked', () => {
+    render(
+      <DetailFinance
+        order={makeOrder({ computed_production_cost: null, cogs_fx_rate: 41.5 })}
+      />,
+    )
+    expect(screen.queryByTestId('fx-provenance')).toBeNull()
   })
 })

@@ -50,6 +50,13 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "shipping_np_cost": "cost",
     "platform_fee": "cost",
     "computed_production_cost": "cost",
+    # FX-CONVERSION: provenance for computed_production_cost. cogs_basis_amount is
+    # literally the same money pre-conversion. cogs_fx_rate is a public number on
+    # its own, but it is classified `cost` so it is censored WITH the cost it
+    # explains — a caller who may not see the cost has no use for its rate, and
+    # publishing one beside a nulled other is incoherent.
+    "cogs_fx_rate": "cost",
+    "cogs_basis_amount": "cost",
     "cost_price": "cost",
     "current_unit_cost": "cost",
     "material_current_unit_cost": "cost",

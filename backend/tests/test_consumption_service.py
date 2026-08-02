@@ -1,31 +1,52 @@
-"""MAT-4 — order consumption service regression guards.
+"""MAT-4 / FX-CONVERSION — order consumption service regression guards.
 
 Validates services.order_consumption_service.consume_materials_for_order via
 mocked AsyncSession + MagicMock objects. No real DB. Mirrors the pattern in
 test_material_receipts.py (MAT-2) and test_stock_service.py (PKG-2).
 
-Six guards (per task.md §scope):
+Guards:
   1. Idempotency — existing consumption row → no-op, no apply_movement calls.
   2. Happy path — single BOM-equipped item produces the expected cost SUM.
   3. waste_percent shows up in the per-line delta passed to apply_movement.
-  4. Currency mismatch — cost rollup skipped (None) AND warning surfaced AND
-     apply_movement STILL called (inventory stays honest).
+  4. FX — a UAH-priced recipe books a converted cost onto a USD order, with the
+     rate + basis recorded; an unconvertible currency (or no rate at all)
+     degrades to cost=None + warning while apply_movement STILL fires, so
+     inventory stays honest.
   5. Partial BOM coverage — bool flag + warning + cost reflects only BOM items.
   6. Negative stock — material name surfaced AND consumption movement still
      staged (permissive race policy).
+
+The mock session dispatches on the ENTITY BEING QUERIED, not on call order. It
+used to key off a call counter with the comment "we rely on call order matching
+the iteration order of items" — which meant any new query inside the service
+silently shifted every subsequent result, and because these are MagicMocks the
+mis-wiring failed OPEN rather than raising. An unrecognised query now raises.
 """
 
+import re
 import uuid
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from models.material import Material, MaterialMovementReason
+from models.bom import BomItem
+from models.material import Material, MaterialMovement, MaterialMovementReason
+from models.order import OrderItem
+from services.fx_service import FxRates
 from services.order_consumption_service import (
     ConsumptionResult,
     consume_materials_for_order,
 )
+
+# UAH per 1 USD, NBU quote direction. UAH costs DIVIDE by this.
+RATE = Decimal("41.5")
+
+
+def _fx(rate: Decimal | None = RATE) -> FxRates:
+    if rate is None:
+        return FxRates.unavailable()
+    return FxRates(uah_per_usd=rate, source="manual")
 
 
 def _make_material(
@@ -72,25 +93,39 @@ def _make_bom_item(*, material: Material, qty_per_unit: Decimal):
     return bom
 
 
-def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
-    """Mock AsyncSession.
+def _queried_entity(stmt):
+    """The ORM entity a select() targets, e.g. MaterialMovement for
+    select(MaterialMovement.id)."""
+    descriptions = stmt.column_descriptions
+    return descriptions[0]["entity"] if descriptions else None
 
-    - First db.execute() — idempotency probe; returns a result whose .scalar()
-      gives an int when `idempotent_hit` is True, else None.
-    - Second db.execute() — items query; returns a result whose .scalars() is
-      an iterable of OrderItem MagicMocks.
-    - Subsequent db.execute() — BOM query per item; mapped via `bom_lookup`
-      keyed by product_id.
-    - db.get(Material, ...) returns the Material with that id (used by
-      apply_movement to load the material row).
+
+def _bound_uuid(stmt):
+    """The single UUID bind in the BOM query's WHERE clause (product_id)."""
+    for value in stmt.compile().params.values():
+        if isinstance(value, uuid.UUID):
+            return value
+    return None
+
+
+def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
+    """Mock AsyncSession, dispatching on the queried entity.
+
+    - select(MaterialMovement.id) — idempotency probe; .scalar() yields a UUID
+      when `idempotent_hit` is True, else None.
+    - select(OrderItem)          — items query.
+    - select(BomItem)            — BOM rows for the product_id in the WHERE
+                                   clause, looked up in `bom_lookup`.
+    - db.get(Material, ...)      — the Material row apply_movement loads.
+
+    Anything else raises. Dispatching on identity rather than call order is what
+    keeps this harness honest when the service gains or loses a query.
     """
     captured_adds: list = []
     materials_by_id = {}
     for boms in bom_lookup.values():
         for bom in boms:
             materials_by_id[bom.material.id] = bom.material
-
-    call_index = {"n": 0}
 
     def make_result(scalar_value=None, scalars_iter=None):
         result = MagicMock()
@@ -102,23 +137,20 @@ def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
         return result
 
     async def fake_execute(stmt):
-        idx = call_index["n"]
-        call_index["n"] += 1
-        if idx == 0:
-            # Idempotency probe.
-            return make_result(scalar_value=(uuid.uuid4() if idempotent_hit else None))
-        if idx == 1:
-            # Items query.
+        entity = _queried_entity(stmt)
+        if entity is MaterialMovement:
+            return make_result(
+                scalar_value=(uuid.uuid4() if idempotent_hit else None)
+            )
+        if entity is OrderItem:
             return make_result(scalars_iter=items)
-        # BOM query — derive product_id from the WHERE-clause params is fiddly;
-        # we instead rely on call order matching the iteration order of items.
-        item_idx = idx - 2
-        bom_items_for_call: list = []
-        if item_idx < len(items):
-            variant = items[item_idx].variant
-            if variant is not None and variant.product_id in bom_lookup:
-                bom_items_for_call = bom_lookup[variant.product_id]
-        return make_result(scalars_iter=bom_items_for_call)
+        if entity is BomItem:
+            return make_result(scalars_iter=bom_lookup.get(_bound_uuid(stmt), []))
+        raise AssertionError(
+            f"Unexpected query against {entity!r} in consume_materials_for_order. "
+            f"If the service gained a query, teach this harness about it — do not "
+            f"let it fall through to a MagicMock."
+        )
 
     async def fake_get(model_cls, ident):
         if model_cls is Material:
@@ -213,32 +245,225 @@ async def test_consume_applies_waste_percent():
 
 
 # ---------------------------------------------------------------------------
-# 4. Currency mismatch — skip cost, KEEP consumption
+# 4. FX conversion (FX-CONVERSION)
 # ---------------------------------------------------------------------------
 
+def _uah_recipe_on_usd_order(*, unit_cost=Decimal("100"), qty_per_unit=Decimal("5.00")):
+    material = _make_material(currency="UAH", unit_cost=unit_cost, stock=Decimal("50"))
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=qty_per_unit)
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+    db, _ = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+    return material, db
+
+
 @pytest.mark.asyncio
-async def test_consume_skips_cost_on_currency_mismatch():
-    """Material in UAH, Order in USD → cost None + warning, but stock decremented."""
-    material = _make_material(currency="UAH", stock=Decimal("50"))
+async def test_uah_materials_book_a_converted_cost_on_a_usd_order():
+    """The whole point of the sprint: UAH warehouse cost reaching a USD order.
+
+    5.00 dm2 x 1 x 100 UAH = 500 UAH; 500 / 41.5 = 12.0481... -> 12.05 USD.
+    """
+    material, db = _uah_recipe_on_usd_order()
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.computed_production_cost == Decimal("12.05")
+    assert result.warnings == []
+    assert material.stock_quantity == Decimal("45.00")
+
+
+@pytest.mark.asyncio
+async def test_conversion_is_division_not_multiplication():
+    """Direction guard at the booking layer (see also test_fx_direction.py).
+    500 * 41.5 = 20750 — a number that would sail through every downstream sum."""
+    _material, db = _uah_recipe_on_usd_order()
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.computed_production_cost < Decimal("500")
+    assert result.computed_production_cost != Decimal("20750.00")
+
+
+@pytest.mark.asyncio
+async def test_the_rate_and_basis_are_recorded_for_audit():
+    """Forward-only means a booking that cannot be explained cannot be repaired."""
+    _material, db = _uah_recipe_on_usd_order()
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.fx_rate_used == RATE
+    assert result.basis_currency == "UAH"
+    assert result.basis_amount == Decimal("500.0000")
+    # The stored triple reconstructs the booked figure.
+    reconstructed = result.basis_amount / result.fx_rate_used
+    assert reconstructed.quantize(Decimal("0.01")) == result.computed_production_cost
+
+
+@pytest.mark.asyncio
+async def test_same_currency_books_directly_and_stamps_no_rate():
+    """KoraKlenu is unchanged by this sprint: UAH materials, UAH order, no FX."""
+    material = _make_material(currency="UAH", unit_cost=Decimal("100"))
     product_id = uuid.uuid4()
     bom = _make_bom_item(material=material, qty_per_unit=Decimal("5.00"))
     item = _make_item(variant=_make_variant(product_id), quantity=1)
-
-    order = _make_order(currency="USD")
     db, _ = _make_db(
         idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
     )
 
-    result = await consume_materials_for_order(db, order, uuid.uuid4())
+    result = await consume_materials_for_order(
+        db, _make_order(currency="UAH"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.computed_production_cost == Decimal("500.00")
+    # NULL rate + non-NULL cost is the documented "no conversion applied" state.
+    assert result.fx_rate_used is None
+
+
+@pytest.mark.asyncio
+async def test_no_rate_configured_degrades_but_still_consumes():
+    """Task rule 4 — a missing rate must never hard-fail the SHIPPED transition."""
+    material, db = _uah_recipe_on_usd_order()
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx(None)
+    )
 
     assert result.computed_production_cost is None
-    assert any(
-        "materials in this order are priced in a different currency" in w
-        and "(USD)" in w
-        for w in result.warnings
-    )
+    assert result.fx_rate_used is None
+    assert any("no exchange rate" in w for w in result.warnings)
     # CONSUMPTION STILL FIRED — stock honest.
     assert material.stock_quantity == Decimal("45.00")
+
+
+@pytest.mark.asyncio
+async def test_an_unsupported_order_currency_degrades_rather_than_using_the_usd_rate():
+    """Task rule 1: only UAH<->USD is built. A EUR order must NOT be converted at
+    the USD rate — that would be wrong by the EUR/USD cross, silently."""
+    material, db = _uah_recipe_on_usd_order()
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="EUR"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.computed_production_cost is None
+    assert material.stock_quantity == Decimal("45.00")
+
+
+@pytest.mark.asyncio
+async def test_one_unconvertible_bucket_nulls_the_whole_cost():
+    """All-or-nothing. Booking only the convertible bucket would under-state COGS
+    and over-state profit — a plausible wrong number, which is worse than none."""
+    uah = _make_material(name="Шкіра", currency="UAH", unit_cost=Decimal("100"))
+    gbp = _make_material(name="Нитка", currency="GBP", unit_cost=Decimal("10"))
+    product_id = uuid.uuid4()
+    boms = [
+        _make_bom_item(material=uah, qty_per_unit=Decimal("5.00")),
+        _make_bom_item(material=gbp, qty_per_unit=Decimal("1.00")),
+    ]
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+    db, _ = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: boms}
+    )
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.computed_production_cost is None
+    # Both materials still consumed.
+    assert uah.stock_quantity == Decimal("95.00")
+    assert gbp.stock_quantity == Decimal("99.00")
+
+
+@pytest.mark.asyncio
+async def test_mixed_convertible_currencies_book_but_record_no_single_basis():
+    """UAH + USD materials on a USD order: everything converts, so a cost is
+    booked — but no single basis figure can describe it, so basis stays NULL."""
+    uah = _make_material(name="Шкіра", currency="UAH", unit_cost=Decimal("100"))
+    usd = _make_material(name="Zip", currency="USD", unit_cost=Decimal("2"))
+    product_id = uuid.uuid4()
+    boms = [
+        _make_bom_item(material=uah, qty_per_unit=Decimal("5.00")),  # 500 UAH
+        _make_bom_item(material=usd, qty_per_unit=Decimal("1.00")),  # 2 USD
+    ]
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+    db, _ = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: boms}
+    )
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx()
+    )
+
+    # 500/41.5 + 2 = 12.0481... + 2 = 14.0481... -> 14.05
+    assert result.computed_production_cost == Decimal("14.05")
+    assert result.fx_rate_used == RATE
+    assert result.basis_amount is None
+    assert result.basis_currency is None
+
+
+@pytest.mark.asyncio
+async def test_currency_codes_are_normalised_before_the_fx_lookup():
+    """Material.currency is a bare String(3) with no CHECK — a stray lowercase
+    value must not read as an unknown currency and silently null the cost."""
+    material = _make_material(currency=" uah ", unit_cost=Decimal("100"))
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("5.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+    db, _ = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="usd"), uuid.uuid4(), fx=_fx()
+    )
+
+    assert result.computed_production_cost == Decimal("12.05")
+    assert result.basis_currency == "UAH"
+
+
+@pytest.mark.asyncio
+async def test_rounding_happens_once_at_the_end_not_per_bucket():
+    """A repeating decimal pins the quantize-once rule. Rounding each bucket first
+    would drift from bom_service's preview, which folds identically."""
+    material = _make_material(currency="UAH", unit_cost=Decimal("100"))
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("1.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+    db, _ = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    # 100 UAH / 3 = 33.3333... -> 33.33
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx(Decimal("3"))
+    )
+
+    assert result.computed_production_cost == Decimal("33.33")
+
+
+@pytest.mark.asyncio
+async def test_fx_warnings_never_contain_amounts_or_rates():
+    """routers/shipping.py returns these warnings in a raw dict with no
+    response_model, so they bypass censor_order_financials AND the money-field
+    guard entirely. They must therefore carry no money at all."""
+    _material, db = _uah_recipe_on_usd_order()
+
+    result = await consume_materials_for_order(
+        db, _make_order(currency="USD"), uuid.uuid4(), fx=_fx(None)
+    )
+
+    assert result.warnings
+    for warning in result.warnings:
+        assert not re.search(r"\d+[.,]\d", warning), f"money leaked into: {warning!r}"
 
 
 # ---------------------------------------------------------------------------

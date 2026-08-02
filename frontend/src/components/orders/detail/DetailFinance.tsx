@@ -151,6 +151,20 @@ export function DetailFinance({ order }: DetailFinanceProps) {
           </p>
         )}
 
+        {/* FX-CONVERSION: materials are priced in UAH, so a USD order's computed
+            cost is a converted figure. Show the rate that produced it — otherwise
+            the operator sees a USD number with no way to check it. Frozen at
+            ship: changing the rate later never moves this order. */}
+        {computedCost != null && order.cogs_fx_rate != null && (
+          <p className="text-[10px] italic text-zinc-600" data-testid="fx-provenance">
+            ⓘ Converted from{' '}
+            {order.cogs_basis_amount != null && order.cogs_basis_currency
+              ? `${formatMoney(order.cogs_basis_amount)} ${order.cogs_basis_currency}`
+              : 'material cost'}{' '}
+            at {order.cogs_fx_rate} UAH per $1, fixed when this order shipped.
+          </p>
+        )}
+
         <div className="h-px bg-zinc-800/30 my-4" />
 
         <div className="flex items-center justify-between">

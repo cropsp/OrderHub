@@ -124,7 +124,15 @@ class OrderResponse(OrderListResponse):
     packaging: PackagingBoxSummary | None = None
     # MAT-4: BOM-driven cost snapshot, populated by the consumption hook on
     # SHIPPED. Coexists with manual `production_cost` (Phase A — design §6.2).
+    # FX-CONVERSION: denominated in the ORDER's currency.
     computed_production_cost: float | None = None
+    # FX-CONVERSION: how that snapshot was derived, frozen at ship. The rate is
+    # UAH per 1 USD, so cost = basis / rate. NULL rate with a non-NULL cost means
+    # no conversion was needed (same-currency order). All censored with the cost
+    # itself — see order_service.ORDER_COST_FIELDS.
+    cogs_fx_rate: float | None = None
+    cogs_basis_amount: float | None = None
+    cogs_basis_currency: str | None = None
     # MAT-4: operational warnings from the SHIPPED transition (currency
     # mismatch, partial BOM coverage, negative stock). Empty for plain reads.
     warnings: list[str] = []

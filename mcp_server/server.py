@@ -31,11 +31,14 @@ How the costing actually works, so you get it right:
   finished unit consumes. Product cost = the sum of those lines at current \
   material prices.
 - When an order ships, the system consumes the BOM materials from stock and \
-  snapshots the production cost onto that order. That snapshot is what the P&L \
-  uses. **Known gap:** the snapshot is skipped when the material currency differs \
-  from the order currency, so UAH materials currently produce a booked cost only \
-  for UAH orders. Do not try to work around this by mispricing materials — \
-  a currency-conversion feature is planned separately.
+  snapshots the production cost onto that order, in that order's currency. That \
+  snapshot is what the P&L uses. UAH material costs are converted to USD at the \
+  UAH/USD rate held in Settings (auto-fetched from the National Bank, with a \
+  manual override), and the rate used is frozen onto the order — changing the \
+  rate later never moves an order that already shipped. If no rate is configured, \
+  or the order is in some third currency, the snapshot is skipped and the stock \
+  is still consumed. Never try to work around a missing rate by mispricing \
+  materials; ask for the rate to be set instead.
 - **Overhead materials** are indirect costs (tape, tools, supplies). They have no \
   stock and no unit cost; you only record dated expenses against them.
 
