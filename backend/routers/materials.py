@@ -13,7 +13,7 @@ import uuid
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -60,7 +60,16 @@ async def list_materials(
     if not include_inactive:
         stmt = stmt.where(Material.is_active == True)  # noqa: E712
     if search:
-        stmt = stmt.where(Material.name.ilike(f"%{search}%"))
+        # MAT-6: the supplier article is the key that ties one material across
+        # invoices, so it is searchable exactly like the name. The MCP dedup
+        # guard relies on this — a client-side SKU filter would have nothing to
+        # filter if the server only matched names.
+        stmt = stmt.where(
+            or_(
+                Material.name.ilike(f"%{search}%"),
+                Material.supplier_sku.ilike(f"%{search}%"),
+            )
+        )
     result = await db.execute(stmt)
     return result.scalars().all()
 
@@ -76,6 +85,7 @@ async def create_material(
         unit=body.unit,
         currency=body.currency,
         supplier_name=body.supplier_name,
+        supplier_sku=body.supplier_sku,
         notes=body.notes,
     )
     db.add(material)

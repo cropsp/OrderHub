@@ -67,6 +67,12 @@ class Material(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         Numeric(5, 2), nullable=False, default=Decimal("0")
     )
     supplier_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # MAT-6: the supplier's article (артикул) — the key that ties one material
+    # across invoices. Nullable: non-catalog items (some hardware, thread) have
+    # no code. Deliberately NOT unique — the code space belongs to the supplier,
+    # and `supplier_name` is free text, so the correct key (supplier, sku) is not
+    # expressible. Collisions are refused by the MCP create guard, not the DB.
+    supplier_sku: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
@@ -87,7 +93,10 @@ class Material(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         passive_deletes=True,
     )
 
-    __table_args__ = (Index("ix_materials_is_active_name", "is_active", "name"),)
+    __table_args__ = (
+        Index("ix_materials_is_active_name", "is_active", "name"),
+        Index("ix_materials_supplier_sku", "supplier_sku"),
+    )
 
     def __repr__(self) -> str:
         return f"<Material {self.name} ({self.unit}, {self.currency})>"

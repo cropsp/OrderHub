@@ -6,6 +6,7 @@ import {
   PackagePlus,
   ClipboardEdit,
   Truck,
+  Hash,
   Coins,
   Layers,
   Percent,
@@ -219,13 +220,26 @@ export default function MaterialDetailPage() {
                 />
               </div>
 
-              {material.supplier_name && (
-                <div className="mt-6 pt-6 border-t border-zinc-800/50 flex items-center gap-2 text-xs text-zinc-400">
-                  <Truck className="size-3" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-                    Supplier
-                  </span>
-                  <span>{material.supplier_name}</span>
+              {(material.supplier_name || material.supplier_sku) && (
+                <div className="mt-6 pt-6 border-t border-zinc-800/50 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-400">
+                  {material.supplier_name && (
+                    <div className="flex items-center gap-2">
+                      <Truck className="size-3" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                        Supplier
+                      </span>
+                      <span>{material.supplier_name}</span>
+                    </div>
+                  )}
+                  {material.supplier_sku && (
+                    <div className="flex items-center gap-2">
+                      <Hash className="size-3" />
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                        Article
+                      </span>
+                      <span className="font-mono">{material.supplier_sku}</span>
+                    </div>
+                  )}
                 </div>
               )}
               {material.notes && (

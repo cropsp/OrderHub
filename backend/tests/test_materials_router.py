@@ -77,6 +77,68 @@ async def test_create_material_persists_currency():
 
 
 @pytest.mark.asyncio
+async def test_create_material_persists_supplier_sku():
+    """MAT-6 — the supplier article reaches the staged Material. It is the dedup
+    key that ties one material across invoices, so a silent drop here would leave
+    every new material unmatchable."""
+    db, _stmts, adds = _make_db()
+    body = MaterialCreate(
+        name="Шкіра Крейзі Хорс AN 1,4-1,6мм чорна",
+        unit="dm2",
+        currency="UAH",
+        supplier_name="ФОП Додон Максим Анатолійович",
+        supplier_sku="027515",
+        notes=None,
+    )
+
+    await create_material(body=body, db=db, user=MagicMock())
+
+    staged = adds[0]
+    assert staged.supplier_sku == "027515", (
+        f"Material was staged with supplier_sku={staged.supplier_sku!r}; expected '027515'."
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_material_without_supplier_sku_is_null():
+    """Nullable by design — non-catalog items (some hardware, thread) have no
+    supplier code, and 2 of the 15 materials loaded so far carry none."""
+    db, _stmts, adds = _make_db()
+    body = MaterialCreate(name="Нитка", unit="m", currency="UAH")
+
+    await create_material(body=body, db=db, user=MagicMock())
+
+    assert adds[0].supplier_sku is None
+
+
+@pytest.mark.asyncio
+async def test_list_materials_search_matches_name_and_supplier_sku():
+    """MAT-6 — `search` must hit supplier_sku server-side, not just name.
+
+    The MCP create-time dedup guard searches by SKU and then exact-matches
+    client-side; if the server only matched names the guard would silently never
+    fire, which is the failure this column exists to prevent."""
+    db, stmts, _adds = _make_db()
+
+    await list_materials(
+        search="027515", include_inactive=False, db=db, user=MagicMock()
+    )
+    sql = _compiled(stmts[-1])
+
+    # literal_binds escapes the LIKE wildcards as '%%'.
+    assert "materials.name ilike '%%027515%%'" in sql, (
+        f"search must still match the name. SQL: {sql}"
+    )
+    assert "materials.supplier_sku ilike '%%027515%%'" in sql, (
+        f"search must also match supplier_sku. SQL: {sql}"
+    )
+    assert (
+        "materials.name ilike '%%027515%%' or materials.supplier_sku ilike '%%027515%%'"
+        in sql
+    ), f"name and supplier_sku must be OR-ed, not AND-ed. SQL: {sql}"
+
+
+@pytest.mark.asyncio
 async def test_list_materials_filters_inactive_by_default():
     """GET /api/materials (no params) → SELECT compiles to include
     materials.is_active = true. GET with include_inactive=true → no is_active

@@ -9,7 +9,7 @@ MAT-2: Receipts + ledger + adjustments schemas; MaterialUpdate gains
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -23,6 +23,8 @@ class MaterialBase(BaseModel):
     name: str = Field(..., max_length=200)
     unit: str = Field(..., max_length=20)
     supplier_name: Optional[str] = Field(None, max_length=200)
+    # MAT-6: supplier's article (артикул). Inherited by MaterialCreate + MaterialRead.
+    supplier_sku: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
 
 
@@ -37,6 +39,7 @@ class MaterialUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=200)
     unit: Optional[str] = Field(None, max_length=20)
     supplier_name: Optional[str] = Field(None, max_length=200)
+    supplier_sku: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
     low_stock_threshold: Optional[Decimal] = Field(None, ge=0)
     waste_percent: Optional[Decimal] = Field(None, ge=0, le=100)
@@ -189,3 +192,33 @@ class OverheadMaterialReceiptRead(BaseModel):
     notes: Optional[str]
     user_id: uuid.UUID
     created_at: datetime
+
+
+# ---- MAT-6: receipts grouped by supplier invoice ----
+#
+# Subclasses rather than new models, so the per-material read shapes above stay
+# untouched and every numeric field they carry remains already-classified in
+# tests/test_money_field_completeness.py. The joined display-name pattern
+# mirrors MaterialMovementRead.order_code and OverheadMaterialReceiptRead.shop_name.
+
+
+class InvoiceMaterialReceiptRead(MaterialReceiptRead):
+    material_name: Optional[str] = None  # joined
+
+
+class InvoiceOverheadReceiptRead(OverheadMaterialReceiptRead):
+    overhead_material_name: Optional[str] = None  # joined
+
+
+class InvoiceReceiptsRead(BaseModel):
+    """Every line booked under one supplier invoice, across both ledgers.
+
+    A real invoice mixes direct materials with overhead lines (cutting service,
+    finishing compound), so both blocks are returned. No totals: summing is the
+    reader's job — the lines may span currencies, and a summed field here would
+    be a new money surface for no gain.
+    """
+
+    invoice_no: str
+    material_receipts: List[InvoiceMaterialReceiptRead]
+    overhead_receipts: List[InvoiceOverheadReceiptRead]

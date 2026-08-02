@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from config import get_settings
 from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, shipping, webhooks,
-    products, packaging, finance, materials, overhead_materials,
+    products, packaging, finance, materials, overhead_materials, receipts,
     partner_payouts, idlaser, app_settings, westernbid, agent_actions,
 )
 
@@ -109,6 +109,7 @@ app.include_router(products.router)
 app.include_router(packaging.router)
 app.include_router(materials.router)
 app.include_router(overhead_materials.router)
+app.include_router(receipts.router)
 app.include_router(shipping.router)
 app.include_router(webhooks.router)
 app.include_router(idlaser.router)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertCircle, Package, Truck, FileText, Layers, Percent } from 'lucide-react'
+import { AlertCircle, Package, Truck, FileText, Hash, Layers, Percent } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -41,6 +41,7 @@ export default function MaterialFormModal({
   const [unit, setUnit] = useState(initialData?.unit || 'dm2')
   const [currency, setCurrency] = useState(initialData?.currency || 'UAH')
   const [supplierName, setSupplierName] = useState(initialData?.supplier_name || '')
+  const [supplierSku, setSupplierSku] = useState(initialData?.supplier_sku || '')
   const [notes, setNotes] = useState(initialData?.notes || '')
   const [lowStockThreshold, setLowStockThreshold] = useState(
     initialData?.low_stock_threshold ? String(initialData.low_stock_threshold) : '',
@@ -58,6 +59,7 @@ export default function MaterialFormModal({
     setUnit(initialData?.unit || 'dm2')
     setCurrency(initialData?.currency || 'UAH')
     setSupplierName(initialData?.supplier_name || '')
+    setSupplierSku(initialData?.supplier_sku || '')
     setNotes(initialData?.notes || '')
     setLowStockThreshold(
       initialData?.low_stock_threshold ? String(initialData.low_stock_threshold) : '',
@@ -85,6 +87,7 @@ export default function MaterialFormModal({
         name,
         unit,
         supplier_name: supplierName.trim() || null,
+        supplier_sku: supplierSku.trim() || null,
         notes: notes.trim() || null,
       }
       if (lowStockThreshold.trim() !== '') {
@@ -110,6 +113,7 @@ export default function MaterialFormModal({
         unit,
         currency,
         supplier_name: supplierName.trim() || null,
+        supplier_sku: supplierSku.trim() || null,
         notes: notes.trim() || null,
       }
     }
@@ -197,6 +201,25 @@ export default function MaterialFormModal({
                 value={supplierName}
                 onChange={(e) => setSupplierName(e.target.value)}
               />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
+                <Hash className="size-3" />
+                <p className="text-[10px] font-bold uppercase tracking-widest">
+                  Supplier article (optional)
+                </p>
+              </div>
+              <Input
+                className="border-zinc-800 bg-zinc-900/50 font-mono"
+                placeholder="e.g. 027515"
+                value={supplierSku}
+                onChange={(e) => setSupplierSku(e.target.value)}
+              />
+              <p className="text-[10px] text-zinc-500">
+                The code on the supplier's invoice — it is what matches this material
+                on the next delivery.
+              </p>
             </div>
 
             {isEdit && (

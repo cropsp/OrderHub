@@ -104,6 +104,9 @@ export default function MaterialsPage() {
                     Name
                   </TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
+                    Article
+                  </TableHead>
+                  <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
                     Unit
                   </TableHead>
                   <TableHead className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-5">
@@ -131,6 +134,9 @@ export default function MaterialsPage() {
                         <Skeleton className="h-5 w-48 bg-zinc-800" />
                       </TableCell>
                       <TableCell>
+                        <Skeleton className="h-5 w-16 bg-zinc-800" />
+                      </TableCell>
+                      <TableCell>
                         <Skeleton className="h-5 w-12 bg-zinc-800" />
                       </TableCell>
                       <TableCell>
@@ -152,7 +158,7 @@ export default function MaterialsPage() {
                   ))
                 ) : materials?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-60 text-center">
+                    <TableCell colSpan={8} className="h-60 text-center">
                       <div className="flex flex-col items-center justify-center gap-3">
                         <Layers className="size-10 text-zinc-800" />
                         <p className="text-sm text-zinc-400 italic">
@@ -194,6 +200,15 @@ export default function MaterialsPage() {
                             </span>
                           )}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {item.supplier_sku ? (
+                          <span className="text-xs font-mono text-zinc-400">
+                            {item.supplier_sku}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-zinc-600">—</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <span className="text-xs font-mono text-zinc-300">{item.unit}</span>

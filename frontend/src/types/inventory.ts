@@ -144,6 +144,9 @@ export interface Material {
   low_stock_threshold: string;
   waste_percent: string;
   supplier_name: string | null;
+  // MAT-6: the supplier's article (артикул) — the key that ties one material
+  // across invoices. Nullable: not every item has a supplier code.
+  supplier_sku: string | null;
   notes: string | null;
   is_active: boolean;
   created_at: string;
@@ -155,6 +158,7 @@ export interface MaterialCreate {
   unit: string;
   currency: string;
   supplier_name?: string | null;
+  supplier_sku?: string | null;
   notes?: string | null;
 }
 
@@ -165,6 +169,7 @@ export interface MaterialUpdate {
   name?: string;
   unit?: string;
   supplier_name?: string | null;
+  supplier_sku?: string | null;
   notes?: string | null;
   low_stock_threshold?: number | string;
   waste_percent?: number | string;

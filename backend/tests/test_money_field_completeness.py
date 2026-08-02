@@ -112,6 +112,9 @@ MONEY_SURFACE_ENFORCEMENT: dict[str, str] = {
     "GET /api/orders/{order_id}": "view_costs-null",
     "GET /api/overhead-materials/{overhead_id}/receipts": "view_costs-403",
     "GET /api/products/{id}": "view_costs-null",
+    # MAT-6: whole-invoice read spanning both receipt ledgers. Cost-only surface,
+    # 403'd wholesale by the router-level require_capability(VIEW_COSTS).
+    "GET /api/receipts/by-invoice": "view_costs-403",
     "GET /api/products/{id}/bom": "view_costs-null",
     "GET /api/products/{id}/bom/cost": "view_costs-403",
     "GET /api/shops/{shop_id}/finance": "view_finance,view_costs-strip",
