@@ -36,6 +36,22 @@ class Config:
     agent_email: str
     agent_password: str
     timeout_s: float
+    # Cloudflare Access service token. Prod sits behind an Access policy, so
+    # every request — including the login itself — needs these. Dev has no gate
+    # and leaves them empty. Both or neither: a half-configured pair would send
+    # a token Cloudflare rejects, which surfaces as a 302 to a login page rather
+    # than as a clean auth error.
+    cf_access_client_id: str | None = None
+    cf_access_client_secret: str | None = None
+
+    def access_headers(self) -> dict[str, str]:
+        """CF Access headers, or an empty dict when no service token is set."""
+        if self.cf_access_client_id and self.cf_access_client_secret:
+            return {
+                "CF-Access-Client-Id": self.cf_access_client_id,
+                "CF-Access-Client-Secret": self.cf_access_client_secret,
+            }
+        return {}
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -51,4 +67,8 @@ class Config:
             agent_email=os.environ.get("ORDERHUB_AGENT_EMAIL", DEFAULT_AGENT_EMAIL),
             agent_password=password,
             timeout_s=float(os.environ.get("ORDERHUB_TIMEOUT_S", "30")),
+            cf_access_client_id=os.environ.get("CF_ACCESS_CLIENT_ID", "").strip() or None,
+            cf_access_client_secret=(
+                os.environ.get("CF_ACCESS_CLIENT_SECRET", "").strip() or None
+            ),
         )

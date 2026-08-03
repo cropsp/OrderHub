@@ -270,3 +270,121 @@ def test_drop_none_keeps_falsy_values():
 def test_detail_of_handles_non_json_body():
     response = httpx.Response(502, text="upstream boom")
     assert _detail_of(response) == "upstream boom"
+
+
+# ── Cloudflare Access service token ────────────────────────
+
+CF_ID = "abc123.access"
+CF_SECRET = "s3rvice-t0ken-secret"
+
+
+def _cf_client(handler, **over) -> tuple[OrderHubClient, Recorder]:
+    recorder = Recorder(handler)
+    return (
+        OrderHubClient(_config(**over), transport=httpx.MockTransport(recorder)),
+        recorder,
+    )
+
+
+def _login_then_ok(request):
+    if request.url.path == "/api/auth/login":
+        return _ok({"access_token": "tok-1"})
+    return _ok([{"id": "m1"}])
+
+
+@pytest.mark.asyncio
+async def test_cf_access_headers_sent_on_every_request_when_configured():
+    """Including the LOGIN. Access gates the hostname, not just /api/materials —
+    and login goes out before any bearer token exists, so if the service token
+    were attached per-request alongside the bearer, login would be blocked and
+    the client could never authenticate at all."""
+    client, rec = _cf_client(
+        _login_then_ok,
+        cf_access_client_id=CF_ID,
+        cf_access_client_secret=CF_SECRET,
+    )
+    await client.get("/api/materials")
+    await client.aclose()
+
+    assert rec.paths() == ["/api/auth/login", "/api/materials"]
+    for request in rec.requests:
+        assert request.headers.get("cf-access-client-id") == CF_ID
+        assert request.headers.get("cf-access-client-secret") == CF_SECRET
+
+
+@pytest.mark.asyncio
+async def test_cf_access_headers_absent_when_not_configured():
+    """Dev has no Access gate — sending an empty or partial token would be noise
+    at best and a rejected request at worst."""
+    client, rec = _cf_client(_login_then_ok)
+    await client.get("/api/materials")
+    await client.aclose()
+
+    assert rec.requests
+    for request in rec.requests:
+        assert "cf-access-client-id" not in request.headers
+        assert "cf-access-client-secret" not in request.headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"cf_access_client_id": CF_ID},
+        {"cf_access_client_secret": CF_SECRET},
+    ],
+)
+async def test_half_configured_service_token_sends_nothing(over):
+    """Both or neither. Sending one half produces a token Cloudflare rejects,
+    which comes back as a 302 to a login page — not a 401, so the client's
+    re-auth path would not fire and the failure would be opaque."""
+    client, rec = _cf_client(_login_then_ok, **over)
+    await client.get("/api/materials")
+    await client.aclose()
+
+    for request in rec.requests:
+        assert "cf-access-client-id" not in request.headers
+        assert "cf-access-client-secret" not in request.headers
+
+
+@pytest.mark.asyncio
+async def test_bearer_and_cf_headers_coexist():
+    """The per-request Authorization header must not displace the client-level
+    Access headers — httpx merges them, it does not replace the whole set."""
+    client, rec = _cf_client(
+        _login_then_ok,
+        cf_access_client_id=CF_ID,
+        cf_access_client_secret=CF_SECRET,
+    )
+    await client.get("/api/materials")
+    await client.aclose()
+
+    api_call = rec.requests[-1]
+    assert api_call.headers.get("authorization") == "Bearer tok-1"
+    assert api_call.headers.get("cf-access-client-id") == CF_ID
+
+
+def test_access_headers_reads_both_env_vars(monkeypatch):
+    monkeypatch.setenv("ORDERHUB_AGENT_PASSWORD", "pw")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_ID", CF_ID)
+    monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", CF_SECRET)
+
+    config = Config.from_env()
+
+    assert config.access_headers() == {
+        "CF-Access-Client-Id": CF_ID,
+        "CF-Access-Client-Secret": CF_SECRET,
+    }
+
+
+def test_blank_env_vars_are_treated_as_unset(monkeypatch):
+    """`.env.example` ships them as empty placeholders, so an uncommented-but-
+    unfilled line must not count as configured."""
+    monkeypatch.setenv("ORDERHUB_AGENT_PASSWORD", "pw")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_ID", "  ")
+    monkeypatch.setenv("CF_ACCESS_CLIENT_SECRET", "")
+
+    config = Config.from_env()
+
+    assert config.cf_access_client_id is None
+    assert config.access_headers() == {}

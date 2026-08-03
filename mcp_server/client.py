@@ -11,6 +11,14 @@ Auth (§5.7): log in once as the agent user, keep the httpOnly refresh cookie in
 the jar, and mint a fresh 15-minute access token on 401. Revocation is
 `is_active=False` on the agent user, which both `get_current_user` and
 `/api/auth/refresh` check.
+
+Cloudflare Access: prod is Access-gated, so a service token (CF-Access-Client-Id
+/ -Secret) is set as DEFAULT headers on the client rather than per request. That
+placement is load-bearing — Access gates the hostname, so `/api/auth/login` and
+`/api/auth/refresh` need the token too, and those go through `self._http`
+directly without passing through `_send`. Without the token an Access-gated host
+answers 302 to a login page, which is not a 401 and would not trigger the
+re-auth path. Dev is ungated and sends nothing.
 """
 
 import asyncio
@@ -52,6 +60,11 @@ class OrderHubClient:
             # jar keeps it so `_reauthenticate` can mint access tokens without
             # re-sending the password.
             cookies=httpx.Cookies(),
+            # Empty on dev. Client-level so login/refresh carry it too — see the
+            # module docstring. httpx merges these into every request, and a
+            # per-request header of the same name would win, so `_send`'s
+            # Authorization header coexists with them rather than replacing them.
+            headers=config.access_headers(),
             transport=transport,
         )
 
