@@ -26,7 +26,7 @@ from schemas.order import OrderCreate, OrderItemCreate
 from services.catalog_import import ensure_catalog_row, _weight_to_grams
 from services.catalog_service import CatalogService
 from services.encryption_service import decrypt_value
-from services.order_service import create_order
+from services.order_service import compute_platform_fee, create_order
 
 SHOPIFY_API_VERSION = "2024-04"
 
@@ -495,6 +495,25 @@ async def _write_order_node(
         f"Imported from Shopify (fulfillment={fulfillment}, financial={financial})"
     )
 
+    # SHOP-FEE-1: the shop's effective transaction rate applied to the order
+    # total, frozen here. Computed from the Decimal amount rather than the float
+    # at total_price= below, so no binary-float error reaches the money column.
+    # A CANCELLED order never enters REVENUE_STATUSES, so a fee on it is inert in
+    # the P&L but wrong on the order card — skip it, using the SAME predicate the
+    # backfill uses so the two paths cannot drift.
+    platform_fee = None
+    if mapped_status is not OrderStatus.CANCELLED:
+        platform_fee = compute_platform_fee(
+            _to_decimal(money.get("amount")), shop.fee_percent
+        )
+    if platform_fee is not None:
+        # Provenance without a schema change. The literal "platform_fee: <amt>"
+        # token is REQUIRED, not cosmetic: _FINANCIAL_COMMENT_RE in order_service
+        # matches exactly that shape, so this addendum inherits VIEW_COSTS
+        # redaction in the order timeline. Any other wording leaks the fee to
+        # designers, who see import comments verbatim.
+        history_comment += f", platform_fee: {platform_fee} @ {shop.fee_percent}%"
+
     order_create_payload = OrderCreate(
         external_id=external_id,
         shop_id=shop.id,
@@ -529,6 +548,7 @@ async def _write_order_node(
         status=mapped_status,
         completed_at=completed_at,
         history_comment=history_comment,
+        platform_fee=platform_fee,
     )
     logger.info(
         "Synced order %s → %s: %s",

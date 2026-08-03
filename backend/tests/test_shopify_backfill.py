@@ -36,6 +36,11 @@ def _make_shop():
     shop.shopify_store_url = "test.myshopify.com"
     shop.shopify_access_token_encrypted = b"encrypted"
     shop.last_synced_at = None
+    # SHOP-FEE-1: must be an explicit None, not left to MagicMock's auto-attr.
+    # A bare mock reaching compute_platform_fee raises InvalidOperation, which
+    # the per-order `except Exception` in sync_shop_orders swallows — every
+    # import silently counts as failed, with a misleading assertion message.
+    shop.fee_percent = None
     return shop
 
 

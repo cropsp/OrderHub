@@ -111,6 +111,14 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "uah_per_usd_effective": "neutral",
     "uah_per_usd_override": "neutral",
     "uah_per_usd_cached": "neutral",
+    # SHOP-FEE-1: the shop's total effective transaction rate. Neutral by the
+    # same reading as uah_per_usd_effective above — a configured rate, not an
+    # amount, and no cost figure travels with it on the shops surface. It is
+    # nonetheless nulled for callers without VIEW_COSTS in routers/shops.py
+    # (`_can_view_fee_percent`), because rate × total_price reconstructs
+    # platform_fee exactly and total_price is never censored. Neutral here keeps
+    # /api/shops — the sidebar source every role hits — out of _money_routes().
+    "fee_percent": "neutral",
     "qty": "neutral",
     "qty_per_unit": "neutral",
     "delta": "neutral",

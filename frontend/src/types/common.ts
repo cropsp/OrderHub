@@ -37,6 +37,10 @@ export interface Shop {
   np_default_description: string | null
   np_default_weight_kg: number
   np_default_volume_m3: number
+  /** SHOP-FEE-1: total effective transaction fee, percent. A string because it
+   *  is a Decimal server-side — parse before arithmetic. null means either "no
+   *  rate configured" or "you may not see it" (nulled without VIEW_COSTS). */
+  fee_percent: string | null
   created_at: string
 }
 

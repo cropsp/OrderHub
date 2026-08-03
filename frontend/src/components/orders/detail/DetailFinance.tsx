@@ -32,12 +32,21 @@ export function DetailFinance({ order }: DetailFinanceProps) {
   const manualCost = order.production_cost;
   const computedCost = order.computed_production_cost;
 
+  // SHOP-FEE-1: the transaction fee the channel/gateway takes off this order.
+  // Null when the shop has no rate configured, or when the caller may not see
+  // costs (censor_order_financials nulls it) — in both cases it contributes 0,
+  // which is what this card showed before fees were ever populated.
+  const platformFee = order.platform_fee ?? 0;
+
   // Net profit / margin are only honest when we actually know a cost AND an
   // authoritative total (otherwise profit off a 0 total reads as a real loss).
   // computed (BOM-driven) takes precedence over the manual figure.
+  // The fee is subtracted here to match the finance page's definition
+  // (revenue − COGS − fees − …); leaving it out made this card disagree with
+  // the P&L on every order carrying a fee.
   const effectiveCost = computedCost ?? manualCost ?? null;
   const netProfit =
-    totalKnown && effectiveCost != null ? orderTotal - effectiveCost : null;
+    totalKnown && effectiveCost != null ? orderTotal - effectiveCost - platformFee : null;
   const marginPercent =
     netProfit != null && orderTotal > 0
       ? Math.round((netProfit / orderTotal) * 100)
@@ -109,6 +118,20 @@ export function DetailFinance({ order }: DetailFinanceProps) {
             </span>
             <span className="text-sm font-medium text-zinc-300">
               {formatMoney(manualCost)}{' '}
+              <span className="text-[10px] text-zinc-600 uppercase ml-0.5">
+                {order.currency}
+              </span>
+            </span>
+          </div>
+        )}
+
+        {order.platform_fee != null && (
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-zinc-400">
+              Platform fee
+            </span>
+            <span className="text-sm font-medium text-zinc-300">
+              −{formatMoney(order.platform_fee)}{' '}
               <span className="text-[10px] text-zinc-600 uppercase ml-0.5">
                 {order.currency}
               </span>

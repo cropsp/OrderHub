@@ -38,6 +38,10 @@ CLASSIFIED: dict[str, str] = {
     "POST /api/shops/{shop_id}/backfill-refunds": "guarded",
     "POST /api/shops/{shop_id}/backfill-order-numbers": "guarded",
     "POST /api/shops/{shop_id}/backfill-product-images": "guarded",
+    # SHOP-FEE-1: OWNER-only unlike the sibling backfills — it writes
+    # platform_fee (a FINANCIAL_FIELDS column, owner-gated on the update path)
+    # and moves every future partner-payout base.
+    "POST /api/shops/{shop_id}/backfill-platform-fees": "owner-only",
     "GET /api/shops/{shop_id}/finance": "guarded",
     "GET /api/shops/{shop_id}/products": "guarded",
     "POST /api/shops/{shop_id}/products": "guarded",

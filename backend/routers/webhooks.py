@@ -19,7 +19,7 @@ from models.shop import Shop, ShopPlatform
 from services.encryption_service import decrypt_value
 from services.shopify_sync import call_shopify_graphql # For fetching full details if needed
 from schemas.order import OrderCreate
-from services.order_service import create_order, update_order
+from services.order_service import compute_platform_fee, create_order, update_order
 from models.order import Order
 from models.user import User
 
@@ -114,7 +114,26 @@ async def shopify_webhook(
             # await update_order(db, existing.id, payload, system_user)
             logger.info(f"Order {external_id} already exists, skipping update for now.")
         else:
-            await create_order(db, OrderCreate(**payload), system_user)
+            # SHOP-FEE-1: same fee rule as the polling sync, so an order landing
+            # here instead of there is priced identically. Webhook orders are
+            # always created NEW, so there is no CANCELLED case to skip.
+            platform_fee = compute_platform_fee(payload["total_price"], shop.fee_percent)
+            create_kwargs = {}
+            if platform_fee is not None:
+                # Literal "platform_fee: <amt>" token — see _FINANCIAL_COMMENT_RE
+                # in order_service; this exact shape is what earns VIEW_COSTS
+                # redaction in the order timeline.
+                create_kwargs["history_comment"] = (
+                    f"Created via Shopify webhook, "
+                    f"platform_fee: {platform_fee} @ {shop.fee_percent}%"
+                )
+            await create_order(
+                db,
+                OrderCreate(**payload),
+                system_user,
+                platform_fee=platform_fee,
+                **create_kwargs,
+            )
             logger.info(f"Created new order {external_id} via webhook.")
 
     return {"status": "ok"}

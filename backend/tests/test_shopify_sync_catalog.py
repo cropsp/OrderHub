@@ -79,6 +79,8 @@ def _make_shop():
     shop.shopify_store_url = "test.myshopify.com"
     shop.shopify_access_token_encrypted = b"encrypted"
     shop.last_synced_at = None
+    # SHOP-FEE-1: explicit None — see the note in test_shopify_backfill._make_shop.
+    shop.fee_percent = None
     return shop
 
 

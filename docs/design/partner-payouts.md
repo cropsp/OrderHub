@@ -218,6 +218,34 @@ GROUP BY o.currency;
 
 **Caveat on the GROUP BY shape:** if a shop ever has orders in multiple currencies in one period, the SUM-then-subtract pattern at the row level is correct per currency. The actual implementation should validate that `platform_fee.currency` matches `order.currency` per row — already an invariant in FIN-1, but worth re-verifying during PART-1 task planning.
 
+> **⚠️ SHOP-FEE-1 consequence — accepted, not a bug.** Since SHOP-FEE-1,
+> `platform_fee` is populated as `shops.fee_percent × orders.total_price` — and
+> as noted directly above, `total_price` **includes shipping**. This formula then
+> subtracts that whole fee from an **items-only** revenue base. So a partner bears
+> the transaction fee on shipping they get no share of.
+>
+> On the same Heavy Mushroom Keychain order ($14.99 items + $8.00 shipping =
+> $22.99) at an 8% rate: $1.84 is deducted where a shipping-excluded fee would be
+> $1.20 — the partner is charged ~$0.64 more on that order.
+>
+> This was invisible before SHOP-FEE-1, because `platform_fee` was NULL on every
+> live order and the term was always 0. **Every settlement cut from now on comes
+> out lower**, and the gap grows with the shipping share of an order.
+>
+> The decision was to keep **one** fee definition everywhere rather than introduce
+> a second, pro-rated expression that could drift from the figure stamped on the
+> order. If revisited, the change belongs in `_run_product_only_aggregate`
+> (`backend/services/finance_service.py`) — scale by
+> `items_subtotal / NULLIF(total_price, 0)` — and must not alter
+> `orders.platform_fee` itself, which records what the processor actually took.
+>
+> **Backfill interaction:** re-pricing fees over an already-settled period leaves
+> that period retroactively over-settled. Settlements are immutable snapshots, so
+> past payouts stand, but the same period would now compute lower.
+> `POST /api/shops/{shop_id}/backfill-platform-fees` reports overlapping
+> settlements in its dry run for exactly this reason, and accepts `since`/`until`
+> so closed periods can be left alone.
+
 **Negative base handling:** if platform fees somehow exceed items (e.g. high-fee Etsy order combined with a refund), `base_amount` goes negative. Settlement stored as-is; computed_amount also negative. Operator interprets — see §6 Edge Cases.
 
 ### 4.2 `net_profit_product_only`

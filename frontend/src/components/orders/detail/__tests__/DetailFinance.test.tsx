@@ -179,3 +179,36 @@ describe('DetailFinance — FX-CONVERSION provenance', () => {
     expect(screen.queryByTestId('fx-provenance')).toBeNull()
   })
 })
+
+describe('DetailFinance — SHOP-FEE-1 platform fee', () => {
+  it('subtracts the platform fee from net profit', () => {
+    // 1000 total − 300 cost − 65 fee = 635. Without the fee term this card read
+    // 700 while the finance page read 635 — the divergence this closes.
+    render(
+      <DetailFinance
+        order={makeOrder({ production_cost: 300, platform_fee: 65 })}
+      />,
+    )
+    expect(screen.getByText('Platform fee')).toBeInTheDocument()
+    expect(screen.getByText('635.00')).toBeInTheDocument()
+    expect(screen.queryByText('700.00')).toBeNull()
+  })
+
+  it('omits the fee row when no fee is set', () => {
+    render(<DetailFinance order={makeOrder({ production_cost: 300 })} />)
+    expect(screen.queryByText('Platform fee')).toBeNull()
+    // Unchanged from before fees existed: 1000 − 300.
+    expect(screen.getByText('700.00')).toBeInTheDocument()
+  })
+
+  it('treats a censored fee as zero rather than breaking net profit', () => {
+    // A caller without VIEW_COSTS gets platform_fee: null (null-in-200), which
+    // must degrade to the pre-fee arithmetic, not to NaN.
+    render(
+      <DetailFinance
+        order={makeOrder({ production_cost: 300, platform_fee: null })}
+      />,
+    )
+    expect(screen.getByText('700.00')).toBeInTheDocument()
+  })
+})

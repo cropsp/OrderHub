@@ -25,10 +25,48 @@ Where each component is computed by `backend/services/finance_service.py`:
 |---|---|---|
 | **Revenue** | `SUM(orders.total_price)` | **Includes shipping**; `total_price` is the order's gross total. Filters: `status IN ('shipped', 'completed')`, `COALESCE(shipped_at, ordered_at) BETWEEN :start AND :end`, grouped by `currency`. |
 | **COGS** | `SUM(COALESCE(orders.computed_production_cost, orders.production_cost, 0))` | Phase B: prefers BOM-computed cost (set by MAT-4 consumption hook); falls back to manual `production_cost`. NULL/missing → 0 contribution. |
-| **Fees** | `SUM(COALESCE(orders.platform_fee, 0) + COALESCE(orders.shipping_np_cost, 0))` | Platform fees (Shopify/Etsy commission) + Nova Poshta shipping cost. **Shipping is netted via Fees.** |
+| **Fees** | `SUM(COALESCE(orders.platform_fee, 0) + COALESCE(orders.shipping_np_cost, 0))` | Platform fees (Shopify/Etsy commission) + Nova Poshta shipping cost. **Shipping is netted via Fees.** See §1a for where `platform_fee` comes from. |
 | **Allocated Overhead** | `SUM(overhead_material_receipts.total_cost) WHERE shop_id = :shop_id` | Per-shop tagged overhead from MAT-5. Excludes unallocated overhead. |
 
 All four aggregates are per-currency. Net Profit retains per-currency breakdown — no cross-currency aggregation.
+
+## 1a. Where `platform_fee` comes from (SHOP-FEE-1)
+
+Until SHOP-FEE-1, `orders.platform_fee` was NULL on every live order — only
+`seed.py` ever wrote it. The Fees term was therefore carried entirely by
+`shipping_np_cost`, and **Net Profit was overstated on every real order**.
+
+Each shop now carries `shops.fee_percent` — its **total effective** per-order
+transaction rate, one calibrated number covering channel commission + payment
+gateway + merchant-of-record cut. For the Lamamarka Shopify shop that is WB's ~4%
+of funds received, plus card processing, plus the Shopify "Grow" plan's 1%
+third-party-gateway surcharge. The $105/mo Shopify subscription is **not** part of
+it — that is a fixed cost entered separately as overhead.
+
+- **Base: `orders.total_price`.** The full customer charge — inclusive of shipping
+  and tax, **gross of refunds**. That is what the merchant of record actually
+  receives and commissions. It is also the only monetary total an `Order` stores;
+  there is no subtotal column to choose instead. Refunds are not deducted from the
+  base because processors generally keep their fee on a refund; refunds are
+  subtracted separately by the Refunds term, so nothing is double-counted.
+- **Applied at order creation and frozen there.** Changing a shop's `fee_percent`
+  never re-prices existing orders, the same rule `cogs_fx_rate` follows. Re-pricing
+  on a rate change would silently rewrite closed months and already-paid payouts.
+- **Manual edits win.** An auto fee is only ever written where `platform_fee IS
+  NULL`. An owner-entered value is never overwritten, by the sync or the backfill.
+- **NULL rate = no auto fee**, which is the state of every shop until a rate is set.
+- **Percent-only, no fixed component.** Real gateway pricing is
+  `pct × total + fixed` (e.g. 2.9% + $0.30), so this under-states fees on small
+  orders. Deliberate approximation; the WB Balance API is the eventual exact
+  source (see `implementation_plan.md`).
+- **Shopify + WB only this sprint.** Etsy is deferred — its fee stack is larger,
+  more variable, and includes ad spend.
+
+Existing orders are re-priced by the explicit, dry-run-first
+`POST /api/shops/{shop_id}/backfill-platform-fees` (OWNER-only). It skips
+CANCELLED orders and anything with a fee already set, bounds by
+`COALESCE(shipped_at, ordered_at)` so the window lines up with these aggregates,
+and reports overlapping partner settlements before writing.
 
 ## 2. What FIN-1 Net Profit does NOT include
 

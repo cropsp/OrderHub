@@ -7,8 +7,9 @@ Nova Poshta sender configuration and encrypted API tokens.
 
 import enum
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -55,6 +56,14 @@ class Shop(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     np_default_volume_m3: Mapped[float] = mapped_column(Float, default=0.004)
     np_default_payer_type: Mapped[str] = mapped_column(String(20), default="Sender")
     np_default_payment_method: Mapped[str] = mapped_column(String(20), default="Cash")
+
+    # Finance (SHOP-FEE-1): the shop's TOTAL EFFECTIVE per-order transaction fee
+    # as a percent (e.g. 8.00 = 8%) — channel commission + payment gateway +
+    # merchant-of-record cut, collapsed into one calibrated number. NULL means
+    # "not configured": orders synced for this shop get no auto-computed
+    # platform_fee, which is today's behaviour for every shop. Applied to
+    # Order.total_price at order creation and frozen there.
+    fee_percent: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
 
     # UI
     color: Mapped[str] = mapped_column(String(7), default="#6366F1")

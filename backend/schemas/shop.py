@@ -4,6 +4,7 @@ OrderHub CRM — Shop Schemas
 
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -36,6 +37,29 @@ class ShopRefundBackfillRequest(BaseModel):
     dry_run: bool = True
 
 
+class ShopPlatformFeeBackfillRequest(BaseModel):
+    """SHOP-FEE-1: re-price existing orders that never got a `platform_fee`.
+
+    `since`/`until` bound the run by COALESCE(shipped_at, ordered_at) — the same
+    expression finance buckets by — so an operator can leave already-settled
+    partner periods alone. Both optional: unset re-prices the shop's whole
+    history.
+    """
+
+    since: date | None = None
+    until: date | None = None
+    # dry_run defaults TRUE, like the other shop backfills. This one moves the
+    # P&L and every future partner-payout base, so a real write must be an
+    # explicit dry_run=false after reviewing the reported impact.
+    dry_run: bool = True
+
+    @model_validator(mode="after")
+    def _check_range(self) -> "ShopPlatformFeeBackfillRequest":
+        if self.since is not None and self.until is not None and self.until < self.since:
+            raise ValueError("until must be on or after since")
+        return self
+
+
 class ShopBase(BaseModel):
     name: str = Field(..., max_length=255)
     platform: ShopPlatform
@@ -53,6 +77,10 @@ class ShopBase(BaseModel):
     np_default_payment_method: str = Field("Cash", max_length=20)
     color: str = Field("#6366F1", max_length=7)
     is_active: bool = True
+    # SHOP-FEE-1: total effective per-order transaction fee, percent. None = not
+    # configured (no auto fee). Nulled on read for callers without VIEW_COSTS —
+    # see routers/shops.py `_visible_fee_percent`.
+    fee_percent: Decimal | None = Field(None, ge=0, le=100)
 
 
 class ShopCreate(ShopBase):
@@ -82,6 +110,11 @@ class ShopUpdate(BaseModel):
     np_default_payment_method: str | None = Field(None, max_length=20)
     color: str | None = Field(None, max_length=7)
     is_active: bool | None = None
+    # SHOP-FEE-1. Must be declared here explicitly: ShopUpdate does NOT inherit
+    # ShopBase, and Pydantic drops unknown keys, so an omitted field would make
+    # PATCH return 200 while silently discarding the value. Sending an explicit
+    # null clears the rate (exclude_unset distinguishes that from "absent").
+    fee_percent: Decimal | None = Field(None, ge=0, le=100)
 
 
 class ShopResponse(ShopBase):

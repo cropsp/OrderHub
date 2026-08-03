@@ -60,6 +60,44 @@ export function useSyncShop() {
   })
 }
 
+export function useBackfillPlatformFees() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...body
+    }: {
+      id: string
+      since?: string | null
+      until?: string | null
+      dry_run: boolean
+    }) => shopsApi.backfillPlatformFees(id, body),
+    onSuccess: (result) => {
+      if (result.dry_run) {
+        const totals = Object.entries(result.fee_total_by_currency)
+          .map(([c, v]) => `${v.toFixed(2)} ${c}`)
+          .join(', ')
+        addToast(
+          `Dry run: ${result.matched} order(s) would be priced` +
+            `${totals ? ` (${totals})` : ''} · ${result.affects_pnl_now} already in the P&L` +
+            `${result.overlapping_settlements.length ? ` · ${result.overlapping_settlements.length} settlement(s) overlap` : ''}`,
+          'info',
+        )
+        return
+      }
+      // Real run moves revenue-side figures everywhere they are cached.
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['finance'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      addToast(`Priced ${result.updated} order(s) at ${result.fee_percent}%`, 'success')
+    },
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Failed to backfill platform fees'), 'error')
+    },
+  })
+}
+
 export function useBackfillProductImages() {
   const queryClient = useQueryClient()
   const addToast = useToastStore((s) => s.addToast)

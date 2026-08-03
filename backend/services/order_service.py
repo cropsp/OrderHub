@@ -2,22 +2,27 @@
 OrderHub CRM — Order Service
 """
 
+import logging
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import select, func, or_, update
+from sqlalchemy import Date, cast, select, func, or_, update
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from models.order import Order, OrderItem, OrderStatus, OrderStatusHistory, ALLOWED_TRANSITIONS
+from models.shop import Shop
 from models.user import User, UserRole
 from models.customer import Customer
 from models.product import Product, ProductVariant
 from models.packaging import PackagingBox
 from schemas.order import OrderCreate, OrderUpdate, OrderFilters, OrderItemCreate, OrderItemUpdate
 from services.customer_service import upsert_customer
+
+logger = logging.getLogger(__name__)
 
 
 # Owner-only financial fields. Only OWNER may WRITE these (see update_order).
@@ -72,6 +77,151 @@ def censor_order_financials(data: dict, *, can_view_costs: bool) -> dict:
     for entry in data.get("status_history") or []:
         entry["comment"] = redact_financial_comment(entry.get("comment"))
     return data
+
+
+def compute_platform_fee(total_price, fee_percent) -> Decimal | None:
+    """The order's platform fee: `total_price × fee_percent / 100` (SHOP-FEE-1).
+
+    `fee_percent` is the shop's total effective transaction rate (see
+    `models.shop.Shop.fee_percent`). None means the shop has no rate configured,
+    and the answer is None — NOT 0.00 — so `platform_fee` stays NULL and the
+    order remains eligible for a later backfill. A configured rate of 0 does
+    return `Decimal("0.00")`: that shop has been priced, at zero.
+
+    The base is `Order.total_price`, the full customer charge (inclusive of
+    shipping and tax, gross of refunds) — the amount the merchant of record
+    actually receives and commissions. It is also the only monetary total the
+    Order carries; there is no stored subtotal to choose instead.
+
+    Both arguments go through `Decimal(str(x))` so a float total never
+    contaminates the result with binary-float error, and a non-numeric argument
+    raises `InvalidOperation` rather than silently yielding a wrong number.
+    Quantized ONCE at the end, ROUND_HALF_UP — the same convention as the
+    consumption/BOM cost paths.
+    """
+    if fee_percent is None:
+        return None
+    total = Decimal(str(total_price))
+    percent = Decimal(str(fee_percent))
+    return (total * percent / Decimal(100)).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+
+async def backfill_platform_fees(
+    db: AsyncSession,
+    shop: Shop,
+    *,
+    since: date | None = None,
+    until: date | None = None,
+    dry_run: bool = True,
+) -> dict:
+    """One-time re-pricing of existing orders that never got a fee (SHOP-FEE-1).
+
+    The sync only ever prices an order at CREATION and never revisits an existing
+    row, so without this every order imported before the shop's rate was set
+    keeps `platform_fee IS NULL` forever and its months stay overstated in the
+    P&L. This is the explicit, operator-driven catch-up for that history.
+
+    Eligibility, deliberately identical to the sync-time rule so the two paths
+    cannot drift:
+      - `platform_fee IS NULL` — a fee a human entered is NEVER overwritten, and
+        an auto fee already written is never recomputed at a newer rate (an
+        order's fee is frozen at its creation rate, like `cogs_fx_rate`).
+      - status != CANCELLED — cancelled orders are outside REVENUE_STATUSES, so a
+        fee there is inert in the P&L but wrong on the order card.
+
+    `since`/`until` bound the run by `COALESCE(shipped_at, ordered_at)` — the same
+    expression finance buckets by — so the reported total reconciles against the
+    finance-page delta and lines up with partner settlement periods. Leaving them
+    unset re-prices the shop's whole history.
+
+    Not platform-gated: `fee_percent` is generic shop config, and only shops the
+    operator has actually given a rate are reachable here at all.
+
+    Returns per-currency fee totals split by whether the order is already in the
+    P&L (SHIPPED/COMPLETED) or still pending, so the operator can see the
+    immediate impact separately from what is coming. Writes no per-order history
+    rows — the endpoint call and its dry-run report are the record, as with
+    `backfill_order_numbers`.
+    """
+    empty = {
+        "matched": 0,
+        "affects_pnl_now": 0,
+        "pending": 0,
+        "fee_total_by_currency": {},
+        "fee_total_pnl_now_by_currency": {},
+        "updated": 0,
+        "dry_run": dry_run,
+    }
+    if shop.fee_percent is None:
+        return empty
+
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    conditions = [
+        Order.shop_id == shop.id,
+        Order.platform_fee.is_(None),
+        Order.status != OrderStatus.CANCELLED,
+    ]
+    if since is not None:
+        conditions.append(cast(date_expr, Date) >= since)
+    if until is not None:
+        conditions.append(cast(date_expr, Date) <= until)
+
+    result = await db.execute(
+        select(Order.id, Order.total_price, Order.currency, Order.status).where(*conditions)
+    )
+    rows = result.all()
+    if not rows:
+        return empty
+
+    revenue_statuses = (OrderStatus.SHIPPED, OrderStatus.COMPLETED)
+    fee_by_currency: dict[str, Decimal] = {}
+    fee_by_currency_pnl: dict[str, Decimal] = {}
+    affects_pnl_now = 0
+    fees: list[tuple[uuid.UUID, Decimal]] = []
+
+    for row in rows:
+        fee = compute_platform_fee(row.total_price, shop.fee_percent)
+        fees.append((row.id, fee))
+        currency = row.currency or "USD"
+        fee_by_currency[currency] = fee_by_currency.get(currency, Decimal("0")) + fee
+        if row.status in revenue_statuses:
+            affects_pnl_now += 1
+            fee_by_currency_pnl[currency] = (
+                fee_by_currency_pnl.get(currency, Decimal("0")) + fee
+            )
+
+    updated = 0
+    if not dry_run:
+        for order_id, fee in fees:
+            res = await db.execute(
+                update(Order)
+                # The NULL guard is repeated here, not just in the SELECT above,
+                # so a fee entered between the two can never be overwritten.
+                .where(Order.id == order_id, Order.platform_fee.is_(None))
+                .values(platform_fee=fee)
+            )
+            updated += res.rowcount or 0
+        await db.flush()
+
+    logger.info(
+        "Platform-fee backfill for shop %s (rate=%s, dry_run=%s): matched=%d "
+        "affects_pnl_now=%d updated=%d",
+        shop.id, shop.fee_percent, dry_run, len(rows), affects_pnl_now, updated,
+    )
+
+    return {
+        "matched": len(rows),
+        "affects_pnl_now": affects_pnl_now,
+        "pending": len(rows) - affects_pnl_now,
+        "fee_total_by_currency": {c: float(v) for c, v in fee_by_currency.items()},
+        "fee_total_pnl_now_by_currency": {
+            c: float(v) for c, v in fee_by_currency_pnl.items()
+        },
+        "updated": updated,
+        "dry_run": dry_run,
+    }
 
 
 def order_item_image_ref(item: OrderItem) -> tuple[uuid.UUID | None, str | None]:
@@ -316,6 +466,7 @@ async def create_order(
     shipped_at: datetime | None = None,
     completed_at: datetime | None = None,
     history_comment: str = "Order manually created",
+    platform_fee: Decimal | None = None,
 ) -> Order:
     """Create an order + its opening audit row.
 
@@ -327,6 +478,12 @@ async def create_order(
     which would fire the MAT-4 live-stock consumption hook, designer
     auto-assignment, and timestamp mutation for orders that never moved through
     those states in OrderHub.
+
+    `platform_fee` (SHOP-FEE-1) is keyword-only and deliberately NOT part of
+    `OrderCreate`: that schema is the public request body for POST /api/orders,
+    which has no owner gate on FINANCIAL_FIELDS (the gate lives in update_order),
+    so putting a cost field there would open a non-owner write path. Importers
+    pass it explicitly; manual order entry leaves it None.
     """
     # Customupsert -> Create order -> Default History
     customer = await upsert_customer(
@@ -364,6 +521,7 @@ async def create_order(
         shipping_city_ref=data.shipping_city_ref,
         shipping_warehouse_ref=data.shipping_warehouse_ref,
         customer_note=data.customer_note,
+        platform_fee=platform_fee,
     )
     db.add(order)
     await db.flush()

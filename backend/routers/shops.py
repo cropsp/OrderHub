@@ -4,6 +4,7 @@ OrderHub CRM — Shops Router
 
 import asyncio
 import uuid
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -14,9 +15,10 @@ from logger import get_logger
 from models.shop import Shop
 from models.order import Order
 from models.product import Product
-from models.user import User, UserRole
+from models.user import Capability, User, UserRole
 from schemas.shop import (
     ShopBackfillRequest,
+    ShopPlatformFeeBackfillRequest,
     ShopRefundBackfillRequest,
     ShopCreate,
     ShopUpdate,
@@ -25,6 +27,7 @@ from schemas.shop import (
 )
 from routers.dependencies import assert_shop_access, get_current_user, require_role
 from services.access_service import (
+    get_capabilities,
     get_shop_scope,
     propagate_new_shop_to_unrestricted_managers,
 )
@@ -34,6 +37,7 @@ from services.shopify_sync import (
     backfill_order_numbers,
     sync_shop_refunds,
 )
+from services.order_service import backfill_platform_fees
 from services.product_image_service import fetch_and_store_shopify_image
 from services.encryption_service import encrypt_value, decrypt_value
 from services.phone_normalization import normalize_ua_sender_phone
@@ -42,6 +46,21 @@ from services.phone_normalization import normalize_ua_sender_phone
 logger = get_logger("routers.shops")
 
 router = APIRouter(prefix="/api/shops", tags=["shops"])
+
+
+async def _can_view_fee_percent(db: AsyncSession, user: User) -> bool:
+    """Whether this caller may see `Shop.fee_percent` (SHOP-FEE-1).
+
+    The rate is not itself an amount, but `fee_percent × Order.total_price`
+    reconstructs `platform_fee` exactly — the figure ORDER_COST_FIELDS exists to
+    hide — and `total_price` is never censored. So the rate is nulled for callers
+    without VIEW_COSTS, on the same reasoning that censors `cogs_fx_rate`
+    alongside the cost it explains. Note that list_shops is reachable by every
+    role (it feeds the sidebar) and by the MCP agent user, so this is not
+    theoretical.
+    """
+    caps = await get_capabilities(db, user)
+    return caps.has(Capability.VIEW_COSTS)
 
 
 @router.get("", response_model=list[ShopResponse])
@@ -65,10 +84,13 @@ async def list_shops(
 
     result = await db.execute(query)
     shops = result.scalars().all()
-    
+
+    show_fee = await _can_view_fee_percent(db, current_user)
+
     # Map to schema manually to set mask flags
     return [ShopResponse.model_validate({
         **s.__dict__,
+        "fee_percent": s.fee_percent if show_fee else None,
         "has_shopify_token": bool(s.shopify_access_token_encrypted),
         "has_shopify_webhook_secret": bool(s.shopify_webhook_secret_encrypted),
         "has_np_token": bool(s.np_api_key_encrypted),
@@ -96,6 +118,7 @@ async def create_shop(
         np_default_weight_kg=body.np_default_weight_kg,
         color=body.color,
         is_active=body.is_active,
+        fee_percent=body.fee_percent,
     )
     
     if body.shopify_access_token:
@@ -116,6 +139,10 @@ async def create_shop(
 
     resp = ShopDetailResponse.model_validate({
         **shop.__dict__,
+        # Owner-only route, so this always resolves true — applied anyway so all
+        # three ShopResponse serializers share one rule and cannot drift apart
+        # the way the order list/detail censoring once did (LEAK 1).
+        "fee_percent": shop.fee_percent if await _can_view_fee_percent(db, current_user) else None,
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
         "has_shopify_webhook_secret": bool(shop.shopify_webhook_secret_encrypted),
         "has_np_token": bool(shop.np_api_key_encrypted),
@@ -148,6 +175,7 @@ async def get_shop(
     
     resp = ShopDetailResponse.model_validate({
         **shop.__dict__,
+        "fee_percent": shop.fee_percent if await _can_view_fee_percent(db, current_user) else None,
         "has_shopify_token": bool(shop.shopify_access_token_encrypted),
         "has_shopify_webhook_secret": bool(shop.shopify_webhook_secret_encrypted),
         "has_np_token": bool(shop.np_api_key_encrypted),
@@ -392,6 +420,72 @@ async def backfill_shop_order_numbers(
         )
 
     return {"status": "success", **summary}
+
+
+@router.post("/{shop_id}/backfill-platform-fees")
+async def backfill_shop_platform_fees(
+    shop_id: uuid.UUID,
+    body: ShopPlatformFeeBackfillRequest,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-price existing orders that never got a `platform_fee` (SHOP-FEE-1).
+
+    The sync prices an order only at creation and never revisits it, so orders
+    imported before this shop's `fee_percent` was set keep a NULL fee and their
+    months stay overstated in the P&L. This is the explicit catch-up.
+
+    Never overwrites a fee that is already set — auto or hand-entered — and skips
+    CANCELLED orders, matching the sync-time rule exactly. `dry_run=true` (the
+    default) reports the impact WITHOUT writing: how many orders match, the fee
+    totals per currency split into "already in the P&L" (SHIPPED/COMPLETED) vs
+    still pending, and any partner settlements overlapping the window.
+
+    OWNER-only, unlike the sibling backfills (OWNER/MANAGER): this writes
+    `platform_fee`, a FINANCIAL_FIELDS column whose direct-write path in
+    update_order is owner-gated, and it moves every future partner-payout base.
+    """
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))  # noqa: E712
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+
+    if shop.fee_percent is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Shop has no fee_percent configured — set a rate before backfilling.",
+        )
+
+    # Q4 diagnostic, as on the order backfill: settlements are immutable, so a
+    # period that gets re-priced underneath one becomes retroactively
+    # over-settled. find_settlements_overlapping_period requires a non-NULL
+    # `since` (its predicate is period_end >= since), and passing None would
+    # silently report zero overlaps precisely when the window is unbounded and
+    # the exposure is largest — hence date.min.
+    overlapping_settlements = await find_settlements_overlapping_period(
+        db, shop_id, body.since or date.min, body.until
+    )
+
+    try:
+        summary = await backfill_platform_fees(
+            db, shop, since=body.since, until=body.until, dry_run=body.dry_run
+        )
+        # Real write commits via get_db on return; dry-run must persist nothing.
+        if body.dry_run:
+            await db.rollback()  # belt-and-suspenders: dry-run writes nothing
+    except Exception as e:
+        logger.error(f"[SHOPS] Platform-fee backfill failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Platform-fee backfill failed: {str(e)}",
+        )
+
+    return {
+        "status": "success",
+        **summary,
+        "fee_percent": float(shop.fee_percent),
+        "overlapping_settlements": overlapping_settlements,
+    }
 
 
 @router.post("/{shop_id}/backfill-product-images")

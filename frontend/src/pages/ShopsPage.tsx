@@ -11,8 +11,9 @@ import {
   Truck,
   LineChart,
   Images,
+  Percent,
 } from 'lucide-react';
-import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop, useBackfillProductImages } from '@/hooks/useShops';
+import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop, useBackfillProductImages, useBackfillPlatformFees } from '@/hooks/useShops';
 import { shippingApi } from '@/api/shipping';
 import ShellPage from './ShellPage';
 import { Button } from '@/components/ui/button';
@@ -84,6 +85,7 @@ const INITIAL_SHOP_STATE = {
   np_sender_phone: '',
   np_sender_city_ref: '',
   np_sender_warehouse_ref: '',
+  fee_percent: '',
 };
 
 export default function ShopsPage() {
@@ -94,6 +96,7 @@ export default function ShopsPage() {
   const deleteShop = useDeleteShop();
   const syncShop = useSyncShop();
   const backfillImages = useBackfillProductImages();
+  const backfillFees = useBackfillPlatformFees();
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingShop, setEditingShop] = useState(INITIAL_SHOP_STATE);
@@ -132,6 +135,15 @@ export default function ShopsPage() {
   const senderPhoneValid =
     senderPhoneDigits === '' || /^(\+?380|0)?\d{9}$/.test(senderPhoneDigits);
 
+  // SHOP-FEE-1: mirrors the backend's Field(ge=0, le=100). Empty is valid — it
+  // means "no automatic fee", which is the default for every shop.
+  const feePercentRaw = editingShop.fee_percent.trim();
+  const feePercentValid =
+    feePercentRaw === '' ||
+    (Number.isFinite(parseFloat(feePercentRaw)) &&
+      parseFloat(feePercentRaw) >= 0 &&
+      parseFloat(feePercentRaw) <= 100);
+
   const handleOpenCreate = () => {
     setEditingShop(INITIAL_SHOP_STATE);
     setDialogError(null);
@@ -155,6 +167,10 @@ export default function ShopsPage() {
       np_sender_phone: shop.np_sender_phone || '',
       np_sender_city_ref: shop.np_sender_city_ref || '',
       np_sender_warehouse_ref: shop.np_sender_warehouse_ref || '',
+      // Explicit null check, not `|| ''` — a configured rate of 0 is meaningful
+      // and must not be hydrated as "unset". Without this hydration, editing any
+      // other field would send fee_percent: null and silently wipe the rate.
+      fee_percent: shop.fee_percent != null ? String(shop.fee_percent) : '',
     });
     setCitySearch(''); // We don't have city name in Shop model, user will search again or we can improve later
     setCityResults([]);
@@ -188,6 +204,19 @@ export default function ShopsPage() {
     };
 
     if (editingShop.platform === 'shopify') {
+      // SHOP-FEE-1. Empty clears the rate (back to "no auto fee"); anything else
+      // must parse, or the shop would silently keep its old rate.
+      const feeRaw = editingShop.fee_percent.trim();
+      if (feeRaw === '') {
+        payload.fee_percent = null;
+      } else {
+        const fee = parseFloat(feeRaw);
+        if (!Number.isFinite(fee) || fee < 0 || fee > 100) {
+          setDialogError('Platform fee must be between 0 and 100.');
+          return;
+        }
+        payload.fee_percent = fee;
+      }
       if (editingShop.shopify_store_url.trim()) {
         payload.shopify_store_url = editingShop.shopify_store_url.trim();
       }
@@ -337,6 +366,35 @@ export default function ShopsPage() {
                           onChange={(e) => setEditingShop(p => ({ ...p, shopify_webhook_secret: e.target.value }))}
                         />
                       </div>
+                      <Separator className="bg-zinc-800" />
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold uppercase tracking-wider text-zinc-400">Platform Fee (%)</p>
+                        <Input
+                          className={cn(
+                            "border-zinc-800 bg-zinc-900/50",
+                            !feePercentValid && "border-red-500/50",
+                          )}
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          placeholder="e.g. 8.00 — leave empty for no automatic fee"
+                          value={editingShop.fee_percent}
+                          onChange={(e) => setEditingShop(p => ({ ...p, fee_percent: e.target.value }))}
+                        />
+                        {feePercentValid ? (
+                          <p className="text-[11px] text-zinc-500">
+                            Total effective transaction fee — channel commission, payment
+                            gateway and merchant-of-record cut combined. Applied to each
+                            order's total when it is imported, and frozen there: changing
+                            this rate never re-prices existing orders.
+                          </p>
+                        ) : (
+                          <p className="text-xs text-red-400">
+                            Platform fee must be a number between 0 and 100.
+                          </p>
+                        )}
+                      </div>
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center p-8 border border-dashed border-zinc-800 rounded-xl bg-zinc-900/10">
@@ -464,7 +522,7 @@ export default function ShopsPage() {
               <Button
                 type="submit"
                 className="bg-teal-600 text-white hover:bg-teal-500 shadow-[0_0_20px_-5px_rgba(20,184,166,0.5)]"
-                disabled={createShop.isPending || updateShop.isPending || !senderPhoneValid}
+                disabled={createShop.isPending || updateShop.isPending || !senderPhoneValid || !feePercentValid}
               >
                 {(createShop.isPending || updateShop.isPending) ? 'Saving...' : 'Save Configuration'}
               </Button>
@@ -598,9 +656,48 @@ export default function ShopsPage() {
                                 <Images className="h-4 w-4" />
                               </Button>
                             )}
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
+                            {isOwner && shop.platform?.toLowerCase() === 'shopify' && shop.fee_percent != null && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                title={`Backfill platform fees at ${shop.fee_percent}% (dry run first)`}
+                                className={cn(
+                                  "h-9 w-9 text-teal-500 hover:text-teal-400 hover:bg-teal-500/10 rounded-xl",
+                                  backfillFees.isPending && "animate-pulse"
+                                )}
+                                disabled={backfillFees.isPending}
+                                onClick={() => {
+                                  // Dry run is the default and the first gate: it
+                                  // reports the P&L impact and any settlement
+                                  // overlap. Only then is a real write offered.
+                                  backfillFees
+                                    .mutateAsync({ id: shop.id, dry_run: true })
+                                    .then((preview) => {
+                                      if (preview.matched === 0) return;
+                                      const settlements = preview.overlapping_settlements.length;
+                                      const confirmed = window.confirm(
+                                        `Price ${preview.matched} order(s) at ${preview.fee_percent}%?\n\n` +
+                                          `${preview.affects_pnl_now} are already SHIPPED/COMPLETED, so this changes closed months.\n` +
+                                          (settlements
+                                            ? `${settlements} partner settlement(s) overlap — those periods become retroactively over-settled.\n`
+                                            : '') +
+                                          `\nOrders with a fee already set are never touched.`,
+                                      );
+                                      if (confirmed) {
+                                        backfillFees.mutate({ id: shop.id, dry_run: false });
+                                      }
+                                    })
+                                    .catch(() => {
+                                      /* surfaced by the hook's onError toast */
+                                    });
+                                }}
+                              >
+                                <Percent className="h-4 w-4" />
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               title="Config"
                               className="h-9 w-9 text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.05] rounded-xl"
                               onClick={() => handleOpenEdit(shop)}
