@@ -87,9 +87,12 @@ So the MCP client needs a **CF Access service token**:
    open (skip this section); 302 = gated (expected).
 2. Create a service token in the Cloudflare dashboard for the orderhub app; add an Access policy
    allowing that token to reach `/api/`.
-3. **`mcp_server/client.py` needs a small change** to send `CF-Access-Client-Id` +
-   `CF-Access-Client-Secret` headers (filed; ask CC to add when doing prod). The two values →
-   password manager + `.env`.
+3. **`mcp_server/client.py` already sends the CF Access headers** (done in `998a3de`). Set
+   `CF_ACCESS_CLIENT_ID` + `CF_ACCESS_CLIENT_SECRET` in the prod `mcp_server/.env` (+ password
+   manager); the client attaches `CF-Access-Client-Id` / `CF-Access-Client-Secret` to **every**
+   request (client-level defaults, so `_login` is covered too) whenever **both** are set, and
+   nothing when unset (dev stays ungated). It is both-or-neither: a half-configured pair sends a
+   token Cloudflare rejects with a 302 the re-auth path can't read. Leave both blank on dev.
 
 **D. Register prod as a SEPARATE MCP server** (`orderhub-prod`, `ORDERHUB_API_URL=https://orderhub.orderapp.uk`),
 not by editing the dev URL — writes are append-only with no undo, so you never want to discover
