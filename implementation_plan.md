@@ -4307,7 +4307,10 @@ in this document where applicable, to avoid duplication.
 | SHOPIFY-REFUNDS-followup-1 | Shopify `test: true` orders are imported as real revenue; one such order is already in prod | Discovered during the SHOPIFY-REFUNDS reconciliation (2026-07-27). `services/shopify_sync.py:sync_shop_orders` does not filter the order node's `test` flag, so Shopify test orders land as ordinary revenue-bearing orders. Shopify's own analytics excludes them, so they can never reconcile. Evidence: order `91890_1559` (external_id `7076796924060`, $44.49, created 2026-04-13) is the **entire** 2026-04 delta when reconciling against the Shopify order feed — it is the only test order among the store's 831. **Currently latent on prod**: the order sits at status `NEW`, which is outside `REVENUE_STATUSES`, so 2026-04 reconciles to the cent today; if it is ever moved to SHIPPED/COMPLETED it silently adds $44.49 to April. Two parts: (a) skip `test: true` at the node level in the paging loop (the GraphQL `order` node already exposes `test` — no query change needed beyond adding the field); (b) remove/neutralise the one already-imported test order on prod. Deliberately left out of SHOPIFY-REFUNDS to keep that sprint surgical. Small; bundle with the next Shopify-sync-touching sprint. |
 | SHOPIFY-REFUNDS-followup-2 | Finance buckets months by UTC date while Shopify reports in `Europe/Kyiv` — month-boundary drift | Discovered during the SHOPIFY-REFUNDS reconciliation (2026-07-27). `finance_service` casts both the order date (`COALESCE(shipped_at, ordered_at)`) and `OrderRefund.refunded_at` to a **UTC** date (`cast(..., Date)`, `date_trunc('month', ...)`), but Shopify's analytics buckets in the **shop's** timezone (Lamamarka = `Europe/Kyiv`, UTC+2/+3). An order or refund timestamped late-UTC on the last day of a month therefore lands in the previous month in OrderHub and the next month in Shopify. **Measured, not theoretical:** UTC bucketing put 2024-12 off by **$39.99** and 2024-11 off by **$49.99**; re-bucketing in `Europe/Kyiv` took 2024-12 to exactly $0.00 and 2024-11 down to $10.00. Matters most for **partner payouts**, which settle at month-end — under Model 2 a refund is booked in its own period, so a boundary drift shifts money between two settlement periods. Fix is not a one-liner: `Shop` has no timezone column today, so a correct fix likely stores the shop timezone first (Shopify exposes `shop.ianaTimezone`) rather than hardcoding Kyiv — note the codebase already uses `Europe/Kiev` for Nova Poshta. Relates to the **Shop-level region / country** open architectural question below. |
 | MAT-7 | Money on `packaging_boxes` — packaging as a per-order direct cost | Split out of MAT-6 (2026-08-02). `packaging_boxes` has no cost model today (name/dims/weight/stock only), so packaging spend can only land in overhead with no link to the box catalog. Making it a per-order direct cost = the MAT-4 treatment for boxes: cost fields on the box, a costed receipt/ledger, consumption at the SHIPPED transition, coupled to the parcel calculator's box choice. Hits the **same currency wall** as materials (boxes bought UAH, main orders USD → COGS skipped for the 3 USD shops), so it only benefits KoraKlenu until `FX-CONVERSION` — sequence with/after FX, not before. Parked alongside and NOT built in MAT-6: an MCP packaging-restock tool, invoice **photo** attachment, and a real `Invoice` header entity (an invoice is implicit today — receipts sharing `invoice_no`). |
-| SETTINGS-TEST-1 | `SettingsPage.test.tsx` — 9 failing frontend tests on HEAD | Surfaced during MAT-6 (2026-08-02). CC stashed its changes and re-ran on HEAD: identical 9 failures → pre-existing, unrelated to MAT-6, so `npm run test` is not green today. Also seen in MAT-6: `npm run lint` reports 88 pre-existing errors across 32 untouched files (CC's own touched files are clean). Fix both in a dedicated frontend-health cleanup; bundle with TYPECHECK-1 (same area). |
+| SETTINGS-TEST-1 | ~~`SettingsPage.test.tsx` — 9 failing frontend tests~~ **(test half RESOLVED by FX-CONVERSION)**; lint/tsc debt remains | Surfaced during MAT-6 (2026-08-02): 9 SettingsPage tests erroring at render. Root cause found + fixed in FX-CONVERSION (2026-08-03) — the `useAppSettings` mock was stale since WB-1; the FX card needed it, so it's fixed and those 9 are green (156 frontend pass). **Remaining:** `npm run lint` ~88 errors + `tsc` 21 errors across untouched files — pre-existing, fold into TYPECHECK-1 (same frontend-health cleanup). |
+| BOM-QTY-PRECISION | `bom_items.qty_per_unit` is `Numeric(8,2)` — quantities round to 2dp | Surfaced during the BOM pilot (2026-08-02): a 3.425 m cut length stored as 3.43 (+8 kop). The `qty > 0` CheckConstraint means a sub-0.01 quantity is **rejected loudly**, not silently zeroed — so this is a precision/UX nit, not a correctness hole. Mitigated for now by the convention rule (pick a unit where per-product qty is comfortably ≥ 0.01 — see `docs/warehouse/bom-intake.md`). A `Numeric(_,3)` bump is a later micro-migration only if precision-sensitive materials appear. |
+| SVC-MATERIAL-NONSTOCK | Service materials (cutting/sewing) bleed negative stock on every ship | Surfaced during the BOM pilot (2026-08-02). Cutting/sewing are modelled as materials (there is no labour/service concept), so `order_consumption_service` decrements them on every shipment — consumption runs regardless of currency; only the cost snapshot is skipped on currency mismatch — driving stock negative and adding a "stock went negative" warning per order. Noise, not breakage (the low-stock dashboard card is packaging-only). Real fix: a "non-stocked / service" flag on `Material` so flagged rows don't decrement. Bundle with the labour-model decision. |
+| BOM-COSTQUERY-DEADWIRE | `BomEditor.tsx` never renders the server-computed BOM cost | Surfaced during BOM-WASTE-1 (2026-08-02). `useBomCost`'s `.data` is never displayed — its only uses are `refetch()` + `isFetching` for the "Refresh cost" button spinner (`BomEditor.tsx:214-221`); the footer always shows the client-side `liveCost`. So `compute_bom_cost` never reaches that screen, and "Refresh cost" refetches a number nobody shows. BOM-WASTE-1 made the client math waste-inclusive so the footer is now correct; rewiring the footer to server data was deliberately NOT done because it would kill the live preview of unsaved rows. File: either render the server cost for saved state alongside the live preview, or drop the dead query + button. Low-priority. |
 
 ---
 
@@ -4319,7 +4322,7 @@ fetch from the order card; label type by `ShippingType`; manager-confirm order�
 refunds as dated `order_refunds` records netted in the refund's month; retro-fix ran, 3 rows on prod;
 reconciliation ties per complete month). WB is live on prod (creds + `WESTERNBID_BASE_URL`).
 
-Built but **NOT merged/deployed** — branch `feat/mcp-warehouse`, now carrying **two** sprints:
+Built but **NOT merged/deployed** — branch `feat/mcp-warehouse`, now carrying **four** sprints:
 **MCP-WAREHOUSE** — a local **stdio** MCP server (`mcp_server/`) letting an agent populate
 materials/receipts/BOMs/overhead via the CRM's own REST API (loopback → all guards cover it) as a
 MANAGER agent user, writes audited in `agent_action_log`; dev-verified live (agent connects, sees only
@@ -4335,25 +4338,64 @@ material 18 pass, `tsc` clean, live endpoint returns the right lines. Two commit
 The one deviation (a new money-surface classification) was correct — the completeness guard requires every
 new cost-carrying route to carry a verdict; MAT-6 task.md's "no new classification" expectation was simply
 too strict. Pre-existing frontend-health debt surfaced (not MAT-6's): filed as SETTINGS-TEST-1 above.
+Then **BOM-WASTE-1** (2026-08-02, commit `3257b13`) — surfaced by the BOM pilot: the reviewed/preview
+cost silently excluded `waste_percent` while the shipped COGS included it. Fixed all three parallel cost
+computations (`compute_bom_cost` moved DB-sum → Python Decimal fold; `BomItemRead._compute_line_cost`;
+`BomEditor.tsx` client math) to apply `1 + waste%/100` with `ROUND_HALF_UP` + round-once-at-total, matching
+`order_consumption_service`. New read field `material_waste_percent` (no migration; neutral in the money
+guard). Verified by **falsification** (neutralising waste failed exactly the new tests; HALF_UP→HALF_EVEN
+failed only the rounding test), 520 backend pass, and a dev MCP smoke on Bat ID Wallet hitting 190.43 /
+201.62 / leather 85.80 to the kopeck. Convention frozen in `docs/warehouse/bom-intake.md`. Follow-ups filed
+above: BOM-QTY-PRECISION, SVC-MATERIAL-NONSTOCK, BOM-COSTQUERY-DEADWIRE.
+Then **FX-CONVERSION** (2026-08-03, commits `1a1f396` A / `fe410de` B / `447c365` C) — a single
+**UAH→USD** rate so the UAH warehouse cost reaches USD-shop COGS. Rate from the **NBU public API**
+(free, no key), auto-fetched daily by the in-process APScheduler + a manual override, stored in the
+existing `app_settings` (added a nullable plaintext `value` + `num_nonnulls=1` CHECK so the non-secret
+rate is NOT encrypted — encrypting it would let an `ENCRYPTION_KEY` rotation silently kill COGS booking).
+**Direction is division** (rate = UAH per USD; a dedicated `test_fx_direction.py` pins it un-regressably).
+**Snapshot at ship** — order stores converted COGS + `cogs_basis_amount` + rate used, so a later rate
+change never moves a shipped order (verified: rate→20 left an $8.53 order at $8.53). **Preview** takes an
+explicit **target currency** (NOT `Shop.currency` — which is unreliable, mixed orders prove it, and would
+re-open preview≠booked). **All-or-nothing** — any unconvertible bucket nulls the whole COGS + warning,
+stock still consumes (safe EUR degrade). Rate edit OWNER-only + audited; value readable by `view_costs`.
+Fetch is scheduled (never on the read path — a lazy fetch would sit inside the SHIPPED transaction between
+the NP TTN write and commit, so an NBU hiccup could roll back a transition whose TTN already exists at NP).
+Verified: 612 backend (89 new) / 63 MCP / 156 frontend, both migrations round-tripped (incl. downgrade with
+a plaintext row), e2e on real dev data in a rolled-back transaction (scheduler pulled 44.6395 unprompted;
+USD order 380.85 UAH → $8.53; KoraKlenu UAH booked directly, rate NULL). **Closes the currency wall for
+USD shops going forward.** Also fixed the pre-existing SETTINGS-TEST-1 test half (the `useAppSettings` mock
+was stale since WB-1 → 9 SettingsPage tests had been erroring; the FX card needed it → now 156 green).
 
-**Currency wall (blocks the payoff):** `order_consumption_service.py` SKIPS COGS when material currency
-≠ order currency. Materials are UAH-only, main orders USD → the warehouse moves COGS for **KoraKlenu only**
-until **`FX-CONVERSION`** (single UAH→USD) lands — the next big sprint after warehouse data is entered.
+**Currency wall — BRIDGED going forward (FX-CONVERSION, 2026-08-03).** `order_consumption_service.py`
+used to SKIP COGS when material currency ≠ order currency; FX-CONVERSION now converts UAH→USD at ship
+(single NBU rate + override), so USD-shop orders shipped from now on book a USD COGS. **Two residual gaps:**
+(a) already-shipped orders keep NULL cost — the separate `historical-COGS-recompute`; (b) still on
+`feat/mcp-warehouse`, not merged/deployed to prod.
 
 **Where we left off (2026-08-02):** the first real load is IN the dev DB — 8 supplier invoices →
 13 direct materials + 21 receipts + 7 overhead materials + 9 expenses (51 997,26 грн; verified to
 2 kopecks, only drift a 4-decimal rounding on Galaces S999; no duplicates, deduped by hand on the
 supplier article). MAT-6 then landed, and the 13 materials had their `supplier_sku` **back-filled**
 (agent-driven, metadata only — costs/stock byte-identical; `update_material` structurally cannot touch
-them; each `search=<article>` returns exactly one row). **Next:** (1) **BOM** is the natural next sprint —
-materials exist but no product has a recipe yet, so COGS still computes to nothing; (2) then merge
-`feat/mcp-warehouse` (MCP-WAREHOUSE + MAT-6 together) → main + deploy per `docs/integrations/mcp-server.md`
-(the one manual owner step is a Cloudflare Access **service token** + a small `client.py` header change);
-(3) then `FX-CONVERSION` (unlocks USD-shop COGS) and MAT-7 (packaging cost); (4) then historical COGS
-recompute. Docs are fully committed on `feat/mcp-warehouse` — `CLAUDE.md` +
-`docs/integrations/mcp-server.md` (rewritten for the new MCP) landed in `7c7818e`; nothing doc-side is
-left uncommitted. Follow-ups in the deferred table above:
-SHOPIFY-REFUNDS-followup-1/2, MAT-7, SETTINGS-TEST-1. Other open items live in the Cowork memory backlog.
+them; each `search=<article>` returns exactly one row). The **BOM pilot** then ran end-to-end on the
+Bat ID Wallet: leather (from blank area) + thread (measured) + laser cutting (shared service material,
+16 UAH/m) + sewing (per-product service material, 60 UAH) = 190.43 UAH, dev-verified via MCP. The intake
+rules are frozen in `docs/warehouse/bom-intake.md`, and `BOM-WASTE-1` closed the preview-vs-booked waste
+gap it surfaced. Then **FX-CONVERSION** landed (2026-08-03) — USD-shop COGS now converts UAH→USD at ship
+(dev-verified e2e), bridging the currency wall going forward. Of the four post-warehouse questions, **FX
+is done**; three remain: (1) the **fee-source** decision (platform_fee is NULL on live Shopify orders →
+fees=0 → profit overstated — a choice, not a build: manual per-order / shop-level % / WB Balance-API),
+(2) **historical COGS recompute** (costing is forward-only, so already-shipped orders stay NULL; NBU's
+`date=` enables per-date FX for backfill), (3) the **MCP prod rollout** (per `docs/integrations/mcp-server.md`:
+merge `feat/mcp-warehouse` → main + deploy; prod agent user; CF Access **service token** + a small
+`client.py` header change — the MCP server stays on the laptop pointed at the prod URL; no SSH for data
+entry). Plus ongoing BOM entry per `docs/warehouse/bom-intake.md`, and MAT-7 (packaging cost) sequenced
+with the packaging work. **`feat/mcp-warehouse` now carries four sprints** (MCP-WAREHOUSE + MAT-6 +
+BOM-WASTE-1 + FX-CONVERSION), pushed to origin, **not merged/deployed** — the growing stack is worth
+merging soon to de-risk. **Uncommitted docs to commit onto the branch:** `docs/warehouse/bom-intake.md`
+(new, now FX-aware) + this `implementation_plan.md` update. Follow-ups in the deferred table above:
+SHOPIFY-REFUNDS-followup-1/2, MAT-7, SETTINGS-TEST-1 (test half resolved), BOM-QTY-PRECISION,
+SVC-MATERIAL-NONSTOCK, BOM-COSTQUERY-DEADWIRE. Other open items live in the Cowork memory backlog.
 
 ---
 
