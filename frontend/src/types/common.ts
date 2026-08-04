@@ -188,3 +188,48 @@ export interface ImportResult {
   skipped: number
   errors: any[]
 }
+
+/** STATEMENT-IMPORT: an order the statement charges for, summed.
+ *  Used both for orders this shop does not have (nothing was written) and for
+ *  orders whose fee came out negative because the period that charged it has
+ *  not been imported. */
+export interface StatementUnmatchedOrder {
+  order_external_id: string
+  platform_fee_amount: number
+}
+
+/** An order whose existing platform_fee the statement replaced. The statement is
+ *  what Etsy actually charged, so it wins over a hand-entered estimate — the
+ *  opposite of the flat-rate path, and never silent. */
+export interface StatementFeeOverride {
+  order_external_id: string
+  previous_platform_fee: number
+  statement_platform_fee: number
+}
+
+/** Mirrors backend schemas/etsy_statement.py StatementImportReport. */
+export interface StatementImportReport {
+  period: string
+  source_filename: string
+  file_sha256: string
+  identical_file: boolean
+
+  lines_imported: number
+  lines_replaced: number
+
+  orders_matched: number
+  orders_unmatched: number
+  unmatched_orders: StatementUnmatchedOrder[]
+  fee_overrides: StatementFeeOverride[]
+  credit_only_orders: StatementUnmatchedOrder[]
+
+  ads_overhead_amount: number
+  account_fee_overhead_amount: number
+
+  sales_count: number
+  statement_base_amount: number
+  refunds_count: number
+  refunds_amount: number
+  deposits_count: number
+  deposits_amount: number
+}

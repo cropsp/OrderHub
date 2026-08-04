@@ -7,12 +7,14 @@ import {
   ChevronRight, 
   Database,
   Info,
+  Receipt,
   Store as StoreIcon,
   Zap
 } from 'lucide-react';
 import ShellPage from './ShellPage';
 import { useShops } from '@/hooks/useShops';
 import { useImportEtsyCsv } from '@/hooks/useImports';
+import StatementImportTab from '@/components/imports/StatementImportTab';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -22,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 
 export default function ImportsPage() {
@@ -58,6 +61,27 @@ export default function ImportsPage() {
       description="Intelligence pipeline for synchronizing historical Etsy exports into your production database."
     >
       <div className="max-w-4xl mx-auto space-y-10">
+        {/* Two different Etsy files, two different jobs: the order export CREATES
+            orders; the payment statement PRICES them. */}
+        <Tabs defaultValue="orders" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 bg-zinc-900/50 p-1 border border-zinc-800">
+            <TabsTrigger
+              value="orders"
+              className="flex items-center gap-2 data-[state=active]:bg-zinc-800"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              Order export
+            </TabsTrigger>
+            <TabsTrigger
+              value="statement"
+              className="flex items-center gap-2 data-[state=active]:bg-zinc-800"
+            >
+              <Receipt className="h-3.5 w-3.5" />
+              Payment statement
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="orders" className="mt-8 space-y-10">
         {!importMutation.isSuccess ? (
           <div className="grid gap-8 lg:grid-cols-5 animate-in fade-in slide-in-from-bottom-4 duration-700">
             {/* Step 1: Select Shop */}
@@ -212,7 +236,12 @@ export default function ImportsPage() {
                     </p>
                     <div className="space-y-2 max-h-40 overflow-auto pr-4 scrollbar-thin scrollbar-thumb-zinc-800">
                         {importMutation.data.errors.map((err, idx) => (
-                           <div key={idx} className="text-[11px] text-zinc-400 font-medium py-1.5 border-b border-white/5 last:border-0">• {err.detail || "Data integrity mismatch"}</div>
+                           /* etsy_parser emits {row|sale_id, error}; `detail` was
+                              never a key, so every row rendered as the fallback. */
+                           <div key={idx} className="text-[11px] text-zinc-400 font-medium py-1.5 border-b border-white/5 last:border-0">
+                             • {err.sale_id ? `Sale ${err.sale_id}: ` : err.row ? `Row ${err.row}: ` : ''}
+                             {err.error || err.detail || "Data integrity mismatch"}
+                           </div>
                         ))}
                     </div>
                  </div>
@@ -236,6 +265,12 @@ export default function ImportsPage() {
             </CardContent>
           </Card>
         )}
+          </TabsContent>
+
+          <TabsContent value="statement" className="mt-8">
+            <StatementImportTab shops={etsyShops} />
+          </TabsContent>
+        </Tabs>
 
         <section className="pt-10">
           <div className="flex items-center gap-4 mb-8">
