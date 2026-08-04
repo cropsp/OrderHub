@@ -65,6 +65,7 @@ from models.shop import Shop
 from schemas.etsy_statement import (
     StatementImportReport,
     StatementFeeOverride,
+    StatementUnmatchedEntry,
     StatementUnmatchedOrder,
 )
 from services.etsy_statement_parser import (
@@ -192,6 +193,10 @@ async def import_statement(
 
     await db.flush()
 
+    sold_externals = await _externals_with_a_sale_row(
+        db, shop, set(unmatched_totals)
+    )
+
     overrides, credit_only = await _recompute_platform_fees(
         db, shop, affected_order_ids, previous["fees"]
     )
@@ -246,7 +251,11 @@ async def import_statement(
         orders_matched=len(matched_ids),
         orders_unmatched=len(unmatched_totals),
         unmatched_orders=[
-            StatementUnmatchedOrder(order_external_id=k, platform_fee_amount=v)
+            StatementUnmatchedEntry(
+                order_external_id=k,
+                platform_fee_amount=v,
+                has_sale_row=k in sold_externals,
+            )
             for k, v in sorted(unmatched_totals.items())
         ],
         fee_overrides=overrides,
@@ -291,6 +300,38 @@ async def _resolve_orders(
         )
     )
     return {o.external_id: o for o in rows.scalars()}
+
+
+async def _externals_with_a_sale_row(
+    db: AsyncSession, shop: Shop, externals: set[str]
+) -> set[str]:
+    """Which of these order numbers the STATEMENT itself sold, across all periods.
+
+    The one signal that tells a genuinely-missing order apart from a number the
+    parser should never have produced. An id Etsy sold has a `Sale` row; a
+    listing id read as an order can never have one (across the six calibration
+    statements the 210 sale ids and the 38 listing ids are disjoint sets).
+
+    Run AFTER the incoming lines are flushed, so a single query covers both this
+    file and every period previously imported for this shop.
+
+    Known false negative, by design: an order sold in a month that has not been
+    imported has no Sale row here either — 2 of the 210 calibration orders, both
+    sold the month before the earliest imported statement. So `False` means
+    "check this", not "this is wrong".
+    """
+    if not externals:
+        return set()
+    rows = await db.execute(
+        select(EtsyStatementLine.order_external_id)
+        .where(
+            EtsyStatementLine.shop_id == shop.id,
+            EtsyStatementLine.order_external_id.in_(externals),
+            EtsyStatementLine.bucket == BUCKET_SALE,
+        )
+        .distinct()
+    )
+    return {row[0] for row in rows}
 
 
 async def _existing_period_state(

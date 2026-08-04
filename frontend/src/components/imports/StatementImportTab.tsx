@@ -215,11 +215,14 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
                 title={`${report.unmatched_orders.length} order${
                   report.unmatched_orders.length === 1 ? '' : 's'
                 } not in this shop`}
-                hint="The lines are stored but linked to nothing — no order was created and no match was guessed. Import the matching order CSV, then re-run this statement."
+                hint="The lines are stored but linked to nothing — no order was created and no match was guessed. Rows marked SOLD IN STATEMENT are real Etsy orders missing from OrderHub: import that period's order CSV, then re-run this statement. NO SALE ROW means the statement never sold that number here — its sale month may simply not be imported, or the number may not be an order number at all."
                 rows={report.unmatched_orders.map((o) => ({
                   key: o.order_external_id,
                   left: o.order_external_id,
                   right: formatMoney(o.platform_fee_amount),
+                  badge: o.has_sale_row
+                    ? { text: 'sold in statement', tone: 'neutral' as const }
+                    : { text: 'no sale row', tone: 'alert' as const },
                 }))}
               />
             )}
@@ -487,7 +490,12 @@ function ReportList({
   tone: 'info' | 'warn';
   title: string;
   hint: string;
-  rows: { key: string; left: string; right: string }[];
+  rows: {
+    key: string;
+    left: string;
+    right: string;
+    badge?: { text: string; tone: 'neutral' | 'alert' };
+  }[];
 }) {
   return (
     <div
@@ -514,7 +522,21 @@ function ReportList({
             key={row.key}
             className="flex items-center justify-between gap-4 text-[11px] py-1.5 border-b border-white/5 last:border-0"
           >
-            <span className="font-mono text-zinc-400">{row.left}</span>
+            <span className="flex items-center gap-2.5 min-w-0">
+              <span className="font-mono text-zinc-400">{row.left}</span>
+              {row.badge && (
+                <span
+                  className={cn(
+                    'rounded-md px-2 py-0.5 text-[9px] font-black uppercase tracking-widest whitespace-nowrap',
+                    row.badge.tone === 'alert'
+                      ? 'bg-red-500/10 text-red-300 border border-red-500/20'
+                      : 'bg-zinc-800/60 text-zinc-400 border border-zinc-700/50',
+                  )}
+                >
+                  {row.badge.text}
+                </span>
+              )}
+            </span>
             <span className="font-bold text-zinc-300 tabular-nums">{row.right}</span>
           </div>
         ))}

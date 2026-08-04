@@ -30,6 +30,34 @@ class StatementUnmatchedOrder(BaseModel):
     platform_fee_amount: Decimal
 
 
+class StatementUnmatchedEntry(StatementUnmatchedOrder):
+    """An unmatched order number, plus the one signal that tells the two very
+    different causes apart.
+
+    Without it, "this shop genuinely has no such order" and "the parser produced
+    a plausible-but-wrong number" render identically — an order number and an
+    amount — and the operator has to go to the database to distinguish them.
+    That is not theoretical: `renew sold auto credit: N` quotes a LISTING id in
+    an order-shaped form, and reading it as an order would manufacture phantom
+    unmatched orders that look exactly like real missing ones.
+
+    `has_sale_row` carries no such flag on `credit_only_orders`, which is why
+    that section keeps the plain parent model: credit-only *means* the order has
+    no Sale row, so the field would be constant there.
+    """
+
+    has_sale_row: bool = Field(
+        description=(
+            "The statement itself carries a Sale row for this order number — in "
+            "this file or in any period already imported for this shop. True: "
+            "the id is real and the order is simply missing from OrderHub "
+            "(import that period's order CSV). False: either the sale happened "
+            "in a month that has not been imported, or the number is not an "
+            "order number at all — check it before trusting the amount."
+        )
+    )
+
+
 class StatementFeeOverride(BaseModel):
     """An order whose existing `platform_fee` was replaced by the statement.
 
@@ -67,7 +95,7 @@ class StatementImportReport(BaseModel):
 
     orders_matched: int
     orders_unmatched: int
-    unmatched_orders: list[StatementUnmatchedOrder] = []
+    unmatched_orders: list[StatementUnmatchedEntry] = []
     fee_overrides: list[StatementFeeOverride] = []
     credit_only_orders: list[StatementUnmatchedOrder] = []
 

@@ -198,6 +198,16 @@ export interface StatementUnmatchedOrder {
   platform_fee_amount: number
 }
 
+/** An unmatched order number plus the signal that tells the two causes apart.
+ *  `has_sale_row` = the statement itself sold this id (in this file or any
+ *  imported period), so it is a real Etsy order missing from OrderHub. False =
+ *  either its sale month was never imported, or the number is not an order
+ *  number at all. Not carried on credit_only_orders, where it is always false
+ *  by definition. */
+export interface StatementUnmatchedEntry extends StatementUnmatchedOrder {
+  has_sale_row: boolean
+}
+
 /** An order whose existing platform_fee the statement replaced. The statement is
  *  what Etsy actually charged, so it wins over a hand-entered estimate — the
  *  opposite of the flat-rate path, and never silent. */
@@ -223,7 +233,7 @@ export interface StatementImportReport {
 
   orders_matched: number
   orders_unmatched: number
-  unmatched_orders: StatementUnmatchedOrder[]
+  unmatched_orders: StatementUnmatchedEntry[]
   fee_overrides: StatementFeeOverride[]
   credit_only_orders: StatementUnmatchedOrder[]
 

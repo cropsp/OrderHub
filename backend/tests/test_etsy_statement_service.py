@@ -164,6 +164,16 @@ class FakeSession:
                 totals[l.order_id] = totals.get(l.order_id, Decimal("0")) + l.net_signed
             return _Result(rows=list(totals.items()))
 
+        if cols == ("order_external_id",):
+            wanted = set(re.findall(r"'(\d+)'", sql))
+            return _Result(
+                rows=[
+                    (l.order_external_id,)
+                    for l in self.lines
+                    if l.order_external_id in wanted and l.bucket == BUCKET_SALE
+                ]
+            )
+
         if cols == ("order_id",):
             wanted_ids = _uuids_in(sql)
             return _Result(
@@ -454,6 +464,68 @@ async def test_unmatched_order_is_counted_and_reported_never_created():
     assert report.unmatched_orders[0].platform_fee_amount == Decimal("2.40")
     assert len(db.lines) == 2, "the lines are still stored, just unlinked"
     assert all(l.order_id is None for l in db.lines)
+
+
+@pytest.mark.asyncio
+async def test_unmatched_entries_say_whether_the_statement_sold_that_id():
+    """The signal that separates "OrderHub is missing this order" from "this is
+    not an order number at all". Both render as a number and an amount without
+    it."""
+    db = FakeSession([])
+
+    report = await _run(
+        db,
+        _shop(),
+        # Sold in this very file -> a real Etsy order, absent from OrderHub.
+        '"April 10, 2026",Sale,"Payment for Order #4026053403",,USD,$40.00,--,$40.00,--',
+        '"April 10, 2026",Fee,"Processing fee","Order #4026053403",USD,--,-$2.00,-$2.00,--',
+        # No Sale row anywhere -> could be a mis-extracted id. Worth a look.
+        '"April 12, 2026",Fee,"Processing fee","Order #9999999999",USD,--,-$1.00,-$1.00,--',
+    )
+
+    flags = {u.order_external_id: u.has_sale_row for u in report.unmatched_orders}
+    assert flags == {"4026053403": True, "9999999999": False}
+
+
+@pytest.mark.asyncio
+async def test_a_sale_row_from_an_earlier_period_still_counts():
+    """The query runs over every period stored for the shop, not just this file —
+    an order sold in April and charged a fee credit in May is one Etsy order, and
+    the May report must say so."""
+    db = FakeSession([])
+    shop = _shop()
+
+    await _run(
+        db,
+        shop,
+        '"April 10, 2026",Sale,"Payment for Order #4026053403",,USD,$40.00,--,$40.00,--',
+    )
+    report = await _run(
+        db,
+        shop,
+        '"May 03, 2026",Fee,"Processing fee credit","Order #4026053403",USD,--,$0.50,$0.50,--',
+    )
+
+    assert [u.has_sale_row for u in report.unmatched_orders] == [True]
+
+
+@pytest.mark.asyncio
+async def test_a_listing_id_never_reaches_the_unmatched_list_at_all():
+    """Defence in depth for the same failure. The parser reads
+    `renew sold auto credit: N` as a LISTING id, so it never becomes an unmatched
+    order — and if it ever did, it would carry has_sale_row=False, because listing
+    ids and sale ids are disjoint sets."""
+    db = FakeSession([])
+
+    report = await _run(
+        db,
+        _shop(),
+        '"April 12, 2026",Fee,"Auto-renew sold fee","renew sold auto credit: 4343151753",USD,--,-$0.20,-$0.20,--',
+    )
+
+    assert report.unmatched_orders == []
+    assert db.lines[0].listing_external_id == "4343151753"
+    assert db.lines[0].order_external_id is None
 
 
 @pytest.mark.asyncio
