@@ -40,7 +40,9 @@ token. Use Claude Code in WSL (it spawns the binary directly).
    KoraKlenu + Lamamarka Shopify). Re-provision / narrow grants:
    `cd backend && source venv/bin/activate && python scripts/provision_agent_user.py --shops KoraKlenu`
 3. `cp mcp_server/.env.example mcp_server/.env` → paste the agent password.
-4. Register with Claude Code — `.mcp.json` at repo root (carries no secret; safe to commit):
+4. Register with Claude Code — `.mcp.json` at repo root. **Git-ignored — do NOT commit.** The
+   dev entry alone carries no secret, but once the prod entry is added (rollout §D) the file holds
+   the prod agent password inline, so it is in `.gitignore` and `chmod 600`.
    ```json
    { "mcpServers": { "orderhub-dev": {
        "command": "/home/serhii/projects/OrderHub/mcp_server/venv/bin/python",
@@ -55,6 +57,15 @@ token. Use Claude Code in WSL (it spawns the binary directly).
    Receipts are append-only — use a throwaway material for the very first run if unsure.
 
 ## PROD rollout runbook
+
+> **EXECUTED 2026-08-03 — prod MCP is live and verified.** Branch merged to `main` (b570cc5) +
+> deployed (backend + **frontend**; all 4 migrations applied at container start, head
+> `d90b7c25e4a1`); FX scheduler fetched the live NBU rate on boot. Prod agent provisioned with
+> `--all-shops` (the 3 real prod shops). CF service token "orderhub-mcp" (non-expiring) + a
+> "Service Auth" Access policy added. `orderhub-prod` registered in `.mcp.json`; `list_shops`
+> returns the 3 shops through the full CF-gated path. The steps below are kept as the reference
+> for the next environment / re-issue; some specifics (file counts, migration head) are from the
+> original MCP-WAREHOUSE-only plan and have since grown.
 
 `mcp_server/` is **not deployed** — it stays on the laptop and is pointed at prod. Prod needs
 only the **backend changes** + a prod agent user + the Cloudflare Access path.
@@ -75,11 +86,14 @@ only the **backend changes** + a prod agent user + the Cloudflare Access path.
 **B. Create the prod agent user** (doesn't exist there; WORKDIR `/app`):
 ```
 docker compose -f docker-compose.prod.yml exec backend \
-  python scripts/provision_agent_user.py --shops KoraKlenu
+  python scripts/provision_agent_user.py --all-shops
 ```
-Grant **KoraKlenu only** initially — it's the sole UAH shop, the only place data changes COGS
-before `FX-CONVERSION`. Prints the prod password once → password manager + `mcp_server/.env`
-(a **different** value from dev). `--shops` takes exact shop names (errors with the list if wrong).
+**Prod shops differ from dev:** prod has **Lamamarka (ETSY), Lamamarka Shopify (SHOPIFY),
+Vine&Roses ETSY** — there is **no KoraKlenu on prod** (dev-only). All three sell in non-UAH, so
+now that `FX-CONVERSION` is live they all book COGS; `--all-shops` grants exactly those three
+(re-run with explicit `--shops` later if you'd rather pin the list so a future new shop isn't
+granted silently). Prints the prod password once → password manager + the prod entry in
+`.mcp.json`. Re-issue with `--reset-password`; `--show` prints state without the secret.
 
 **C. Cloudflare Access** — prod is Access-gated (a `curl .../api/health` returns 302 to login).
 So the MCP client needs a **CF Access service token**:
