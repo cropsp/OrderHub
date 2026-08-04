@@ -114,17 +114,25 @@ class OrderHubClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
     ) -> Any:
         """Issue an authenticated request, retrying once on 401.
 
         Returns the parsed JSON body, or None for 204.
+
+        `data`/`files` send a multipart form instead of JSON. File content must
+        be passed as BYTES, never an open handle: the 401 path re-sends the
+        request, and a consumed stream would replay as an empty upload.
         """
         if self._access_token is None:
             async with self._auth_lock:
                 if self._access_token is None:
                     await self._login()
 
-        response = await self._send(method, path, params=params, json=json)
+        response = await self._send(
+            method, path, params=params, json=json, data=data, files=files
+        )
 
         if response.status_code == 401:
             stale = self._access_token
@@ -132,7 +140,9 @@ class OrderHubClient:
                 # Another coroutine may have refreshed while we waited.
                 if self._access_token == stale:
                     await self._reauthenticate()
-            response = await self._send(method, path, params=params, json=json)
+            response = await self._send(
+                method, path, params=params, json=json, data=data, files=files
+            )
 
         if response.status_code >= 400:
             raise OrderHubError(
@@ -150,12 +160,16 @@ class OrderHubClient:
         *,
         params: dict[str, Any] | None,
         json: Any | None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
     ) -> httpx.Response:
         return await self._http.request(
             method,
             path,
             params=_drop_none(params),
             json=json,
+            data=data,
+            files=files,
             headers={"Authorization": f"Bearer {self._access_token}"},
         )
 
@@ -164,6 +178,29 @@ class OrderHubClient:
 
     async def post(self, path: str, body: Any | None = None) -> Any:
         return await self.request("POST", path, json=body)
+
+    async def post_file(
+        self,
+        path: str,
+        *,
+        fields: dict[str, str],
+        filename: str,
+        content: bytes,
+        content_type: str = "text/csv",
+        field_name: str = "file",
+    ) -> Any:
+        """POST a multipart upload to an endpoint that takes Form + File.
+
+        The bytes are read by this process and streamed to the API, so a file
+        the agent names never travels through a tool argument — see the
+        data-handling note on `import_etsy_statement` in tools_write.py.
+        """
+        return await self.request(
+            "POST",
+            path,
+            data=fields,
+            files={field_name: (filename, content, content_type)},
+        )
 
     async def patch(self, path: str, body: Any) -> Any:
         return await self.request("PATCH", path, json=body)

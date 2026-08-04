@@ -26,6 +26,7 @@ WRITE_TOOLS = {
     "record_material_receipt", "adjust_material_stock",
     "create_overhead_material", "record_overhead_expense",
     "set_product_bom", "add_bom_line", "remove_bom_line",
+    "import_etsy_statement",
 }
 
 MATERIAL = {
@@ -586,3 +587,150 @@ def test_diff_ignores_decimal_formatting_noise():
     old = [_line("m1", "5.00", "Leather")]
     new = [BomLine(material_id="m1", qty_per_unit="5")]
     assert _diff_bom(old, new)["changed"] == []
+
+
+# ── STATEMENT-IMPORT: statement upload ─────────────────────
+
+STATEMENT_REPORT = {
+    "period": "2026-04",
+    "source_filename": "etsy_statement_2026_4.csv",
+    "file_sha256": "abc123",
+    "identical_file": False,
+    "lines_imported": 343,
+    "lines_replaced": 0,
+    "orders_matched": 18,
+    "orders_unmatched": 6,
+    "unmatched_orders": [],
+    "fee_overrides": [],
+    "credit_only_orders": [],
+    "ads_overhead_amount": "145.56",
+    "account_fee_overhead_amount": "7.30",
+    "sales_count": 24,
+    "statement_base_amount": "949.69",
+    "refunds_count": 1,
+    "refunds_amount": "-34.23",
+    "deposits_count": 4,
+    "deposits_amount": "812.40",
+}
+
+STATEMENT_CSV = (
+    'Date,Type,Title,Info,Currency,Amount,"Fees & Taxes",Net,"Tax Details"\n'
+    '"April 10, 2026",Fee,"Processing fee","Order #4026053403",USD,--,-$2.00,-$2.00,--\n'
+)
+
+
+def _statement_file(tmp_path, name="etsy_statement_2026_4.csv"):
+    path = tmp_path / name
+    path.write_text(STATEMENT_CSV, encoding="utf-8")
+    return path
+
+
+@pytest.mark.asyncio
+async def test_statement_is_uploaded_as_multipart_not_a_json_argument(tmp_path):
+    mcp, client, seen = _build(
+        {("POST", "/api/imports/etsy-statement"): httpx.Response(200, json=STATEMENT_REPORT)}
+    )
+    path = _statement_file(tmp_path)
+
+    await mcp.call_tool(
+        "import_etsy_statement", {"shop_id": "shop-1", "file_path": str(path)}
+    )
+
+    upload = next(r for r in seen if r.url.path == "/api/imports/etsy-statement")
+    assert upload.headers["content-type"].startswith("multipart/form-data")
+    body = upload.content.decode()
+    assert "etsy_statement_2026_4.csv" in body
+    assert "Processing fee" in body, "the file's bytes must reach the API"
+    assert 'name="shop_id"' in body and "shop-1" in body
+
+
+@pytest.mark.asyncio
+async def test_statement_contents_never_reach_the_action_log(tmp_path):
+    """The statement is financial + PII data. Only the path is recorded — a CSV
+    passed as a tool argument would be persisted verbatim in
+    agent_action_log.arguments."""
+    mcp, client, seen = _build(
+        {("POST", "/api/imports/etsy-statement"): httpx.Response(200, json=STATEMENT_REPORT)}
+    )
+    path = _statement_file(tmp_path)
+
+    await mcp.call_tool(
+        "import_etsy_statement", {"shop_id": "shop-1", "file_path": str(path)}
+    )
+
+    entry = _logged(seen)[0]
+    assert entry["tool"] == "import_etsy_statement"
+    assert entry["ok"] is True
+    assert set(entry["arguments"]) == {"shop_id", "file_path"}
+    assert "Processing fee" not in json.dumps(entry)
+    assert "Order #4026053403" not in json.dumps(entry)
+
+
+@pytest.mark.asyncio
+async def test_statement_summary_reports_what_was_booked(tmp_path):
+    mcp, client, seen = _build(
+        {("POST", "/api/imports/etsy-statement"): httpx.Response(200, json=STATEMENT_REPORT)}
+    )
+    path = _statement_file(tmp_path)
+
+    result = await mcp.call_tool(
+        "import_etsy_statement", {"shop_id": "shop-1", "file_path": str(path)}
+    )
+    text = str(result)
+
+    assert "2026-04" in text
+    assert "18 orders priced" in text
+    assert "6 unmatched" in text
+    assert "145.56" in text and "7.30" in text
+
+
+@pytest.mark.asyncio
+async def test_missing_file_is_refused_before_any_request(tmp_path):
+    mcp, client, seen = _build({})
+
+    with pytest.raises(Exception, match="No file at"):
+        await mcp.call_tool(
+            "import_etsy_statement",
+            {"shop_id": "shop-1", "file_path": str(tmp_path / "nope.csv")},
+        )
+
+    assert not [r for r in seen if r.url.path == "/api/imports/etsy-statement"]
+    assert _logged(seen) == [], "nothing was attempted, so nothing is logged"
+
+
+@pytest.mark.asyncio
+async def test_non_csv_is_refused(tmp_path):
+    mcp, client, seen = _build({})
+    path = _statement_file(tmp_path, name="statement.xlsx")
+
+    with pytest.raises(Exception, match="Expected a .csv"):
+        await mcp.call_tool(
+            "import_etsy_statement", {"shop_id": "shop-1", "file_path": str(path)}
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_statement_is_logged_as_a_failed_attempt(tmp_path):
+    """The API aborts on any row it cannot classify. That refusal is signal, so
+    it is recorded and the message is raised verbatim."""
+    detail = (
+        "etsy_statement_2026_4.csv row 12: unknown Type 'Chargeback' "
+        "[Type='Chargeback' Title='Disputed' Info='Order #4026053403']"
+    )
+    mcp, client, seen = _build(
+        {
+            ("POST", "/api/imports/etsy-statement"): httpx.Response(
+                400, json={"detail": detail}
+            )
+        }
+    )
+    path = _statement_file(tmp_path)
+
+    with pytest.raises(Exception, match="Chargeback"):
+        await mcp.call_tool(
+            "import_etsy_statement", {"shop_id": "shop-1", "file_path": str(path)}
+        )
+
+    entry = _logged(seen)[0]
+    assert entry["ok"] is False
+    assert "Chargeback" in entry["error"]

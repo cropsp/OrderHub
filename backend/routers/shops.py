@@ -12,11 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from logger import get_logger
-from models.shop import Shop
+from models.shop import Shop, ShopPlatform
 from models.order import Order
 from models.product import Product
 from models.user import Capability, User, UserRole
 from schemas.shop import (
+    ETSY_FLAT_RATE_REJECTED,
     ShopBackfillRequest,
     ShopPlatformFeeBackfillRequest,
     ShopRefundBackfillRequest,
@@ -200,6 +201,20 @@ async def update_shop(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
         
     update_data = body.model_dump(exclude_unset=True, exclude={"shopify_access_token", "shopify_webhook_secret", "np_api_key"})
+
+    # STATEMENT-IMPORT: an Etsy shop is priced from its payment statement, which
+    # carries the exact per-order fee. A flat rate on the same shop would let both
+    # paths write platform_fee. Checked here rather than on the schema because
+    # ShopUpdate carries no `platform` — only the stored shop knows. Clearing the
+    # rate (explicit null) stays allowed.
+    if (
+        update_data.get("fee_percent") is not None
+        and shop.platform == ShopPlatform.ETSY
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=ETSY_FLAT_RATE_REJECTED,
+        )
 
     # NP-FIX-3b: normalize sender phone on write (422 on unparseable input).
     if "np_sender_phone" in update_data:

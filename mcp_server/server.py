@@ -41,6 +41,13 @@ How the costing actually works, so you get it right:
   materials; ask for the rate to be set instead.
 - **Overhead materials** are indirect costs (tape, tools, supplies). They have no \
   stock and no unit cost; you only record dated expenses against them.
+- **Etsy selling costs come from the monthly payment statement**, not from a rate. \
+  `import_etsy_statement` reads one month's statement CSV and books it: the \
+  transaction fees and their VAT onto each individual order, and advertising and \
+  listing fees to two monthly overhead rows. Etsy takes roughly a third of the \
+  sale price all-in, and about half of that is advertising, so a shop's profit \
+  looks far too healthy until its statements are loaded. Re-importing a month is \
+  safe — it replaces that month rather than adding to it.
 
 Working rules:
 
@@ -51,6 +58,9 @@ Working rules:
   stay visible in the ledger. Get it right the first time; when a source record is \
   ambiguous, ask rather than guess.
 - **Read a recipe before changing it.** Writing a BOM replaces it wholesale.
+- **A statement import that refuses has found something real.** It aborts on any \
+  row it cannot classify and writes nothing. Pass the message to the owner as it \
+  is rather than trying another file — it names the row he needs to look at.
 - Report what you did in the owner's terms — which material, what quantity, what \
   it did to the unit cost.
 """

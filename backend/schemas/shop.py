@@ -60,6 +60,19 @@ class ShopPlatformFeeBackfillRequest(BaseModel):
         return self
 
 
+# STATEMENT-IMPORT: Etsy orders are priced from the payment statement, which
+# carries the exact per-order fee, so a flat rate must never also fire on them —
+# the two paths would both write `platform_fee` and the statement's accuracy
+# would be indistinguishable from an estimate. The UI happens not to render the
+# input for a non-Shopify shop (FEE-UI-SHOPIFY-ONLY), but the API accepted one,
+# so the rule was enforced only by omission. Enforced here on create, and in
+# routers/shops.py `update_shop` on PATCH (ShopUpdate carries no platform).
+ETSY_FLAT_RATE_REJECTED = (
+    "Etsy shops are priced from the payment-account statement import, not a flat "
+    "rate. Leave fee_percent unset and import the monthly statement instead."
+)
+
+
 class ShopBase(BaseModel):
     name: str = Field(..., max_length=255)
     platform: ShopPlatform
@@ -81,6 +94,12 @@ class ShopBase(BaseModel):
     # configured (no auto fee). Nulled on read for callers without VIEW_COSTS —
     # see routers/shops.py `_visible_fee_percent`.
     fee_percent: Decimal | None = Field(None, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _no_flat_rate_on_etsy(self) -> "ShopBase":
+        if self.platform == ShopPlatform.ETSY and self.fee_percent is not None:
+            raise ValueError(ETSY_FLAT_RATE_REJECTED)
+        return self
 
 
 class ShopCreate(ShopBase):

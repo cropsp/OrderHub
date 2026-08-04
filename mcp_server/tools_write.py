@@ -30,6 +30,7 @@ columns.
 """
 
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Callable
 
 from mcp.server.fastmcp import FastMCP
@@ -637,3 +638,68 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         args = {"product_id": product_id, "material_id": material_id}
         result = await _write_bom(product_id, remaining, "remove_bom_line", args)
         return f"Removed {material_id} from the recipe.\n{result}"
+
+    @mcp.tool()
+    async def import_etsy_statement(shop_id: str, file_path: str) -> str:
+        """Import one monthly Etsy payment-account statement CSV.
+
+        Derives each order's exact `platform_fee` from the statement's Fee and
+        fee-VAT lines, and books advertising and listing/account fees to two
+        monthly overhead rows for the shop. This is how Etsy orders get priced —
+        the flat per-shop rate is for Shopify/WesternBid, where no such statement
+        exists.
+
+        `file_path` is a path on THIS machine. Give the operator's downloaded
+        statement, one calendar month per file.
+
+        Safe to re-run: importing a month replaces that month's stored lines
+        wholesale and recomputes the affected fees, so re-uploading the same file
+        changes nothing, and a statement Etsy re-issued fully supersedes the
+        original.
+
+        The import refuses rather than guesses. A row it cannot classify — an
+        unknown type, an unrecognised advertising line, a non-USD amount, a file
+        spanning two months — aborts the whole import naming that row, and
+        nothing is written. Report the message to the operator verbatim.
+
+        Order numbers that this shop has no order for are counted and listed, not
+        created. If there are many, the order CSV for that period probably has
+        not been imported yet.
+        """
+        path = Path(file_path).expanduser()
+        if not path.is_file():
+            raise ToolError(f"No file at {path}")
+        if path.suffix.lower() != ".csv":
+            raise ToolError(f"Expected a .csv statement export, got {path.name}")
+
+        content = path.read_bytes()
+
+        # The statement holds real financial data and customer order numbers, so
+        # only the PATH is logged, never the contents — a CSV passed as a tool
+        # argument would be persisted verbatim in agent_action_log.arguments.
+        args = {"shop_id": shop_id, "file_path": str(path)}
+
+        return await _logged(
+            client,
+            "import_etsy_statement",
+            args,
+            "etsy_statement",
+            lambda: client.post_file(
+                "/api/imports/etsy-statement",
+                fields={"shop_id": shop_id},
+                filename=path.name,
+                content=content,
+            ),
+            summarise=lambda r: (
+                f"Statement {r['period']} booked: {r['lines_imported']} lines, "
+                f"{r['orders_matched']} orders priced"
+                + (
+                    f", {r['orders_unmatched']} unmatched"
+                    if r["orders_unmatched"]
+                    else ""
+                )
+                + f". Advertising {r['ads_overhead_amount']} and account fees "
+                f"{r['account_fee_overhead_amount']} booked to overhead."
+            ),
+            object_id=lambda r: r["period"],
+        )

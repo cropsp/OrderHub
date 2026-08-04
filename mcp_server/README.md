@@ -102,6 +102,16 @@ deliberately absent — every one has irreversible real-world side effects.
 | `create_overhead_material` / `record_overhead_expense` | indirect costs |
 | `set_product_bom` | replace a whole recipe (guarded, see below) |
 | `add_bom_line` / `remove_bom_line` | change one recipe line, preserving the rest |
+| `import_etsy_statement` | book one month's Etsy payment statement — exact per-order fees + ad/listing overhead (STATEMENT-IMPORT) |
+
+`import_etsy_statement` is the one tool that takes a **local file path** rather
+than scalars. The MCP process reads the bytes itself and streams them to
+`POST /api/imports/etsy-statement` as multipart, so the statement — real revenue
+figures and customer order numbers — never travels through a tool argument and
+therefore never lands in `agent_action_log.arguments`. Only the path is logged.
+It is safe to re-run: importing a month replaces that month rather than adding to
+it. It aborts on any row it cannot classify and writes nothing, so a refusal is a
+finding to pass to the operator verbatim, not something to retry.
 
 Quantities and money are decimal **strings** ("5.00", "597.14") end to end —
 binary floats do not round-trip cents.

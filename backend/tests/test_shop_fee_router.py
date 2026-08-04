@@ -255,3 +255,99 @@ async def test_backfill_passes_window_through_to_the_service():
 def test_backfill_request_rejects_inverted_range():
     with pytest.raises(ValueError):
         ShopPlatformFeeBackfillRequest(since=date(2026, 6, 30), until=date(2026, 1, 1))
+
+
+# ── STATEMENT-IMPORT: the flat rate must never reach an Etsy shop ──
+
+def test_etsy_shop_cannot_be_created_with_a_flat_rate():
+    """Etsy orders are priced from the payment statement, which carries the exact
+    per-order fee. Allowing a flat rate too would let both paths write
+    platform_fee. Until now this was enforced only by the UI not rendering the
+    input (FEE-UI-SHOPIFY-ONLY) — the API accepted one."""
+    from pydantic import ValidationError
+
+    from schemas.shop import ShopCreate
+
+    with pytest.raises(ValidationError, match="payment-account statement"):
+        ShopCreate(
+            name="Lamamarka ETSY",
+            platform=ShopPlatform.ETSY,
+            fee_percent=Decimal("8.00"),
+        )
+
+
+def test_etsy_shop_without_a_rate_is_fine():
+    from schemas.shop import ShopCreate
+
+    shop = ShopCreate(name="Lamamarka ETSY", platform=ShopPlatform.ETSY)
+    assert shop.fee_percent is None
+
+
+def test_shopify_shop_keeps_its_flat_rate():
+    """The guard is Etsy-only: Shopify/WB have no statement, so the flat rate is
+    the only pricing they have."""
+    from schemas.shop import ShopCreate
+
+    shop = ShopCreate(
+        name="Lamamarka Shopify",
+        platform=ShopPlatform.SHOPIFY,
+        fee_percent=Decimal("8.00"),
+    )
+    assert shop.fee_percent == Decimal("8.00")
+
+
+@pytest.mark.asyncio
+async def test_patching_a_flat_rate_onto_an_etsy_shop_is_rejected():
+    """ShopUpdate carries no `platform`, so only the stored shop can answer —
+    the check lives in the router."""
+    from routers.shops import update_shop
+    from schemas.shop import ShopUpdate
+
+    shop = _shop(fee_percent=None)
+    shop.platform = ShopPlatform.ETSY
+    db = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = shop
+    db.execute = AsyncMock(return_value=result)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc:
+        await update_shop(
+            shop.id,
+            ShopUpdate(fee_percent=Decimal("8.00")),
+            MagicMock(role=UserRole.OWNER),
+            db,
+        )
+
+    assert exc.value.status_code == 422
+    assert "statement" in exc.value.detail
+    assert shop.fee_percent is None, "nothing may be written before the refusal"
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_rate_on_an_etsy_shop_is_still_allowed():
+    """An explicit null is a cleanup, not a collision — a shop that wrongly got a
+    rate must be fixable."""
+    from routers.shops import update_shop
+    from schemas.shop import ShopUpdate
+
+    shop = _shop(fee_percent=Decimal("8.00"))
+    shop.platform = ShopPlatform.ETSY
+    db = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = shop
+    db.execute = AsyncMock(return_value=result)
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+
+    with patch("routers.shops.get_shop", new=AsyncMock(return_value=MagicMock())):
+        await update_shop(
+            shop.id,
+            ShopUpdate(fee_percent=None),
+            MagicMock(role=UserRole.OWNER),
+            db,
+        )
+
+    assert shop.fee_percent is None
