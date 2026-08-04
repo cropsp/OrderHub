@@ -1,6 +1,10 @@
 # Environment
 .env
 
+# MCP client registration — the prod server entry carries the agent password inline
+# (per-server env overrides mcp_server/.env), so this file is a secret. Never commit.
+.mcp.json
+
 # Env/secret backups (never commit)
 *.bak
 *.bak.*
@@ -42,6 +46,9 @@ scratch/
 # Internal audit / historical docs (kept locally, not pushed)
 docs/integrations/nova-poshta-audit-2026-05.md
 task.md
+
+# Financial reports — real revenue, fees and payout figures. Local only, never pushed.
+docs/finance/
 
 # Per-session agent working artifacts (transient, regenerated each review)
 COWORK_HANDOFF.md
