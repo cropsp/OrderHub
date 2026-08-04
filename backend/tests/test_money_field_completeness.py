@@ -69,6 +69,16 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # which are neutral: there the rate is standalone owner config with no cost
     # anywhere near it. Same number, different company.
     "uah_per_usd": "cost",
+    # STATEMENT-IMPORT: the Etsy statement import report. All four are costs Etsy
+    # charged — the per-order fee (matched, unmatched, or overridden) and the two
+    # monthly overhead totals. Named with explicit suffixes rather than reusing
+    # `amount` / `total_cost`, which are already classified here under the global
+    # name key and would have inherited a verdict with nobody deciding.
+    "platform_fee_amount": "cost",
+    "previous_platform_fee": "cost",
+    "statement_platform_fee": "cost",
+    "ads_overhead_amount": "cost",
+    "account_fee_overhead_amount": "cost",
     "cost_price": "cost",
     "current_unit_cost": "cost",
     "material_current_unit_cost": "cost",
@@ -90,6 +100,13 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # itemised view_costs cost. The finance page's `refunds` KpiCard is covered via
     # its leaf `amount`/`change_percent` fields.
     "total_refunds": "money",
+    # STATEMENT-IMPORT cross-check figures, reported but never booked: the
+    # statement's own revenue base (Sale − buyer tax), its refunds, and the
+    # Payoneer payouts. They travel on a route already gated view_costs-403, so
+    # `money` is the honest kind here — none is an itemised production cost.
+    "statement_base_amount": "money",
+    "refunds_amount": "money",
+    "deposits_amount": "money",
     "base_amount": "money",
     "computed_amount": "money",
     "paid_amount": "money",
@@ -171,6 +188,10 @@ MONEY_SURFACE_ENFORCEMENT: dict[str, str] = {
     "POST /api/orders": "view_costs-null",
     "POST /api/orders/{order_id}/items": "revenue-only",
     "POST /api/orders/{order_id}/status": "view_costs-null",
+    # STATEMENT-IMPORT: report is per-order fees + cost totals end to end, so the
+    # endpoint carries require_capability(VIEW_COSTS) directly (not the router —
+    # POST /api/imports/etsy returns only counts and keeps its role-only gate).
+    "POST /api/imports/etsy-statement": "view_costs-403",
     "POST /api/overhead-materials/{overhead_id}/receipts": "view_costs-403",
     "POST /api/products/{id}/image": "view_costs-null",
     "POST /api/products/{id}/image/from-shopify": "view_costs-null",

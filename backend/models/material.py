@@ -188,6 +188,16 @@ class OverheadMaterialReceipt(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # STATEMENT-IMPORT: stable marker for a receipt OWNED by an automated
+    # importer, so a re-import updates its own row instead of appending a second
+    # one. NULL on every hand-entered receipt (the whole existing table), which
+    # keeps them out of the unique index entirely. Format is
+    # "<source>:<scope>", e.g. "etsy-stmt:2026-04:ads".
+    #
+    # Receipts are otherwise append-only through the REST API by design (no
+    # PATCH/DELETE route exists, and none is added here) — only the owning
+    # importer updates its own marked rows, inside its own transaction.
+    source_ref: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
@@ -204,6 +214,13 @@ class OverheadMaterialReceipt(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             postgresql_where=text("shop_id IS NOT NULL"),
         ),
         Index("ix_overhead_material_receipts_received_at", "received_at"),
+        Index(
+            "uq_overhead_material_receipts_shop_source_ref",
+            "shop_id",
+            "source_ref",
+            unique=True,
+            postgresql_where=text("source_ref IS NOT NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

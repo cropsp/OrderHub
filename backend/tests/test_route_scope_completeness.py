@@ -71,6 +71,11 @@ INDIRECT_SHOP_ROUTES = {
     "PUT /api/products/{id}/bom",
     "POST /api/attachments/order/{order_id}",
     "POST /api/shipping/np-ttn/{order_id}",
+    # Both import endpoints take shop_id as a multipart FORM field, so no
+    # {shop_id} appears in the path; each calls assert_shop_access before
+    # touching the shop (routers/imports.py `_get_etsy_shop`).
+    "POST /api/imports/etsy",
+    "POST /api/imports/etsy-statement",
 }
 
 

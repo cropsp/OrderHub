@@ -43,6 +43,7 @@ from models.material import (
     OverheadMaterialReceipt,
 )
 from models.bom import BomItem
+from models.etsy_statement_line import EtsyStatementLine
 from models.partner_settlement import PartnerSettlement, PartnerSettlementFormula
 from models.partner_payment import PartnerPayment
 from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
@@ -94,6 +95,7 @@ __all__ = [
     "MaterialMovement",
     "MaterialMovementReason",
     "BomItem",
+    "EtsyStatementLine",
     "PartnerSettlement",
     "PartnerSettlementFormula",
     "PartnerPayment",
