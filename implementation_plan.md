@@ -4310,9 +4310,77 @@ in this document where applicable, to avoid duplication.
 | SETTINGS-TEST-1 | ~~`SettingsPage.test.tsx` — 9 failing frontend tests~~ **(test half RESOLVED by FX-CONVERSION)**; lint/tsc debt remains | Surfaced during MAT-6 (2026-08-02): 9 SettingsPage tests erroring at render. Root cause found + fixed in FX-CONVERSION (2026-08-03) — the `useAppSettings` mock was stale since WB-1; the FX card needed it, so it's fixed and those 9 are green (156 frontend pass). **Remaining:** `npm run lint` ~88 errors + `tsc` 21 errors across untouched files — pre-existing, fold into TYPECHECK-1 (same frontend-health cleanup). |
 | BOM-QTY-PRECISION | `bom_items.qty_per_unit` is `Numeric(8,2)` — quantities round to 2dp | Surfaced during the BOM pilot (2026-08-02): a 3.425 m cut length stored as 3.43 (+8 kop). The `qty > 0` CheckConstraint means a sub-0.01 quantity is **rejected loudly**, not silently zeroed — so this is a precision/UX nit, not a correctness hole. Mitigated for now by the convention rule (pick a unit where per-product qty is comfortably ≥ 0.01 — see `docs/warehouse/bom-intake.md`). A `Numeric(_,3)` bump is a later micro-migration only if precision-sensitive materials appear. |
 | SVC-MATERIAL-NONSTOCK | Service materials (cutting/sewing) bleed negative stock on every ship | Surfaced during the BOM pilot (2026-08-02). Cutting/sewing are modelled as materials (there is no labour/service concept), so `order_consumption_service` decrements them on every shipment — consumption runs regardless of currency; only the cost snapshot is skipped on currency mismatch — driving stock negative and adding a "stock went negative" warning per order. Noise, not breakage (the low-stock dashboard card is packaging-only). Real fix: a "non-stocked / service" flag on `Material` so flagged rows don't decrement. Bundle with the labour-model decision. |
+| FEE-UI-SHOPIFY-ONLY | The `fee_percent` input renders **only for SHOPIFY shops**, nested inside the credentials tab | Found in the Cowork prod smoke (2026-08-04). `Shop.fee_percent` is a generic column, but the UI puts its input inside the **Platform API** tab's Shopify branch; on an ETSY shop that tab renders "No API configuration needed for ETSY." and **no fee field at all**, with no explanation. Three consequences: (a) a flat rate cannot be set for an Etsy or Manual shop through the UI — whether the backend still accepts one is **unverified**; (b) a money-config field lives inside a credentials tab, so "where do I set the fee?" has no discoverable answer for a non-Shopify shop; (c) **silver lining** — this makes STATEMENT-IMPORT's rule 13 ("never set `fee_percent` on an Etsy shop") structurally enforced rather than merely documented, so the flat-% and statement paths cannot collide on Etsy. Decide whether (a)+(b) are intended; if yes, say so in the UI. Related: a no-op round-trip save on a **Shopify** shop is not obviously safe to test, because the same tab carries "Leave empty to keep existing" token fields whose keep-existing path would silently kill the live sync if wrong — that path has never been exercised deliberately and deserves a test. |
+| FX-AUDIT-SEMANTICS | `fx_rate_audit` records *fetches*, not rate *changes* | Surfaced during the 2026-08-04 deploy. The FX refresh writes **three rows per run** (one per `app_settings` key), and it runs on **every backend start** as well as daily — the deploy took the table 6 → 9 rows while the rate itself did not move (44.7876 → 44.7876; only `fx_fetched_at` changed). Not a bug (the rows are honest records of what was written), but a table named "audit" that is mostly no-op churn makes the question "when did the rate actually change?" a diff rather than a read, and every future release adds three more rows. Fix: write an audit row only when the rate value changes, or split "last fetch" metadata from the rate history. Low-priority; bundle with any FX-touching work. Note `historical-COGS-recompute` does **not** depend on this — NBU's `date=` parameter supplies per-date rates directly. |
+| PROD-BUILD-NO-TYPECHECK | The prod frontend image is built with **no type checking at all**, and the repo does not say so | Confirmed on the server during the 2026-08-04 deploy: `frontend/Dockerfile.deploy` runs `npx vite build` directly and carries a comment stating it deliberately skips `tsc -b` because `main` does not pass it. This settles TYPECHECK-1's open inference — but it also **reframes TYPECHECK-1 from cosmetic cleanup to a real safety gap**: the only gate that would stop a type error reaching prod is switched off on purpose, and the local gate documented in CLAUDE.md was itself a no-op (`tsc --noEmit` against a solution `tsconfig.json` with `"files": []`) until the real command was identified. A type error could therefore have shipped to prod undetected for months. Two parts: (a) fold into TYPECHECK-1 — fix the 21 errors, then **re-enable `tsc` in `Dockerfile.deploy`** so the gate is real; (b) document in CLAUDE.md § Server Deployment that the `.deploy` Dockerfiles differ from the repo ones in **two** ways (idlaser-less **and** typecheck-less) — today only the idlaser difference is written down, and `Dockerfile.deploy` is a server-only file, so this fact is invisible to anyone reading the repo. |
+| STARTDEV-UNTRACK | `start-dev.sh` is **tracked** in git, contradicting AI_ONBOARDING §9 | Found by CC during the 2026-08-04 merge — a `git rebase` refused to run because of unstaged changes to it, and it shows permanently dirty in `git status`. AI_ONBOARDING §9 asserts the file is "intentionally not committed", which was simply never true. Fix: `git rm --cached start-dev.sh` + a `.gitignore` entry, and correct the §9 wording so the doc matches reality. Two-line change; do it in the next docs-touching commit. |
 | BOM-COSTQUERY-DEADWIRE | `BomEditor.tsx` never renders the server-computed BOM cost | Surfaced during BOM-WASTE-1 (2026-08-02). `useBomCost`'s `.data` is never displayed — its only uses are `refetch()` + `isFetching` for the "Refresh cost" button spinner (`BomEditor.tsx:214-221`); the footer always shows the client-side `liveCost`. So `compute_bom_cost` never reaches that screen, and "Refresh cost" refetches a number nobody shows. BOM-WASTE-1 made the client math waste-inclusive so the footer is now correct; rewiring the footer to server data was deliberately NOT done because it would kill the live preview of unsaved rows. File: either render the server cost for saved state alongside the live preview, or drop the dead query + button. Low-priority. |
-| SHOP-FEE-1 | Per-shop `fee_percent` → `order.platform_fee` (Shopify + WB) | **BUILT 2026-08-03, branch `feat/shop-fee` (commit `2e502e8`), off main — NOT merged/smoked.** `Shop.fee_percent` Numeric(5,2) nullable → `platform_fee` computed at order creation from total_price (polling sync + webhook), passed keyword-only to `create_order` (off the public POST body), censored for non-VIEW_COSTS, OWNER-only dry-run backfill endpoint. No behaviour change until a rate is set. **Waiting on Sergii's WB net-received figures** to set the Lamamarka Shopify rate (Shopify+WB ≈ 8% headline) + manual smoke (9am reminder set for 2026-08-04). Uncommitted on the branch: `.gitignore` (protects secret-bearing `.mcp.json`) + `docs/integrations/mcp-server.md` runbook fixes — commit them. Etsy was out of SHOP-FEE-1 scope. |
-| STATEMENT-IMPORT | Import Etsy payment-account statement CSV → exact per-order fees + ads | **Decided 2026-08-04** after the Etsy fee analysis (CC over Jan–Jun statements, 210 orders): **Etsy takes 32.5% all-in** — fees+VAT **19.4%** (stable; incl. ~5.4% VAT on fees) + advertising **13.1%** (variable; the entire monthly swing); offsite-ads orders 34% vs 16% non-offsite (bimodal → a flat % is a compromise). Build an importer: parse the statement CSV, match fee/ad lines to orders by `Order #`, set **exact `order.platform_fee`** (transaction/processing/listing/shipping + VAT + offsite ads) and book **daily Etsy Ads (+VAT) → shop overhead** (period marketing). Idempotent re-import. Complements SHOP-FEE-1 (flat % stays for Shopify/WB). **Parser spec:** SIGNED sums NOT abs() (credits/refunds are positive), partition Marketing offsite-vs-Etsy-Ads with a loud assert, handle Deposit + Buyer Fee types. **To be built in a fresh Cowork chat.** Full numbers + methodology in the Cowork inventory-pnl-audit memory. Statement CSVs are financial/PII — keep OUT of the repo. |
+| SHOP-FEE-1 | Per-shop `fee_percent` → `order.platform_fee` (Shopify + WB) | **MERGED to `main` 2026-08-04 (`6130eaf`, rebased from `2e502e8` — patch-identical per `git range-diff`). Awaiting prod deploy + first smoke; no rate set on any shop.** Originally built 2026-08-03 on `feat/shop-fee`. `Shop.fee_percent` Numeric(5,2) nullable → `platform_fee` computed at order creation from total_price (polling sync + webhook), passed keyword-only to `create_order` (off the public POST body), censored for non-VIEW_COSTS, OWNER-only dry-run backfill endpoint. No behaviour change until a rate is set. **Waiting on Sergii's WB net-received figures** to set the Lamamarka Shopify rate (Shopify+WB ≈ 8% headline) + manual smoke. The `.gitignore` secrets guard and the `docs/integrations/mcp-server.md` runbook fixes shipped in the same range (`9810a8c`, `228b016`). Etsy was out of SHOP-FEE-1 scope — it is closed by STATEMENT-IMPORT instead. |
+| STATEMENT-IMPORT | Import Etsy payment-account statement CSV → exact per-order fees + ads | **Decided 2026-08-04** after the Etsy fee analysis (CC over Jan–Jun statements, 210 orders): **Etsy takes 32.5% all-in** — fees+VAT **19.4%** (stable; incl. ~5.4% VAT on fees) + advertising **13.1%** (variable; the entire monthly swing); offsite-ads orders 34% vs 16% non-offsite (bimodal → a flat % is a compromise). Build an importer: parse the statement CSV, match fee/ad lines to orders by `Order #`, set **exact `order.platform_fee`** (transaction/processing/listing/shipping + VAT + offsite ads) and book **daily Etsy Ads (+VAT) → shop overhead** (period marketing). Idempotent re-import. Complements SHOP-FEE-1 (flat % stays for Shopify/WB). **Parser spec:** SIGNED sums NOT abs() (credits/refunds are positive), partition Marketing offsite-vs-Etsy-Ads with a loud assert, handle Deposit + Buyer Fee types. Statement CSVs are financial/PII — keep OUT of the repo (`docs/finance/` is git-ignored as of `9810a8c`). **Split revised 2026-08-04: ALL advertising — offsite AND daily Etsy Ads — books to marketing overhead; `platform_fee` carries `Fee` + `VAT` rows only.** This supersedes the "offsite per-order → platform_fee" wording above. **`task.md` written 2026-08-04**, deliberately under-specified with 8 Open Questions for CC to resolve in plan mode; the load-bearing ones are the idempotency key (the CSV has no line id and byte-identical rows legitimately repeat — a composite hash collapses them and under-books the fee) and whether VAT-on-advertising follows the fee bucket or the ad bucket (it moves money between the 19.4% / 13.1% targets — Sergii decides). Numbers + methodology now live in the repo at `docs/finance/etsy-fee-analysis-2026-h1.md`, which is the sprint's reconciliation gate. |
+
+---
+
+**Release status (2026-08-04) — read this before trusting anything below**
+
+`main` = **`6130eaf`**, pushed, single alembic head **`e1a4c7b93d28`**. Suites on `main`:
+**650 backend / 70 MCP / 159 frontend** pass; `tsc -p tsconfig.app.json` and `npm run lint` carry
+the known `TYPECHECK-1` debt (21 + 88) and **nothing new** — CC diffed the full outputs, not the counts.
+
+- **`feat/mcp-warehouse` (MCP-WAREHOUSE + MAT-6 + BOM-WASTE-1 + FX-CONVERSION) was merged and
+  deployed on 2026-08-03** — fast-forward to `b570cc5`. The narrative below still calls it
+  "not merged/deployed"; that text is **stale**, kept only for its sprint detail.
+- **SHOP-FEE-1 merged AND deployed 2026-08-04** (`6130eaf`, rebased onto `main`, patch-identical to
+  `2e502e8`). Migration `e1a4c7b93d28` applied on prod; `alembic current` = `e1a4c7b93d28`, single
+  head. Prod baseline unmoved: 3 shops, 676 orders, **0 with `platform_fee`**, 0 shops with a rate.
+  Frontend rebuilt and verified (`fee_percent` present in the shipped bundles).
+  Rollback target: commit `b570cc5`, images `c067ab19b2c3` (backend) / `897ef1f269ad` (frontend);
+  reversal is `alembic downgrade -1` **before** swapping back to the old images (the old code has no
+  `e1a4c7b93d28` revision file and its alembic would fail at startup otherwise).
+- **Cowork prod UI smoke, 2026-08-04 — PASS.** Logged in over `https://orderhub.orderapp.uk`
+  (Cloudflare Access → tunnel → SPA) as OWNER. Dashboard renders (676 orders, 3 shops). The
+  **Platform Fee (%)** input renders in the shop editor, empty, with helper text: *"Total effective
+  transaction fee — channel commission, payment gateway and merchant-of-record cut combined.
+  Applied to each order's total when it is imported, and frozen there: changing this rate never
+  re-prices existing orders."* Round-trip save without touching any field: clean, no console errors,
+  shop row unchanged. Order detail Payment summary renders normally (subtotal / shipping / total /
+  Net Profit "—"), no fee row while `platform_fee` is NULL.
+  - **Operationally important, from that helper text:** the fee is applied **at import time** and
+    frozen. Setting a rate will therefore **not** price the 676 orders already in the DB — that is
+    what the OWNER-only dry-run backfill endpoint exists for. Plan the two steps separately.
+  - **The prod write performed:** one no-op save on **Vine&Roses ETSY** (no credentials attached).
+    The save test was deliberately **not** run on Lamamarka Shopify, whose Platform API tab holds
+    "Leave empty to keep existing" token fields — a no-op save there is only safe if that
+    keep-existing path is correct, and breaking it would kill the live Shopify sync. See
+    `FEE-UI-SHOPIFY-ONLY` below; that untestability is itself worth noting.
+- **SHOP-FEE-1 is deployed but functionally UNVERIFIED.** No shop has a `fee_percent`, so the
+  fee-computation path has never executed — on dev or prod. Dormant by design, but do not record
+  this sprint as "verified" until a rate is set and an order carries a computed fee. Blocked on
+  Sergii's WesternBid net-received figures.
+- **Do not roll prod back past `c4f1a83e6b27` (FX-CONVERSION).** Its downgrade deletes the FX rows
+  from `app_settings` and drops `fx_rate_audit` irrecoverably.
+- Secrets audit run during the merge: `.mcp.json` and `docs/finance/` appear in **no commit and no
+  tree** in the entire history; both are now git-ignored (`9810a8c`); no `.env` is tracked.
+- **The MCP prod rollout is DONE too** (executed 2026-08-03, recorded in
+  `docs/integrations/mcp-server.md` §"PROD rollout runbook"): prod agent user created, CF Access
+  service token "orderhub-mcp" + Service Auth policy, `orderhub-prod` registered in `.mcp.json`.
+  So of the three post-warehouse questions, **two are closed** (FX, MCP prod) and only
+  **historical-COGS-recompute** remains open. The narrative below still lists all three — stale.
+- **Prod shops ≠ dev shops.** Prod has **Lamamarka (ETSY)**, **Lamamarka Shopify (SHOPIFY)** and
+  **Vine&Roses (ETSY)**; there is **no KoraKlenu on prod** (dev-only). Two Etsy shops on prod is a
+  direct input to STATEMENT-IMPORT's OQ4 (which shop a statement belongs to, and whether `Order #`
+  is unique across shops).
+- **Caveat on `docs/finance/`:** `9810a8c` ignores the whole directory, so
+  `etsy-fee-analysis-2026-h1.md` — the STATEMENT-IMPORT reconciliation gate — is **local-only and
+  will not survive a fresh clone**. The doc contains aggregates only and explicitly no PII, so it
+  arguably belongs in the repo while the raw statement CSVs stay out. Decide before that sprint.
+
+> **Process note.** The Cowork brief for this merge was built on *this document's* stale claim that
+> `feat/mcp-warehouse` was unmerged, and invented a two-alembic-heads hazard that could not occur.
+> CC caught it and reported the premise as wrong rather than working around it. This is the
+> AI_ONBOARDING §5 failure mode in mirror image — there it was `CLAUDE.md` describing unmerged work
+> as shipped; here it is `implementation_plan.md` describing shipped work as unmerged. **A closure
+> entry's merge/deploy status is load-bearing input to the next sprint's brief — update it at merge
+> time, not at the next planning session.**
 
 ---
 
@@ -4324,7 +4392,8 @@ fetch from the order card; label type by `ShippingType`; manager-confirm order�
 refunds as dated `order_refunds` records netted in the refund's month; retro-fix ran, 3 rows on prod;
 reconciliation ties per complete month). WB is live on prod (creds + `WESTERNBID_BASE_URL`).
 
-Built but **NOT merged/deployed** — branch `feat/mcp-warehouse`, now carrying **four** sprints:
+**[Merged + deployed 2026-08-03 — see Release status above. The "not merged/deployed" wording in
+this paragraph is stale; kept for the sprint detail.]** Branch `feat/mcp-warehouse` carried **four** sprints:
 **MCP-WAREHOUSE** — a local **stdio** MCP server (`mcp_server/`) letting an agent populate
 materials/receipts/BOMs/overhead via the CRM's own REST API (loopback → all guards cover it) as a
 MANAGER agent user, writes audited in `agent_action_log`; dev-verified live (agent connects, sees only
@@ -4371,8 +4440,8 @@ was stale since WB-1 → 9 SettingsPage tests had been erroring; the FX card nee
 **Currency wall — BRIDGED going forward (FX-CONVERSION, 2026-08-03).** `order_consumption_service.py`
 used to SKIP COGS when material currency ≠ order currency; FX-CONVERSION now converts UAH→USD at ship
 (single NBU rate + override), so USD-shop orders shipped from now on book a USD COGS. **Two residual gaps:**
-(a) already-shipped orders keep NULL cost — the separate `historical-COGS-recompute`; (b) still on
-`feat/mcp-warehouse`, not merged/deployed to prod.
+(a) already-shipped orders keep NULL cost — the separate `historical-COGS-recompute`; (b) ~~still on
+`feat/mcp-warehouse`, not merged/deployed to prod~~ — **CLOSED: merged + deployed 2026-08-03.**
 
 **Where we left off (2026-08-02):** the first real load is IN the dev DB — 8 supplier invoices →
 13 direct materials + 21 receipts + 7 overhead materials + 9 expenses (51 997,26 грн; verified to
@@ -4392,10 +4461,11 @@ fees=0 → profit overstated — a choice, not a build: manual per-order / shop-
 merge `feat/mcp-warehouse` → main + deploy; prod agent user; CF Access **service token** + a small
 `client.py` header change — the MCP server stays on the laptop pointed at the prod URL; no SSH for data
 entry). Plus ongoing BOM entry per `docs/warehouse/bom-intake.md`, and MAT-7 (packaging cost) sequenced
-with the packaging work. **`feat/mcp-warehouse` now carries four sprints** (MCP-WAREHOUSE + MAT-6 +
-BOM-WASTE-1 + FX-CONVERSION), pushed to origin, **not merged/deployed** — the growing stack is worth
-merging soon to de-risk. **Uncommitted docs to commit onto the branch:** `docs/warehouse/bom-intake.md`
-(new, now FX-aware) + this `implementation_plan.md` update. Follow-ups in the deferred table above:
+with the packaging work. **`feat/mcp-warehouse` carried four sprints** (MCP-WAREHOUSE + MAT-6 +
+BOM-WASTE-1 + FX-CONVERSION) and was **merged + deployed 2026-08-03**; `docs/warehouse/bom-intake.md`
+committed in `eafbf0f`. SHOP-FEE-1 followed onto `main` 2026-08-04. Of the three remaining
+post-warehouse questions, the **fee-source** one is now answered twice over: flat `fee_percent` for
+Shopify/WB (SHOP-FEE-1, awaiting a rate) and exact statement import for Etsy (STATEMENT-IMPORT, spec'd). Follow-ups in the deferred table above:
 SHOPIFY-REFUNDS-followup-1/2, MAT-7, SETTINGS-TEST-1 (test half resolved), BOM-QTY-PRECISION,
 SVC-MATERIAL-NONSTOCK, BOM-COSTQUERY-DEADWIRE. Other open items live in the Cowork memory backlog.
 
@@ -4587,6 +4657,14 @@ Goal: Show order history and sales stats per product variant on the detail page.
 > external service on success, the service emails when the ping fails to arrive — which covers
 > script failure, timer removal and a powered-off server alike. Parked until the WesternBid work
 > is finished; see `BACKUP_PLAN.md` §5.
+>
+> **Escalated 2026-08-04.** This gap has now forced a *manual* backup verification as a release
+> pre-flight step twice in a row (the 2026-08-03 and 2026-08-04 deploys), which is precisely the
+> work a dead-man's switch exists to remove. Meanwhile what sits on prod has grown: 676 orders,
+> the materials/receipts/BOM warehouse, FX history, and Fernet-encrypted Nova Poshta / WesternBid /
+> Shopify credentials. WesternBid (the stated blocker) is shipped and live. This is now the
+> cheapest high-value item on the board — a ping in the backup script plus an external monitor,
+> roughly an hour — and should be picked up before the next feature sprint, not after it.
 >
 > Also open: the restore test (2026-07-13) ran against a near-empty DB with an empty uploads
 > volume, so it proved the *mechanism* but not data integrity, and the attachments leg has never
