@@ -3,9 +3,9 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
+  Eye,
   Info,
   Receipt,
-  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,7 +19,7 @@ import {
 import { useImportEtsyStatement } from '@/hooks/useImports';
 import { formatMoney } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import type { Shop } from '@/types/common';
+import type { Shop, StatementImportReport } from '@/types/common';
 
 /**
  * STATEMENT-IMPORT — upload one monthly Etsy payment-account statement.
@@ -31,35 +31,70 @@ import type { Shop } from '@/types/common';
  *
  * Idempotent per calendar month — re-uploading replaces that period wholesale —
  * so the operator can safely re-run a month after Etsy re-issues a statement.
+ *
+ * Two steps, because this writes money: "Preview import" runs a dry run (the
+ * backend defaults to one) and shows the full report without writing; "Confirm
+ * booking" re-sends the same shop and file with dry_run=false. The two reports
+ * are the same code path, so the preview is exactly what gets booked.
  */
 export default function StatementImportTab({ shops }: { shops: Shop[] }) {
   const [selectedShopId, setSelectedShopId] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
+  // Held locally rather than read off the mutation: clicking "Confirm booking"
+  // starts a second mutation, which clears `mutation.data` — the preview must
+  // stay on screen while its own confirmation is in flight, and must survive a
+  // failed confirmation so the operator can read the reason next to the figures.
+  const [report, setReport] = useState<StatementImportReport | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importMutation = useImportEtsyStatement();
 
-  const report = importMutation.data;
   const selectedShop = shops.find((s) => s.id === selectedShopId);
+
+  const runImport = (dryRun: boolean) => {
+    if (!selectedShopId || !file) return;
+    importMutation.mutate(
+      { shopId: selectedShopId, file, dryRun },
+      { onSuccess: setReport },
+    );
+  };
 
   const handleReset = () => {
     setFile(null);
+    setReport(null);
     importMutation.reset();
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   if (report) {
+    const isPreview = report.dry_run
     return (
       <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <Card className="border-teal-500/20 bg-zinc-900/20 backdrop-blur-md rounded-3xl overflow-hidden">
+        <Card
+          className={cn(
+            'bg-zinc-900/20 backdrop-blur-md rounded-3xl overflow-hidden',
+            isPreview ? 'border-amber-500/25' : 'border-teal-500/20',
+          )}
+        >
           <CardContent className="p-10 space-y-10">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-4">
-                <div className="h-14 w-14 rounded-2xl bg-teal-500 shadow-2xl shadow-teal-500/30 flex items-center justify-center">
-                  <CheckCircle2 className="h-7 w-7 text-white" />
+                <div
+                  className={cn(
+                    'h-14 w-14 rounded-2xl shadow-2xl flex items-center justify-center',
+                    isPreview
+                      ? 'bg-amber-500 shadow-amber-500/30'
+                      : 'bg-teal-500 shadow-teal-500/30',
+                  )}
+                >
+                  {isPreview ? (
+                    <Eye className="h-7 w-7 text-white" />
+                  ) : (
+                    <CheckCircle2 className="h-7 w-7 text-white" />
+                  )}
                 </div>
                 <div>
                   <h2 className="text-2xl font-black text-zinc-100 tracking-tight">
-                    {report.period} booked
+                    {isPreview ? `${report.period} preview` : `${report.period} booked`}
                   </h2>
                   <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500 mt-1">
                     {selectedShop?.name} · {report.source_filename}
@@ -75,6 +110,22 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
                 </div>
               )}
             </div>
+
+            {isPreview && (
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-6 flex gap-4">
+                <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-[11px] font-black uppercase tracking-widest text-amber-400">
+                    Dry run — nothing was written
+                  </p>
+                  <p className="text-[11px] text-amber-300/80 font-medium leading-relaxed">
+                    This is the same import, rolled back. Everything below is exactly
+                    what booking will do: the fees, the two overhead rows, and every
+                    order listed. Confirm to write it.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <Stat
@@ -174,20 +225,57 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
             )}
 
             <div className="flex flex-col sm:flex-row gap-4 pt-2">
-              <Button
-                variant="ghost"
-                className="px-8 h-12 border border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl font-bold uppercase text-[10px] tracking-widest"
-                onClick={handleReset}
-              >
-                Import another month
-              </Button>
-              <Button
-                className="px-8 h-12 bg-zinc-100 text-zinc-950 hover:bg-white rounded-xl font-bold uppercase text-[10px] tracking-widest"
-                asChild
-              >
-                <a href="/orders">View orders</a>
-              </Button>
+              {isPreview ? (
+                <>
+                  <Button
+                    className="px-8 h-12 bg-teal-600 hover:bg-teal-500 text-white rounded-xl font-black uppercase text-[10px] tracking-widest"
+                    disabled={importMutation.isPending}
+                    onClick={() => runImport(false)}
+                  >
+                    {importMutation.isPending
+                      ? 'Booking statement...'
+                      : `Confirm booking of ${report.period}`}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-8 h-12 border border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl font-bold uppercase text-[10px] tracking-widest"
+                    onClick={handleReset}
+                  >
+                    Discard
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="ghost"
+                    className="px-8 h-12 border border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 rounded-xl font-bold uppercase text-[10px] tracking-widest"
+                    onClick={handleReset}
+                  >
+                    Import another month
+                  </Button>
+                  <Button
+                    className="px-8 h-12 bg-zinc-100 text-zinc-950 hover:bg-white rounded-xl font-bold uppercase text-[10px] tracking-widest"
+                    asChild
+                  >
+                    <a href="/orders">View orders</a>
+                  </Button>
+                </>
+              )}
             </div>
+
+            {importMutation.isError && (
+              <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/5 flex gap-3">
+                <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-[11px] font-black text-red-400 uppercase tracking-widest">
+                    Booking rejected — nothing was written
+                  </p>
+                  <p className="text-[11px] text-red-300/80 font-medium leading-relaxed break-words">
+                    {extractError(importMutation.error)}
+                  </p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -239,8 +327,10 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
           <div className="rounded-xl border border-blue-500/10 bg-blue-500/5 p-5 flex gap-4">
             <Info className="h-5 w-5 text-blue-400 shrink-0" />
             <p className="text-[11px] text-blue-300/80 leading-relaxed font-medium">
-              One calendar month per file. Re-importing a month replaces it, so
-              running the same statement twice changes nothing.
+              One calendar month per file. The preview shows the full report
+              without writing anything; booking is a second, explicit step.
+              Re-importing a month replaces it, so running the same statement
+              twice changes nothing.
             </p>
           </div>
         </CardContent>
@@ -323,13 +413,10 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
             <Button
               className="w-full bg-teal-600 hover:bg-teal-500 text-white font-black uppercase tracking-widest text-xs h-14 rounded-2xl shadow-xl shadow-teal-900/20 transition-all active:scale-95"
               disabled={!file || importMutation.isPending}
-              onClick={() => {
-                if (!selectedShopId || !file) return;
-                importMutation.mutate({ shopId: selectedShopId, file });
-              }}
+              onClick={() => runImport(true)}
             >
-              {importMutation.isPending ? 'Booking statement...' : 'Import statement'}
-              {!importMutation.isPending && <Zap className="ml-3 h-4 w-4 fill-current" />}
+              {importMutation.isPending ? 'Reading statement...' : 'Preview import'}
+              {!importMutation.isPending && <Eye className="ml-3 h-4 w-4" />}
             </Button>
 
             {importMutation.isError && (
@@ -337,7 +424,7 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
                 <AlertCircle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="text-[11px] font-black text-red-400 uppercase tracking-widest">
-                    Import rejected — nothing was written
+                    Statement rejected — nothing was written
                   </p>
                   {/* The backend aborts on the first row it cannot classify and
                       names it. Surfaced verbatim: it is the operator's fix. */}

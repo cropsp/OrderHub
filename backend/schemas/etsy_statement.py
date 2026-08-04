@@ -45,6 +45,14 @@ class StatementFeeOverride(BaseModel):
 
 
 class StatementImportReport(BaseModel):
+    dry_run: bool = Field(
+        description=(
+            "True: this was a rehearsal and the transaction was rolled back. "
+            "Every other field is identical to what a real import would report — "
+            "it is the same code path, committed or not."
+        )
+    )
+
     period: str = Field(description="Statement calendar month, 'YYYY-MM'")
     source_filename: str
     file_sha256: str

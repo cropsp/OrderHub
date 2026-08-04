@@ -85,6 +85,11 @@ async def import_etsy_orders(
 async def import_etsy_statement(
     shop_id: uuid.UUID = Form(...),
     file: UploadFile = File(...),
+    # Defaults TRUE, like every other money-writing surface in this codebase
+    # (ShopPlatformFeeBackfillRequest.dry_run). A caller that forgets the flag
+    # gets a rehearsal, never an unreviewed write; booking is an explicit
+    # `dry_run=false`.
+    dry_run: bool = Form(True),
     current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -97,6 +102,10 @@ async def import_etsy_statement(
     period's lines wholesale and recomputes the affected fees, so importing the
     same file twice is a no-op and a re-issued statement fully supersedes the
     original.
+
+    `dry_run=true` (the default) reports exactly what a real import would do and
+    writes nothing — the service runs the import whole and rolls it back, so the
+    two reports are identical bar this flag.
     """
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="File must be a CSV")
@@ -107,9 +116,13 @@ async def import_etsy_statement(
 
     try:
         report = await import_statement(
-            db, shop, content, file.filename, current_user.id
+            db, shop, content, file.filename, current_user.id, dry_run=dry_run
         )
-        await db.commit()
+        # A dry run has already rolled itself back inside the service; committing
+        # here would only commit an empty transaction, but not committing keeps
+        # the two paths honestly distinct at the surface too.
+        if not dry_run:
+            await db.commit()
         return report
     except StatementParseError as e:
         # A row we do not understand aborts the whole import by design: silently

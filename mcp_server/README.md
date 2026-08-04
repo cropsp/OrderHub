@@ -113,6 +113,12 @@ It is safe to re-run: importing a month replaces that month rather than adding t
 it. It aborts on any row it cannot classify and writes nothing, so a refusal is a
 finding to pass to the operator verbatim, not something to retry.
 
+It is also the one tool that **rehearses by default**: `dry_run=True` runs the
+import whole and rolls it back, returning the identical report without writing.
+Booking is a second call with `dry_run=False`, after the operator has seen the
+preview. `dry_run` is recorded in the action log, so the trail distinguishes a
+rehearsal from a write.
+
 Quantities and money are decimal **strings** ("5.00", "597.14") end to end —
 binary floats do not round-trip cents.
 

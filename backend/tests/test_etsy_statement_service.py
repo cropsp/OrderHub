@@ -86,6 +86,11 @@ class FakeSession:
         self.materials: list[OverheadMaterial] = []
         self.compiled: list[str] = []
         self.flush = AsyncMock()
+        # A dry run's rollback is the caller-visible proof that it wrote nothing;
+        # this fake records it rather than undoing, so a test can assert both the
+        # rollback AND that the report was built from real accumulated state.
+        self.rollback = AsyncMock()
+        self.commit = AsyncMock()
 
     # -- writes ------------------------------------------------------------
     def add(self, obj):
@@ -229,8 +234,13 @@ class _Result:
         return iter(self._rows)
 
 
-async def _run(db, shop, *rows, filename="statement.csv"):
-    return await import_statement(db, shop, _csv(*rows), filename, uuid.uuid4())
+async def _run(db, shop, *rows, filename="statement.csv", dry_run=False):
+    """Default `dry_run=False` here, opposite the service's own default: these
+    tests are about what a real import writes. The dry-run contract has its own
+    tests below."""
+    return await import_statement(
+        db, shop, _csv(*rows), filename, uuid.uuid4(), dry_run=dry_run
+    )
 
 
 # ---------- fee derivation ----------
@@ -620,3 +630,61 @@ async def test_refund_rows_do_not_move_the_fee_or_the_overhead():
     assert order.platform_fee == Decimal("2.40")
     assert with_refund.ads_overhead_amount == Decimal("9.60")
     assert with_refund.refunds_count == 1
+
+
+# ---------- dry run ----------
+
+
+@pytest.mark.asyncio
+async def test_dry_run_report_is_identical_to_the_real_import():
+    """The load-bearing property. A rehearsal that can disagree with the
+    performance is worse than none, so the dry run is not a second derivation —
+    it is the same code path, rolled back. Only `dry_run` itself may differ."""
+    rows = (
+        *APRIL_ROWS,
+        '"April 15, 2026",Fee,"Processing fee","Order #9999999999",USD,--,-$1.11,-$1.11,--',
+    )
+
+    rehearsal = FakeSession([_order(APRIL_ORDER, platform_fee=Decimal("5.00"))])
+    dry = await _run(rehearsal, _shop(), *rows, dry_run=True)
+
+    # A fresh session, because the real import must start from the same state the
+    # rehearsal started from — which is exactly what the rollback guarantees.
+    performance = FakeSession([_order(APRIL_ORDER, platform_fee=Decimal("5.00"))])
+    real = await _run(performance, _shop(), *rows, dry_run=False)
+
+    assert dry.dry_run is True
+    assert real.dry_run is False
+    assert dry.model_dump(exclude={"dry_run"}) == real.model_dump(exclude={"dry_run"})
+
+
+@pytest.mark.asyncio
+async def test_dry_run_rolls_back_and_never_commits():
+    db = FakeSession([_order(APRIL_ORDER)])
+
+    await _run(db, _shop(), *APRIL_ROWS, dry_run=True)
+
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_real_import_does_not_roll_itself_back():
+    db = FakeSession([_order(APRIL_ORDER)])
+
+    await _run(db, _shop(), *APRIL_ROWS, dry_run=False)
+
+    db.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_service_default_is_a_rehearsal():
+    """Mirrors SHOP-FEE-1: a caller that forgets the flag must not write."""
+    db = FakeSession([_order(APRIL_ORDER)])
+
+    report = await import_statement(
+        db, _shop(), _csv(*APRIL_ROWS), "statement.csv", uuid.uuid4()
+    )
+
+    assert report.dry_run is True
+    db.rollback.assert_awaited_once()

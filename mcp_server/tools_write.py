@@ -640,7 +640,9 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         return f"Removed {material_id} from the recipe.\n{result}"
 
     @mcp.tool()
-    async def import_etsy_statement(shop_id: str, file_path: str) -> str:
+    async def import_etsy_statement(
+        shop_id: str, file_path: str, dry_run: bool = True
+    ) -> str:
         """Import one monthly Etsy payment-account statement CSV.
 
         Derives each order's exact `platform_fee` from the statement's Fee and
@@ -651,6 +653,12 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
 
         `file_path` is a path on THIS machine. Give the operator's downloaded
         statement, one calendar month per file.
+
+        **This writes money, so it rehearses first.** `dry_run` defaults to True:
+        the import runs whole and is then rolled back, and you get the identical
+        report without anything being written. Show that report to the operator,
+        and only call again with `dry_run=False` once they have agreed to it.
+        Never book a statement the operator has not seen the preview of.
 
         Safe to re-run: importing a month replaces that month's stored lines
         wholesale and recomputes the affected fees, so re-uploading the same file
@@ -677,7 +685,9 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         # The statement holds real financial data and customer order numbers, so
         # only the PATH is logged, never the contents — a CSV passed as a tool
         # argument would be persisted verbatim in agent_action_log.arguments.
-        args = {"shop_id": shop_id, "file_path": str(path)}
+        # `dry_run` IS logged: whether a call wrote or only rehearsed is the most
+        # important thing about it in the audit trail.
+        args = {"shop_id": shop_id, "file_path": str(path), "dry_run": dry_run}
 
         return await _logged(
             client,
@@ -686,20 +696,32 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
             "etsy_statement",
             lambda: client.post_file(
                 "/api/imports/etsy-statement",
-                fields={"shop_id": shop_id},
+                # Sent explicitly rather than relying on the API default, so the
+                # agent's intent is on the wire either way.
+                fields={"shop_id": shop_id, "dry_run": str(dry_run).lower()},
                 filename=path.name,
                 content=content,
             ),
             summarise=lambda r: (
-                f"Statement {r['period']} booked: {r['lines_imported']} lines, "
-                f"{r['orders_matched']} orders priced"
+                (
+                    f"DRY RUN — nothing written. Statement {r['period']} would book: "
+                    if r["dry_run"]
+                    else f"Statement {r['period']} booked: "
+                )
+                + f"{r['lines_imported']} lines, {r['orders_matched']} orders priced"
                 + (
                     f", {r['orders_unmatched']} unmatched"
                     if r["orders_unmatched"]
                     else ""
                 )
                 + f". Advertising {r['ads_overhead_amount']} and account fees "
-                f"{r['account_fee_overhead_amount']} booked to overhead."
+                f"{r['account_fee_overhead_amount']} to overhead."
+                + (
+                    " Show this to the operator and call again with dry_run=False "
+                    "to book it."
+                    if r["dry_run"]
+                    else ""
+                )
             ),
             object_id=lambda r: r["period"],
         )

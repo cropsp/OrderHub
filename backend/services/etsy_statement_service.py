@@ -30,6 +30,18 @@ re-uploading a file a no-op, keeps legitimately duplicated rows (nothing
 de-duplicates), and handles a re-issued statement correctly — rows that vanished
 from the re-issue are actually gone, which upserting could never achieve.
 
+DRY RUN — the same code path, rolled back. `dry_run=True` (the default, as on
+SHOP-FEE-1's backfill) runs the import whole and then ROLLS BACK before
+returning, so the report is identical to the one a real import would produce,
+field for field, except `dry_run` itself. It is identical by construction rather
+than by care: every figure in the report is a SQL aggregate over the lines this
+import just inserted, so a "compute without writing" rehearsal would be a second
+derivation of the same money — and a rehearsal that can disagree with the
+performance is worse than none. The price is that a dry run really does write
+inside its transaction and take the same locks for its duration; it is not a
+read-only operation. The rollback lives here, not in the caller, so the
+guarantee sits beside the writes it undoes.
+
 This service writes overhead receipts through the ORM rather than the overhead
 REST router on purpose: that router is append-only (no PATCH/DELETE exists, by
 design) and its create schema forbids a negative `total_cost`, but a
@@ -105,11 +117,17 @@ async def import_statement(
     content: bytes,
     filename: str,
     user_id: uuid.UUID,
+    *,
+    dry_run: bool = True,
 ) -> StatementImportReport:
     """Import one monthly statement for `shop`. Caller commits.
 
     Raises `StatementParseError` (surfaced as 400) if any row is unrecognised —
     nothing is written when that happens.
+
+    `dry_run=True` (the default, mirroring SHOP-FEE-1) produces the identical
+    report and then rolls the transaction back — see "DRY RUN" in the module
+    docstring. The caller must not commit afterwards.
     """
     parsed = parse_statement_csv(content, filename)
     period = parsed.period_month
@@ -201,10 +219,11 @@ async def import_statement(
 
     totals = _bucket_totals(parsed)
     logger.info(
-        "[STATEMENT-IMPORT] shop=%s period=%s lines=%d (replaced %d) "
+        "[STATEMENT-IMPORT] shop=%s period=%s dry_run=%s lines=%d (replaced %d) "
         "matched=%d unmatched=%d ads=%s account=%s",
         shop.id,
         period,
+        dry_run,
         len(parsed.lines),
         previous["line_count"],
         len(matched_ids),
@@ -213,7 +232,8 @@ async def import_statement(
         account_total,
     )
 
-    return StatementImportReport(
+    report = StatementImportReport(
+        dry_run=dry_run,
         period=f"{period:%Y-%m}",
         source_filename=filename,
         file_sha256=parsed.file_sha256,
@@ -240,6 +260,15 @@ async def import_statement(
         deposits_count=totals["deposits_count"],
         deposits_amount=totals["deposits"],
     )
+
+    if dry_run:
+        # The rehearsal is over. Everything above ran for real inside this
+        # transaction; abandoning it is what makes the report trustworthy AND
+        # the database untouched. The report holds only plain values, so it
+        # survives the rollback intact.
+        await db.rollback()
+
+    return report
 
 
 async def _resolve_orders(

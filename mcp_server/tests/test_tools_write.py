@@ -592,6 +592,7 @@ def test_diff_ignores_decimal_formatting_noise():
 # ── STATEMENT-IMPORT: statement upload ─────────────────────
 
 STATEMENT_REPORT = {
+    "dry_run": True,
     "period": "2026-04",
     "source_filename": "etsy_statement_2026_4.csv",
     "file_sha256": "abc123",
@@ -612,6 +613,9 @@ STATEMENT_REPORT = {
     "deposits_count": 4,
     "deposits_amount": "812.40",
 }
+
+#: What the API answers when the tool asks for a real write.
+STATEMENT_REPORT_BOOKED = {**STATEMENT_REPORT, "dry_run": False}
 
 STATEMENT_CSV = (
     'Date,Type,Title,Info,Currency,Amount,"Fees & Taxes",Net,"Tax Details"\n'
@@ -661,13 +665,17 @@ async def test_statement_contents_never_reach_the_action_log(tmp_path):
     entry = _logged(seen)[0]
     assert entry["tool"] == "import_etsy_statement"
     assert entry["ok"] is True
-    assert set(entry["arguments"]) == {"shop_id", "file_path"}
+    # dry_run IS logged: whether a call wrote or only rehearsed is the most
+    # important thing about it in the trail.
+    assert set(entry["arguments"]) == {"shop_id", "file_path", "dry_run"}
     assert "Processing fee" not in json.dumps(entry)
     assert "Order #4026053403" not in json.dumps(entry)
 
 
 @pytest.mark.asyncio
-async def test_statement_summary_reports_what_was_booked(tmp_path):
+async def test_statement_rehearses_unless_told_otherwise(tmp_path):
+    """The tool defaults to a dry run — an agent cannot book a statement the
+    operator has not seen a preview of without saying so explicitly."""
     mcp, client, seen = _build(
         {("POST", "/api/imports/etsy-statement"): httpx.Response(200, json=STATEMENT_REPORT)}
     )
@@ -675,6 +683,57 @@ async def test_statement_summary_reports_what_was_booked(tmp_path):
 
     result = await mcp.call_tool(
         "import_etsy_statement", {"shop_id": "shop-1", "file_path": str(path)}
+    )
+
+    upload = next(r for r in seen if r.url.path == "/api/imports/etsy-statement")
+    body = upload.content.decode()
+    assert 'name="dry_run"' in body and "true" in body
+
+    text = str(result)
+    assert "DRY RUN" in text and "nothing written" in text
+    assert "dry_run=False" in text, "must say how to actually book it"
+
+
+@pytest.mark.asyncio
+async def test_statement_books_only_on_an_explicit_dry_run_false(tmp_path):
+    mcp, client, seen = _build(
+        {
+            ("POST", "/api/imports/etsy-statement"): httpx.Response(
+                200, json=STATEMENT_REPORT_BOOKED
+            )
+        }
+    )
+    path = _statement_file(tmp_path)
+
+    result = await mcp.call_tool(
+        "import_etsy_statement",
+        {"shop_id": "shop-1", "file_path": str(path), "dry_run": False},
+    )
+
+    upload = next(r for r in seen if r.url.path == "/api/imports/etsy-statement")
+    body = upload.content.decode()
+    assert 'name="dry_run"' in body
+    assert body.split('name="dry_run"')[1].split("--")[0].strip().endswith("false")
+
+    text = str(result)
+    assert "DRY RUN" not in text
+    assert "booked" in text
+
+
+@pytest.mark.asyncio
+async def test_statement_summary_reports_what_was_booked(tmp_path):
+    mcp, client, seen = _build(
+        {
+            ("POST", "/api/imports/etsy-statement"): httpx.Response(
+                200, json=STATEMENT_REPORT_BOOKED
+            )
+        }
+    )
+    path = _statement_file(tmp_path)
+
+    result = await mcp.call_tool(
+        "import_etsy_statement",
+        {"shop_id": "shop-1", "file_path": str(path), "dry_run": False},
     )
     text = str(result)
 

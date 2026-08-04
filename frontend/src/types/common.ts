@@ -209,6 +209,10 @@ export interface StatementFeeOverride {
 
 /** Mirrors backend schemas/etsy_statement.py StatementImportReport. */
 export interface StatementImportReport {
+  /** True: a rehearsal that was rolled back. Every other field is what a real
+   *  import would have reported — it is the same code path either way. */
+  dry_run: boolean
+
   period: string
   source_filename: string
   file_sha256: string

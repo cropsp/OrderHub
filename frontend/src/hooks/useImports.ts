@@ -18,11 +18,20 @@ export function useImportEtsyStatement() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: ({ shopId, file }: { shopId: string; file: File }) =>
-      importsApi.importEtsyStatement(shopId, file),
-    onSuccess: () => {
-      // The import rewrites order.platform_fee and books monthly overhead, so
-      // every surface that reads either is now stale.
+    mutationFn: ({
+      shopId,
+      file,
+      dryRun,
+    }: {
+      shopId: string
+      file: File
+      dryRun: boolean
+    }) => importsApi.importEtsyStatement(shopId, file, dryRun),
+    onSuccess: (_report, { dryRun }) => {
+      // A dry run rolled itself back — nothing on the server moved, so nothing
+      // is stale. Only a real import rewrites order.platform_fee and books the
+      // monthly overhead rows.
+      if (dryRun) return
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['finance'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
