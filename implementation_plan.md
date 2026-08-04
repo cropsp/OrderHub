@@ -4268,6 +4268,142 @@ key. `parcels/sent` returns no street, city, email or order reference, so matchi
 
 ---
 
+### STATEMENT-IMPORT — Etsy statement CSV → exact per-order fees + ad overhead (closed 2026-08-04)
+
+**Branch `feat/statement-import`, six commits** (three build + three pre-merge additions), off `main`
+at `9552193`. Migration head `f2b8d6c40a15`. **Not merged, not deployed** as of closure.
+
+> `task.md` is git-ignored, so this entry is the only durable record of the sprint's reasoning.
+> It therefore keeps the rejected alternatives and the accepted trade-offs, not just the outcome.
+
+**Problem.** `order.platform_fee` was NULL on every Etsy order, so `net_profit` was overstated on
+all of them. A flat percentage could not fix it: analysis over Jan–Jun 2026 (210 orders,
+`docs/finance/etsy-fee-analysis-2026-h1.md`) showed Etsy takes **32.53% of base all-in**, and that
+the per-order distribution is **bimodal** — offsite-attributed orders ≈34%, non-offsite ≈16%. A
+single rate averages two distinct populations. The statement CSV carries the exact per-line truth.
+
+**What shipped.** A parser + service that reads the Etsy payment-account statement, stores every row
+signed in a new `etsy_statement_line` table, and derives `order.platform_fee` as an aggregate over
+those rows; advertising and account-level fees book to monthly shop overhead. Two surfaces over one
+service: a Preview → Confirm tab on `/imports`, and an MCP tool. Idempotency is **replace-by-period**
+(`uq_etsy_statement_line_shop_period_row` on `(shop_id, period_month, row_index)`).
+
+**The four decisions Sergii made, and the arithmetic behind them:**
+
+- **VAT on advertising follows its own line (Reading B), not the fee bucket (Reading A).** The
+  decisive fact was structural, not economic: the 180 `VAT: Etsy Ads` rows carry an **empty Info
+  column** — no order number — so under Reading A $152.95 would have been assigned to a per-order
+  bucket it can never structurally reach. A does not achieve "all VAT in fees"; it only inflates the
+  unattributable residue from $58.16 to $211.11. Restated split: order fees **1286.97 → 16.05%**,
+  advertising **1262.89 → 15.75%**, account fees **58.16 → 0.73%**, all-in **2608.02 → 32.53%**
+  (unchanged either way — the choice moves money between buckets, not in total).
+  **Consequence accepted knowingly:** with all advertising in overhead, per-order fees become nearly
+  uniform and the 34%/16% bimodality — the very thing that motivated the sprint — moves into the
+  period. Per-order ad attribution is not lost: the statement line keeps its `order_external_id`.
+  But an offsite-driven order now looks as profitable as an organic one *at the order level*.
+- **The orphan pool books to overhead in its own row.** $58.16 over six months ($49.20 listing +
+  auto-renew fees, $8.96 VAT on them) is a real cost with no order number. Rejected: leaving it
+  unbooked (the grand total would stop tying, killing the sprint's own verification gate) and
+  spreading it pro-rata over orders (invents attribution that does not exist, and is unstable —
+  importing a new month would silently re-price historical orders). Kept **separate from the ads
+  row** so the advertising figure stays usable for marketing decisions.
+  **Orphan is not a dumping ground:** it is reachable only by two explicit classifications
+  (`fee_account`, `vat_fee_account`); there is no `else` branch, an unknown Type raises, and
+  `test_the_three_buckets_partition_every_booked_row` fails if a new bucket appears.
+- **Credit-only orders keep a negative `platform_fee`, and are reported.** An order whose charges
+  sit in an un-imported period and whose credits land in an imported one nets negative (two real
+  cases: 3902046506 at −8.50, 3908813660 at −5.26, both Dec-2025 sales refunded in January).
+  Rejected: clamping to 0.00, which is not merely lossy but **arithmetically wrong later** — a fully
+  refunded order should end at 0.00, which signed arithmetic reaches (−8.50 + 8.50) and clamping
+  never does (0 + 8.50 = 8.50, a fee that does not exist). Self-correction works only because
+  `platform_fee` is an aggregate over stored raw lines rather than a value written blind.
+  **Known interaction:** rule 8 leaves `Refund` rows unbooked, so revenue is *not* reduced — such an
+  order shows full revenue **plus** a negative fee, overstating profit twice. Hence the dedicated
+  `credit_only_orders` report block. Filed as `ETSY-REFUNDS` below.
+- **A `fee_percent` guard on Etsy shops (422), added rather than deferred.** The gap was real, not
+  theoretical: `order_service.py:139` said "not platform-gated" and nothing checked, so a PATCH plus
+  the OWNER backfill could have put estimated flat fees on Etsy orders where they would be
+  indistinguishable from statement-derived exact ones. Deferring was rejected because the rule
+  forbidding it lived only in `task.md`, which is git-ignored and evaporates at the next sprint — a
+  rule with no enforcement mechanism is a rule that gets violated by someone who never read it. The
+  guard targets `ETSY` specifically, **not** "everything that is not Shopify", so a MANUAL shop can
+  still legitimately carry a flat rate. Clearing an existing rate stays allowed.
+
+**The trap that justified the method.** `renew sold auto credit: 4343151753` quotes a *listing* id
+in a form visually identical to the lowercase order form `order: N`. Read as an order it would have
+produced four phantom unmatched entries — indistinguishable from normal operation. Seven distinct
+Info/Title shapes exist across the six files, five carrying an identifier; the planning agent had
+spotted four by eye. Listing patterns are now tested before order patterns
+(`etsy_statement_parser.py:118-131`) and pinned by a test. An Info carrying digits in no recognised
+form **hard-fails** the import rather than degrading to unmatched.
+
+**Three additions made before merge, on one criterion: does the addition lose its value if it lands
+after the first production import?**
+
+- **Dry run** (`dry_run` defaults **true** on all three surfaces, mirroring
+  `ShopPlatformFeeBackfillRequest`). Value peaks exactly once and never recovers. It is the *same
+  code path, rolled back* — deliberately not a "compute without writing" variant, because every
+  figure in the report is a SQL aggregate over the rows just inserted, so a separate derivation
+  would be a **second computation of the same money that could disagree with the booking**. Report
+  is byte-identical; only `dry_run` differs. **Stated cost:** a dry run genuinely writes inside its
+  transaction and holds the same locks for its duration — it is *not* a read-only operation. The
+  rollback lives in the service beside the writes it undoes, so no caller can forget it.
+- **`has_sale_row` on unmatched entries.** Previously "this shop has no such order" and "the parser
+  produced a plausible-but-wrong number" rendered identically; the six April cases were told apart
+  by hand with a DB query. Measured over the six files: the 210 sale ids and 38 listing ids are
+  disjoint, and 208 of 210 fee-bearing ids carry a Sale row — the two that do not were sold before
+  the earliest imported statement, which is the flag's only false-negative mode and is on the field
+  description. `false` means "check this", not "this is wrong". Omitted from `credit_only_orders`,
+  where it would be constant `false` by definition.
+- **Partition checksum in the import report.** `partition_check` now has one definition and two
+  callers — the harness over a *file*, the import over the rows it **actually booked**. An imbalance
+  **aborts (500, rolled back)** rather than annotating a committed import. It proved more useful
+  than specified: April's 306.46 = 153.60 + 145.56 + 7.30, and inside that 153.60 = 110.80 matched
+  + **42.80 unmatched** — so the partition accounts for money that reached no order instead of
+  losing it.
+
+**Verification.** The reconciliation gate ties **to the cent** against all six real statements
+(2728 rows / 210 orders / base 8016.94 / fee 1286.97 / ads 1262.89 / acct 58.16 / all-in 2608.02 /
+32.53%), and was **falsified** — a one-cent bump on one April Fee row (in a scratchpad copy, since
+deleted) exits 1 and names the drift per-period and grand. Independent payout cross-check: $5,166.80
+across 26 deposits. Dev e2e ran **inside a rolled-back transaction** with baselines proven before
+and after: `{lines 0, overhead 0, priced 0}` → unchanged after a dry run against the real April file
+→ `{343, 2, 18}` inside the real import → `{0, 0, 0}` after rollback; dry-run and real reports
+identical; all six unmatched carry `has_sale_row: true`, matching the hand analysis. Suites **737
+backend / 78 MCP / 159 frontend**, both completeness guards green, migration round-trips at a single
+head. `tsc` 21 / eslint 88 — the recorded `TYPECHECK-1` baseline, nothing new on touched files.
+
+**Access.** Import route carries three gates (`routers/imports.py:76-90`): `require_capability(
+VIEW_COSTS)` on the endpoint (not the router, so the existing order-CSV import keeps its role-only
+gate), `require_role(OWNER, MANAGER)`, and `assert_shop_access` inside `_get_etsy_shop`, which also
+rejects a non-Etsy or inactive shop. Classified `view_costs-403` and recorded in
+`INDIRECT_SHOP_ROUTES` because `shop_id` travels as a form field, invisible to the `{shop_id}` path
+scan. **The statement lines table has no read surface at all** — deliberately: rule 5's "queryable
+later" is satisfied by the stored `order_external_id`, and shipping no endpoint keeps the money
+surface minimal. The MCP tool adds no authorization of its own; it drives the same REST endpoint.
+
+**Not verified, and why.** Idempotency cases (b) overlapping periods and (c) statement re-issue are
+**fixture-only** — dev holds no May orders, so a May credit against an April order would have
+nothing to land on. Case (a), legitimate byte-identical duplicate rows, **is** proven on real data
+(the April file contains 13 such rows; re-import kept 343 lines / $110.80 / 2 overhead rows). Both
+(b) and (c) exercise themselves on the first multi-month production import — watch for them then.
+The negative-fee path is unit-tested but not exercised on real data, because the two credit-only
+orders are Dec-2025 and absent from dev; it will fire on prod, where those orders exist.
+
+**Deliberately out of scope:** `Refund` rows are parsed, stored, counted and reported but booked
+nowhere (`test_refund_rows_do_not_move_the_fee_or_the_overhead`); currency is **asserted, never
+converted** (a non-USD row aborts, naming the row — a silently converted fee would be unauditable);
+`Buyer Fee` gets its own bucket, in neither fees nor overhead, excluded from base (−$1.12 over six
+months). The reconciliation harness lives at `backend/scripts/reconcile_etsy_statement.py`, takes a
+directory and an optional `--expect <local JSON>` that stays out of git with the CSVs — so it
+**cannot** run in CI, correctly, but without `--expect` it still verifies the bucket partition on
+whatever files it is given. It is an operator gate run before an import, not a CI gate.
+
+**Follow-ups filed below:** `STATEMENT-UI-TESTS`, `ETSY-REFUNDS`, `AGENT-GRANT-REPLACE`,
+`AGENT-SCOPE-AUTOGRANT`.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -4310,13 +4446,17 @@ in this document where applicable, to avoid duplication.
 | SETTINGS-TEST-1 | ~~`SettingsPage.test.tsx` — 9 failing frontend tests~~ **(test half RESOLVED by FX-CONVERSION)**; lint/tsc debt remains | Surfaced during MAT-6 (2026-08-02): 9 SettingsPage tests erroring at render. Root cause found + fixed in FX-CONVERSION (2026-08-03) — the `useAppSettings` mock was stale since WB-1; the FX card needed it, so it's fixed and those 9 are green (156 frontend pass). **Remaining:** `npm run lint` ~88 errors + `tsc` 21 errors across untouched files — pre-existing, fold into TYPECHECK-1 (same frontend-health cleanup). |
 | BOM-QTY-PRECISION | `bom_items.qty_per_unit` is `Numeric(8,2)` — quantities round to 2dp | Surfaced during the BOM pilot (2026-08-02): a 3.425 m cut length stored as 3.43 (+8 kop). The `qty > 0` CheckConstraint means a sub-0.01 quantity is **rejected loudly**, not silently zeroed — so this is a precision/UX nit, not a correctness hole. Mitigated for now by the convention rule (pick a unit where per-product qty is comfortably ≥ 0.01 — see `docs/warehouse/bom-intake.md`). A `Numeric(_,3)` bump is a later micro-migration only if precision-sensitive materials appear. |
 | SVC-MATERIAL-NONSTOCK | Service materials (cutting/sewing) bleed negative stock on every ship | Surfaced during the BOM pilot (2026-08-02). Cutting/sewing are modelled as materials (there is no labour/service concept), so `order_consumption_service` decrements them on every shipment — consumption runs regardless of currency; only the cost snapshot is skipped on currency mismatch — driving stock negative and adding a "stock went negative" warning per order. Noise, not breakage (the low-stock dashboard card is packaging-only). Real fix: a "non-stocked / service" flag on `Material` so flagged rows don't decrement. Bundle with the labour-model decision. |
+| STATEMENT-UI-TESTS | `StatementImportTab.tsx` ships with **zero tests** | From STATEMENT-IMPORT (2026-08-04). The UI shipped (`components/imports/StatementImportTab.tsx`, wired as a second tab in `ImportsPage.tsx`, `importsApi.importEtsyStatement`, `useImportEtsyStatement`) but frontend tests went 159 → 159. `ImportsPage` had no tests before either, so this is inherited debt rather than a regression — but a component was added to an untested page and left untested. Uncovered: the report rendering, the three conditional lists, and the error-extraction helper. The money path underneath **is** covered (737 backend / 78 MCP). Deliberately deferred as the smallest of the sprint's four gaps; fold into the frontend-health cleanup alongside `TYPECHECK-1` and `SETTINGS-TEST-1`. |
+| ETSY-REFUNDS | Etsy refunds reduce fees but not revenue → a refunded order overstates profit twice | Surfaced by STATEMENT-IMPORT's credit-only decision (2026-08-04). `Refund` rows are parsed, stored, counted and reported but booked nowhere, so revenue is untouched — while the fee credits *do* reach the order through their own Fee/VAT rows. A fully refunded order therefore carries **full revenue plus a negative `platform_fee`**, which reads as income. Two known cases so far (3902046506, 3908813660 — Dec-2025 sales refunded in January), surfaced in the `credit_only_orders` report block rather than hidden. The fix is an Etsy equivalent of `SHOPIFY-REFUNDS` Model 2 (dated `order_refunds` records netted in the refund's month); the statement line table already stores everything such a sprint would need. Sequence after the first production statement import, when the real volume of refunded orders is visible. |
+| AGENT-GRANT-REPLACE | Re-provisioning the MCP agent with `--shops` would silently revoke its Etsy access | Found while verifying prod MCP grants during STATEMENT-IMPORT (2026-08-04). The prod agent user currently holds all three shops (provisioned `--all-shops`, `docs/integrations/mcp-server.md:64`), `view_costs`, and role MANAGER — so the statement MCP tool works on prod and **no grant change is needed**. But `set_shop_access` **replaces** the grant set rather than adding to it, so a future `provision_agent_user.py --shops <one>` would drop the others without warning, and the statement tool would start returning 403 with no obvious cause. Any re-provision must use `--all-shops` or name every shop. Worth a warning line in the runbook. |
+| AGENT-SCOPE-AUTOGRANT | The MCP agent's reach grows automatically as shops are added | Found alongside the above (2026-08-04). Because the agent holds every active shop it counts as "effectively unrestricted", so a newly created shop **auto-grants to it** (`access_service.py:347`). This is the documented USER-ACCESS-1 rule working as designed for human managers — but for an automated actor it means scope expands without anyone deciding, and a shop created for an unrelated purpose becomes agent-writable on creation. Not a defect; a property worth an explicit decision. Options: pin the agent's grants so it is not "effectively unrestricted", or accept and document it. Revisit when a fourth shop is created. |
 | FEE-UI-SHOPIFY-ONLY | The `fee_percent` input renders **only for SHOPIFY shops**, nested inside the credentials tab | Found in the Cowork prod smoke (2026-08-04). `Shop.fee_percent` is a generic column, but the UI puts its input inside the **Platform API** tab's Shopify branch; on an ETSY shop that tab renders "No API configuration needed for ETSY." and **no fee field at all**, with no explanation. Three consequences: (a) a flat rate cannot be set for an Etsy or Manual shop through the UI — whether the backend still accepts one is **unverified**; (b) a money-config field lives inside a credentials tab, so "where do I set the fee?" has no discoverable answer for a non-Shopify shop; (c) **silver lining** — this makes STATEMENT-IMPORT's rule 13 ("never set `fee_percent` on an Etsy shop") structurally enforced rather than merely documented, so the flat-% and statement paths cannot collide on Etsy. Decide whether (a)+(b) are intended; if yes, say so in the UI. Related: a no-op round-trip save on a **Shopify** shop is not obviously safe to test, because the same tab carries "Leave empty to keep existing" token fields whose keep-existing path would silently kill the live sync if wrong — that path has never been exercised deliberately and deserves a test. |
 | FX-AUDIT-SEMANTICS | `fx_rate_audit` records *fetches*, not rate *changes* | Surfaced during the 2026-08-04 deploy. The FX refresh writes **three rows per run** (one per `app_settings` key), and it runs on **every backend start** as well as daily — the deploy took the table 6 → 9 rows while the rate itself did not move (44.7876 → 44.7876; only `fx_fetched_at` changed). Not a bug (the rows are honest records of what was written), but a table named "audit" that is mostly no-op churn makes the question "when did the rate actually change?" a diff rather than a read, and every future release adds three more rows. Fix: write an audit row only when the rate value changes, or split "last fetch" metadata from the rate history. Low-priority; bundle with any FX-touching work. Note `historical-COGS-recompute` does **not** depend on this — NBU's `date=` parameter supplies per-date rates directly. |
 | PROD-BUILD-NO-TYPECHECK | The prod frontend image is built with **no type checking at all**, and the repo does not say so | Confirmed on the server during the 2026-08-04 deploy: `frontend/Dockerfile.deploy` runs `npx vite build` directly and carries a comment stating it deliberately skips `tsc -b` because `main` does not pass it. This settles TYPECHECK-1's open inference — but it also **reframes TYPECHECK-1 from cosmetic cleanup to a real safety gap**: the only gate that would stop a type error reaching prod is switched off on purpose, and the local gate documented in CLAUDE.md was itself a no-op (`tsc --noEmit` against a solution `tsconfig.json` with `"files": []`) until the real command was identified. A type error could therefore have shipped to prod undetected for months. Two parts: (a) fold into TYPECHECK-1 — fix the 21 errors, then **re-enable `tsc` in `Dockerfile.deploy`** so the gate is real; (b) document in CLAUDE.md § Server Deployment that the `.deploy` Dockerfiles differ from the repo ones in **two** ways (idlaser-less **and** typecheck-less) — today only the idlaser difference is written down, and `Dockerfile.deploy` is a server-only file, so this fact is invisible to anyone reading the repo. |
 | STARTDEV-UNTRACK | `start-dev.sh` is **tracked** in git, contradicting AI_ONBOARDING §9 | Found by CC during the 2026-08-04 merge — a `git rebase` refused to run because of unstaged changes to it, and it shows permanently dirty in `git status`. AI_ONBOARDING §9 asserts the file is "intentionally not committed", which was simply never true. Fix: `git rm --cached start-dev.sh` + a `.gitignore` entry, and correct the §9 wording so the doc matches reality. Two-line change; do it in the next docs-touching commit. |
 | BOM-COSTQUERY-DEADWIRE | `BomEditor.tsx` never renders the server-computed BOM cost | Surfaced during BOM-WASTE-1 (2026-08-02). `useBomCost`'s `.data` is never displayed — its only uses are `refetch()` + `isFetching` for the "Refresh cost" button spinner (`BomEditor.tsx:214-221`); the footer always shows the client-side `liveCost`. So `compute_bom_cost` never reaches that screen, and "Refresh cost" refetches a number nobody shows. BOM-WASTE-1 made the client math waste-inclusive so the footer is now correct; rewiring the footer to server data was deliberately NOT done because it would kill the live preview of unsaved rows. File: either render the server cost for saved state alongside the live preview, or drop the dead query + button. Low-priority. |
-| SHOP-FEE-1 | Per-shop `fee_percent` → `order.platform_fee` (Shopify + WB) | **MERGED to `main` 2026-08-04 (`6130eaf`, rebased from `2e502e8` — patch-identical per `git range-diff`). Awaiting prod deploy + first smoke; no rate set on any shop.** Originally built 2026-08-03 on `feat/shop-fee`. `Shop.fee_percent` Numeric(5,2) nullable → `platform_fee` computed at order creation from total_price (polling sync + webhook), passed keyword-only to `create_order` (off the public POST body), censored for non-VIEW_COSTS, OWNER-only dry-run backfill endpoint. No behaviour change until a rate is set. **Waiting on Sergii's WB net-received figures** to set the Lamamarka Shopify rate (Shopify+WB ≈ 8% headline) + manual smoke. The `.gitignore` secrets guard and the `docs/integrations/mcp-server.md` runbook fixes shipped in the same range (`9810a8c`, `228b016`). Etsy was out of SHOP-FEE-1 scope — it is closed by STATEMENT-IMPORT instead. |
-| STATEMENT-IMPORT | Import Etsy payment-account statement CSV → exact per-order fees + ads | **Decided 2026-08-04** after the Etsy fee analysis (CC over Jan–Jun statements, 210 orders): **Etsy takes 32.5% all-in** — fees+VAT **19.4%** (stable; incl. ~5.4% VAT on fees) + advertising **13.1%** (variable; the entire monthly swing); offsite-ads orders 34% vs 16% non-offsite (bimodal → a flat % is a compromise). Build an importer: parse the statement CSV, match fee/ad lines to orders by `Order #`, set **exact `order.platform_fee`** (transaction/processing/listing/shipping + VAT + offsite ads) and book **daily Etsy Ads (+VAT) → shop overhead** (period marketing). Idempotent re-import. Complements SHOP-FEE-1 (flat % stays for Shopify/WB). **Parser spec:** SIGNED sums NOT abs() (credits/refunds are positive), partition Marketing offsite-vs-Etsy-Ads with a loud assert, handle Deposit + Buyer Fee types. Statement CSVs are financial/PII — keep OUT of the repo (`docs/finance/` is git-ignored as of `9810a8c`). **Split revised 2026-08-04: ALL advertising — offsite AND daily Etsy Ads — books to marketing overhead; `platform_fee` carries `Fee` + `VAT` rows only.** This supersedes the "offsite per-order → platform_fee" wording above. **`task.md` written 2026-08-04**, deliberately under-specified with 8 Open Questions for CC to resolve in plan mode; the load-bearing ones are the idempotency key (the CSV has no line id and byte-identical rows legitimately repeat — a composite hash collapses them and under-books the fee) and whether VAT-on-advertising follows the fee bucket or the ad bucket (it moves money between the 19.4% / 13.1% targets — Sergii decides). Numbers + methodology now live in the repo at `docs/finance/etsy-fee-analysis-2026-h1.md`, which is the sprint's reconciliation gate. |
+| SHOP-FEE-1 | Per-shop `fee_percent` → `order.platform_fee` (Shopify + WB) | **MERGED to `main` AND DEPLOYED to prod 2026-08-04** (`6130eaf`, rebased from `2e502e8` — patch-identical per `git range-diff`; migration `e1a4c7b93d28` applied). **UI smoke passed** (fee input renders, no-op save round-trips, order payment summary intact). **Still functionally unverified: no shop has a rate, so the fee-computation path has never executed.** Originally built 2026-08-03 on `feat/shop-fee`. See the Release status block below for the full record. `Shop.fee_percent` Numeric(5,2) nullable → `platform_fee` computed at order creation from total_price (polling sync + webhook), passed keyword-only to `create_order` (off the public POST body), censored for non-VIEW_COSTS, OWNER-only dry-run backfill endpoint. No behaviour change until a rate is set. **Waiting on Sergii's WB net-received figures** to set the Lamamarka Shopify rate (Shopify+WB ≈ 8% headline) + manual smoke. The `.gitignore` secrets guard and the `docs/integrations/mcp-server.md` runbook fixes shipped in the same range (`9810a8c`, `228b016`). Etsy was out of SHOP-FEE-1 scope — it is closed by STATEMENT-IMPORT instead. |
+| STATEMENT-IMPORT | Import Etsy payment-account statement CSV → exact per-order fees + ads | **BUILT 2026-08-04 — see the closure entry above. Branch `feat/statement-import`, six commits, NOT merged/deployed; migration head `f2b8d6c40a15`.** The rest of this row records the pre-build decision and is superseded by the closure entry where they differ. **Decided 2026-08-04** after the Etsy fee analysis (CC over Jan–Jun statements, 210 orders): **Etsy takes 32.5% all-in** — fees+VAT **19.4%** (stable; incl. ~5.4% VAT on fees) + advertising **13.1%** (variable; the entire monthly swing); offsite-ads orders 34% vs 16% non-offsite (bimodal → a flat % is a compromise). Build an importer: parse the statement CSV, match fee/ad lines to orders by `Order #`, set **exact `order.platform_fee`** (transaction/processing/listing/shipping + VAT + offsite ads) and book **daily Etsy Ads (+VAT) → shop overhead** (period marketing). Idempotent re-import. Complements SHOP-FEE-1 (flat % stays for Shopify/WB). **Parser spec:** SIGNED sums NOT abs() (credits/refunds are positive), partition Marketing offsite-vs-Etsy-Ads with a loud assert, handle Deposit + Buyer Fee types. Statement CSVs are financial/PII — keep OUT of the repo (`docs/finance/` is git-ignored as of `9810a8c`). **Split revised 2026-08-04: ALL advertising — offsite AND daily Etsy Ads — books to marketing overhead; `platform_fee` carries `Fee` + `VAT` rows only.** This supersedes the "offsite per-order → platform_fee" wording above. **`task.md` written 2026-08-04**, deliberately under-specified with 8 Open Questions for CC to resolve in plan mode; the load-bearing ones are the idempotency key (the CSV has no line id and byte-identical rows legitimately repeat — a composite hash collapses them and under-books the fee) and whether VAT-on-advertising follows the fee bucket or the ad bucket (it moves money between the 19.4% / 13.1% targets — Sergii decides). Numbers + methodology now live in the repo at `docs/finance/etsy-fee-analysis-2026-h1.md`, which is the sprint's reconciliation gate. |
 
 ---
 
