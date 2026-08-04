@@ -36,6 +36,7 @@ from services.etsy_statement_parser import (
 from services.etsy_statement_service import (
     ACCOUNT_FEE_OVERHEAD_MATERIAL,
     ADS_OVERHEAD_MATERIAL,
+    StatementChecksumError,
     import_statement,
 )
 
@@ -201,6 +202,17 @@ class FakeSession:
             return _Result(
                 one=(sum((l.net_signed for l in hit), Decimal("0")), len(hit))
             )
+
+        if cols == ("bucket", "sum", "count"):
+            period = _DATE_LITERAL.search(sql).group(1)
+            grouped: dict[str, list] = {}
+            for l in self.lines:
+                if str(l.period_month) != period:
+                    continue
+                agg = grouped.setdefault(l.bucket, [Decimal("0"), 0])
+                agg[0] += l.net_signed
+                agg[1] += 1
+            return _Result(rows=[(b, t, c) for b, (t, c) in grouped.items()])
 
         if cols == ("OverheadMaterialReceipt",):
             ref = re.search(r"'(etsy-stmt:[^']+)'", sql).group(1)
@@ -760,3 +772,66 @@ async def test_the_service_default_is_a_rehearsal():
 
     assert report.dry_run is True
     db.rollback.assert_awaited_once()
+
+
+# ---------- partition checksum ----------
+
+
+@pytest.mark.asyncio
+async def test_checksum_proves_the_stored_rows_partition():
+    """Computed from what was WRITTEN, not from the parsed file — that is the
+    half the offline reconciliation harness cannot cover."""
+    order = _order(APRIL_ORDER)
+    db = FakeSession([order])
+
+    report = await _run(db, _shop(), *APRIL_ROWS)
+
+    checksum = report.checksum
+    assert checksum.balanced is True
+    assert checksum.unclassified_buckets == []
+    assert checksum.stored_line_count == report.lines_imported == len(APRIL_ROWS)
+    # This period's fee contribution — not order.platform_fee, which aggregates
+    # every period. Here they coincide because only one period is loaded.
+    assert checksum.platform_fee_total == Decimal("2.40") == order.platform_fee
+    assert checksum.booked_cost_total == (
+        checksum.platform_fee_total
+        + report.ads_overhead_amount
+        + report.account_fee_overhead_amount
+    )
+    assert checksum.booked_cost_total == Decimal("12.20")
+
+
+@pytest.mark.asyncio
+async def test_a_bucket_that_stops_being_booked_aborts_the_import(monkeypatch):
+    """Falsification. Neutralise one booked set and the stored rows no longer
+    add up to the three buckets — which is precisely a fee going nowhere."""
+    import services.etsy_statement_parser as parser_module
+
+    monkeypatch.setattr(parser_module, "PLATFORM_FEE_BUCKETS", frozenset())
+    db = FakeSession([_order(APRIL_ORDER)])
+
+    with pytest.raises(StatementChecksumError, match="booked rows total"):
+        await _run(db, _shop(), *APRIL_ROWS)
+
+
+@pytest.mark.asyncio
+async def test_rows_that_fail_to_persist_abort_the_import():
+    """The read-back's own reason to exist: the parser counted N rows, the table
+    holds fewer. No check over the file can see this."""
+
+    class _LosesARow(FakeSession):
+        async def execute(self, stmt):
+            cols = tuple(
+                d.get("name") for d in getattr(stmt, "column_descriptions", [])
+            )
+            result = await super().execute(stmt)
+            if cols == ("bucket", "sum", "count"):
+                rows = list(result)
+                head = rows[0]
+                return _Result(rows=[(head[0], head[1], head[2] - 1), *rows[1:]])
+            return result
+
+    db = _LosesARow([_order(APRIL_ORDER)])
+
+    with pytest.raises(StatementChecksumError, match="are stored for the period"):
+        await _run(db, _shop(), *APRIL_ROWS)

@@ -72,6 +72,42 @@ class StatementFeeOverride(BaseModel):
     statement_platform_fee: Decimal
 
 
+class StatementPartitionChecksum(BaseModel):
+    """Proof, computed off the rows actually stored, that the money went where
+    the report says it went.
+
+    The reconciliation harness runs the same invariant over a FILE before an
+    import; this runs it over what the import WROTE, which is the half no
+    offline check can cover. It is a response field and an abort condition:
+    the buckets partition by construction, so an imbalance is a code defect, and
+    a committed import carrying `balanced: false` would be a receipt for a
+    broken booking.
+    """
+
+    stored_line_count: int = Field(
+        description="Rows now stored for this shop+period; must equal lines_imported"
+    )
+    booked_cost_total: Decimal = Field(
+        description="Every cost-bearing row in the period, summed from the DB"
+    )
+    platform_fee_total: Decimal = Field(
+        description=(
+            "THIS period's contribution to per-order fees. Not the sum of "
+            "order.platform_fee, which aggregates every period imported so far."
+        )
+    )
+    unclassified_buckets: list[str] = Field(
+        default=[],
+        description="Buckets that are neither booked nor deliberately unbooked",
+    )
+    balanced: bool = Field(
+        description=(
+            "booked_cost_total == platform_fee_total + ads_overhead_amount + "
+            "account_fee_overhead_amount, with nothing unclassified"
+        )
+    )
+
+
 class StatementImportReport(BaseModel):
     dry_run: bool = Field(
         description=(
@@ -105,6 +141,8 @@ class StatementImportReport(BaseModel):
     account_fee_overhead_amount: Decimal = Field(
         description="Booked to the monthly 'Etsy listing & account fees' row"
     )
+
+    checksum: StatementPartitionChecksum
 
     # Cross-checks, computed straight off the file — not booked anywhere.
     sales_count: int

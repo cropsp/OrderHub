@@ -42,6 +42,7 @@ import csv
 import hashlib
 import io
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -81,6 +82,20 @@ ADS_OVERHEAD_BUCKETS = frozenset(
 #: reconciliation could not tie.
 ACCOUNT_FEE_OVERHEAD_BUCKETS = frozenset(
     {BUCKET_FEE_ACCOUNT, BUCKET_VAT_FEE_ACCOUNT}
+)
+
+#: Every bucket that costs money and is booked somewhere.
+BOOKED_BUCKETS = (
+    PLATFORM_FEE_BUCKETS | ADS_OVERHEAD_BUCKETS | ACCOUNT_FEE_OVERHEAD_BUCKETS
+)
+
+#: Deliberately NOT booked to a fee or an overhead row. Sale and Tax establish
+#: the base; Deposit is the payout cross-check; Buyer Fee is buyer-paid; Refund
+#: revenue handling is a separate sprint. Named here, beside the booked sets, so
+#: that "this bucket is knowingly unbooked" is a decision on the record rather
+#: than the absence of one.
+UNBOOKED_BUCKETS = frozenset(
+    {BUCKET_SALE, BUCKET_TAX, BUCKET_DEPOSIT, BUCKET_BUYER_FEE, BUCKET_REFUND}
 )
 
 EXPECTED_CURRENCY = "USD"
@@ -353,6 +368,67 @@ def _classify(entry_type: str, title: str, order_external_id: str | None, fail) 
         )
 
     raise fail(f"unknown Type {entry_type!r}")
+
+
+@dataclass(frozen=True)
+class PartitionResult:
+    """Do the three booked buckets account for every booked row, exactly?
+
+    Costs are expressed as POSITIVE amounts here; statement rows carry them as
+    negatives. `balanced` is the whole point: it fails if a bucket belongs to two
+    booked sets (double-booking), to none (money going nowhere), or if a row's
+    bucket is neither booked nor knowingly unbooked.
+
+    Deliberately takes `(bucket, amount)` pairs rather than parsed lines, so the
+    same invariant can be run over a file before an import and over the rows
+    actually PERSISTED by one. Summing per line and summing per bucket group are
+    the same arithmetic.
+    """
+
+    line_count: int
+    platform_fee_total: Decimal
+    ads_total: Decimal
+    account_fee_total: Decimal
+    booked_total: Decimal
+    unclassified_buckets: tuple[str, ...]
+
+    @property
+    def balanced(self) -> bool:
+        return not self.unclassified_buckets and self.booked_total == (
+            self.platform_fee_total + self.ads_total + self.account_fee_total
+        )
+
+
+def partition_check(
+    rows: "Iterable[tuple[str, Decimal | None]]", line_count: int | None = None
+) -> PartitionResult:
+    """Sum `(bucket, net_signed)` pairs into the three booked buckets.
+
+    `line_count` defaults to the number of pairs, which is right when each pair
+    is one line; pass it explicitly when the pairs are already grouped.
+    """
+    zero = Decimal("0.00")
+    totals: dict[str, Decimal] = {}
+    counted = 0
+    for bucket, amount in rows:
+        counted += 1
+        totals[bucket] = totals.get(bucket, zero) + (amount or zero)
+
+    def cost(buckets) -> Decimal:
+        return (
+            -sum((v for k, v in totals.items() if k in buckets), zero)
+        ).quantize(zero)
+
+    return PartitionResult(
+        line_count=counted if line_count is None else line_count,
+        platform_fee_total=cost(PLATFORM_FEE_BUCKETS),
+        ads_total=cost(ADS_OVERHEAD_BUCKETS),
+        account_fee_total=cost(ACCOUNT_FEE_OVERHEAD_BUCKETS),
+        booked_total=cost(BOOKED_BUCKETS),
+        unclassified_buckets=tuple(
+            sorted(set(totals) - BOOKED_BUCKETS - UNBOOKED_BUCKETS)
+        ),
+    )
 
 
 def _derive_period(lines: list[StatementLine], filename: str) -> date:

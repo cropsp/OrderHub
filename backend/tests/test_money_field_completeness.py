@@ -79,6 +79,13 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "statement_platform_fee": "cost",
     "ads_overhead_amount": "cost",
     "account_fee_overhead_amount": "cost",
+    # STATEMENT-IMPORT partition checksum: the same money as the three fields
+    # above, re-summed from the stored rows to prove they partition. Same kind,
+    # same route, same verdict — `booked_cost_total` is deliberately not called
+    # `total_cost`, which is already classified here and would have inherited a
+    # verdict silently.
+    "booked_cost_total": "cost",
+    "platform_fee_total": "cost",
     "cost_price": "cost",
     "current_unit_cost": "cost",
     "material_current_unit_cost": "cost",

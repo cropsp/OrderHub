@@ -159,6 +159,23 @@ export default function StatementImportTab({ shops }: { shops: Shop[] }) {
               />
             </div>
 
+            {/* The booked buckets, re-summed from the stored rows. The import
+                aborts if this does not tie, so it is always green — displaying
+                it is what makes that a claim the operator can check. */}
+            <div className="rounded-2xl border border-zinc-800/60 bg-zinc-950/50 px-6 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+              <p className="text-[10px] uppercase tracking-widest font-black text-zinc-600 flex items-center gap-2">
+                <CheckCircle2 className="h-3.5 w-3.5 text-teal-500" />
+                Partition checksum
+              </p>
+              <p className="text-[11px] font-bold text-zinc-400 tabular-nums">
+                {report.checksum.stored_line_count} rows ·{' '}
+                {formatMoney(report.checksum.booked_cost_total)} ={' '}
+                {formatMoney(report.checksum.platform_fee_total)} fees +{' '}
+                {formatMoney(report.ads_overhead_amount)} ads +{' '}
+                {formatMoney(report.account_fee_overhead_amount)} account
+              </p>
+            </div>
+
             <div className="grid gap-4 sm:grid-cols-3 text-center">
               <CrossCheck
                 label="Base (sale − buyer tax)"

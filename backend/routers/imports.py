@@ -21,7 +21,7 @@ from routers.dependencies import (
 )
 from services.etsy_parser import parse_etsy_csv
 from services.etsy_statement_parser import StatementParseError
-from services.etsy_statement_service import import_statement
+from services.etsy_statement_service import StatementChecksumError, import_statement
 
 logger = get_logger("routers.imports")
 
@@ -124,6 +124,14 @@ async def import_etsy_statement(
         if not dry_run:
             await db.commit()
         return report
+    except StatementChecksumError as e:
+        # What was written does not partition the way the report would have
+        # claimed. Not the operator's data — the parser refuses anything it
+        # cannot classify — so this is a 500, and the figures go in the message
+        # because they are the whole diagnosis.
+        await db.rollback()
+        logger.error(f"[IMPORTS] {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     except StatementParseError as e:
         # A row we do not understand aborts the whole import by design: silently
         # dropping one is how fee under-booking hides. The message names the

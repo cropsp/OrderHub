@@ -217,6 +217,20 @@ export interface StatementFeeOverride {
   statement_platform_fee: number
 }
 
+/** Proof, computed off the rows the import actually stored, that the three
+ *  booked buckets account for every cost row exactly. An unbalanced import
+ *  aborts server-side, so `balanced` is always true in a report you can see —
+ *  it is shown anyway, because a checksum nobody displays proves nothing. */
+export interface StatementPartitionChecksum {
+  stored_line_count: number
+  booked_cost_total: number
+  /** THIS period's fee contribution — not the sum of order.platform_fee, which
+   *  aggregates every period imported so far. */
+  platform_fee_total: number
+  unclassified_buckets: string[]
+  balanced: boolean
+}
+
 /** Mirrors backend schemas/etsy_statement.py StatementImportReport. */
 export interface StatementImportReport {
   /** True: a rehearsal that was rolled back. Every other field is what a real
@@ -239,6 +253,8 @@ export interface StatementImportReport {
 
   ads_overhead_amount: number
   account_fee_overhead_amount: number
+
+  checksum: StatementPartitionChecksum
 
   sales_count: number
   statement_base_amount: number

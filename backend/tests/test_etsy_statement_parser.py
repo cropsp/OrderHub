@@ -23,6 +23,7 @@ from decimal import Decimal
 
 import pytest
 
+from services import etsy_statement_parser
 from services.etsy_statement_parser import (
     ACCOUNT_FEE_OVERHEAD_BUCKETS,
     ADS_OVERHEAD_BUCKETS,
@@ -41,6 +42,7 @@ from services.etsy_statement_parser import (
     PLATFORM_FEE_BUCKETS,
     StatementParseError,
     parse_statement_csv,
+    partition_check,
 )
 
 HEADER = 'Date,Type,Title,Info,Currency,Amount,"Fees & Taxes",Net,"Tax Details"'
@@ -445,3 +447,66 @@ def test_the_three_buckets_partition_every_booked_row():
         "only Sale and Tax should be unbooked here — a new unbooked bucket means "
         "money is going nowhere"
     )
+
+
+# ---------- partition invariant ----------
+
+
+def test_partition_check_balances_a_normal_file():
+    result = partition_check(
+        [
+            (BUCKET_FEE_ORDER, Decimal("-2.00")),
+            (BUCKET_VAT_FEE_ORDER, Decimal("-0.40")),
+            (BUCKET_ADS_ETSY, Decimal("-3.00")),
+            (BUCKET_VAT_ADS, Decimal("-0.60")),
+            (BUCKET_FEE_ACCOUNT, Decimal("-0.20")),
+            (BUCKET_SALE, Decimal("40.00")),
+            (BUCKET_DEPOSIT, Decimal("0.00")),
+        ]
+    )
+
+    assert result.platform_fee_total == Decimal("2.40")
+    assert result.ads_total == Decimal("3.60")
+    assert result.account_fee_total == Decimal("0.20")
+    assert result.booked_total == Decimal("6.20")
+    assert result.line_count == 7
+    assert result.balanced
+
+
+def test_partition_check_catches_a_bucket_that_is_booked_nowhere():
+    """The failure the whole check exists for: a bucket added to the parser and
+    to neither a booked set nor the unbooked set silently drops real money."""
+    result = partition_check(
+        [
+            (BUCKET_FEE_ORDER, Decimal("-2.00")),
+            ("mystery_new_bucket", Decimal("-9.99")),
+        ]
+    )
+
+    assert result.unclassified_buckets == ("mystery_new_bucket",)
+    assert not result.balanced
+
+
+def test_partition_check_catches_a_bucket_booked_twice(monkeypatch):
+    """Falsification: overlap the ads set into the fee set and the sums stop
+    tying, because the same rows are counted in two places."""
+    monkeypatch.setattr(
+        etsy_statement_parser,
+        "ADS_OVERHEAD_BUCKETS",
+        ADS_OVERHEAD_BUCKETS | {BUCKET_FEE_ORDER},
+    )
+
+    result = partition_check([(BUCKET_FEE_ORDER, Decimal("-2.00"))])
+
+    assert result.platform_fee_total == Decimal("2.00")
+    assert result.ads_total == Decimal("2.00")
+    assert result.booked_total == Decimal("2.00"), "each row is counted once here"
+    assert not result.balanced, "but twice across the buckets — that is the bug"
+
+
+def test_partition_check_can_be_given_a_grouped_line_count():
+    """The importer passes one pair per BUCKET, not per line, so the row count
+    has to come from the caller."""
+    result = partition_check([(BUCKET_FEE_ORDER, Decimal("-4.00"))], line_count=343)
+
+    assert result.line_count == 343

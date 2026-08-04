@@ -606,6 +606,13 @@ STATEMENT_REPORT = {
     "credit_only_orders": [],
     "ads_overhead_amount": "145.56",
     "account_fee_overhead_amount": "7.30",
+    "checksum": {
+        "stored_line_count": 343,
+        "booked_cost_total": "306.46",
+        "platform_fee_total": "153.60",
+        "unclassified_buckets": [],
+        "balanced": True,
+    },
     "sales_count": 24,
     "statement_base_amount": "949.69",
     "refunds_count": 1,

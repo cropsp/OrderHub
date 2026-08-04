@@ -42,6 +42,13 @@ inside its transaction and take the same locks for its duration; it is not a
 read-only operation. The rollback lives here, not in the caller, so the
 guarantee sits beside the writes it undoes.
 
+PARTITION CHECKSUM — every import ends by reading its own rows back and proving
+the three booked buckets account for all of them, exactly, with nothing
+unclassified and nothing lost between insert and read. The reconciliation
+harness runs the same invariant over a FILE before an import; this is the half
+that can only be checked after the write. A failure aborts (see
+`StatementChecksumError`).
+
 This service writes overhead receipts through the ORM rather than the overhead
 REST router on purpose: that router is append-only (no PATCH/DELETE exists, by
 design) and its create schema forbids a negative `total_cost`, but a
@@ -65,6 +72,7 @@ from models.shop import Shop
 from schemas.etsy_statement import (
     StatementImportReport,
     StatementFeeOverride,
+    StatementPartitionChecksum,
     StatementUnmatchedEntry,
     StatementUnmatchedOrder,
 )
@@ -79,11 +87,23 @@ from services.etsy_statement_parser import (
     ParsedStatement,
     StatementParseError,
     parse_statement_csv,
+    partition_check,
 )
 
 logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0.00")
+
+
+class StatementChecksumError(Exception):
+    """What was written does not partition the way the report claims.
+
+    Cannot happen from bad input — the parser refuses anything it cannot
+    classify, and the three booked bucket sets are disjoint by construction. It
+    can only mean a code defect (a bucket added to two sets, a bucket added to
+    none, rows lost between insert and read), which is exactly why it aborts
+    rather than annotating a committed import.
+    """
 
 #: Overhead materials this importer books into, created on first use. Matched by
 #: exact name (the table has no unique constraint on `name`, so a fuzzy lookup
@@ -222,6 +242,15 @@ async def import_statement(
 
     await db.flush()
 
+    checksum = await _partition_checksum(
+        db,
+        shop,
+        period,
+        ads_booked=ads_total,
+        account_booked=account_total,
+        lines_imported=len(parsed.lines),
+    )
+
     totals = _bucket_totals(parsed)
     logger.info(
         "[STATEMENT-IMPORT] shop=%s period=%s dry_run=%s lines=%d (replaced %d) "
@@ -262,6 +291,7 @@ async def import_statement(
         credit_only_orders=credit_only,
         ads_overhead_amount=ads_total,
         account_fee_overhead_amount=account_total,
+        checksum=checksum,
         sales_count=totals["sales_count"],
         statement_base_amount=totals["base"],
         refunds_count=totals["refunds_count"],
@@ -527,6 +557,83 @@ async def _book_overhead(
     return amount
 
 
+async def _partition_checksum(
+    db: AsyncSession,
+    shop: Shop,
+    period: date,
+    *,
+    ads_booked: Decimal,
+    account_booked: Decimal,
+    lines_imported: int,
+) -> StatementPartitionChecksum:
+    """Prove the booked buckets account for every cost row actually STORED.
+
+    Read back from the database rather than from the parsed file on purpose: the
+    reconciliation harness already checks the file, and the interesting failures
+    on this side are the ones only the write can produce — rows that did not
+    persist, or a bucket that reaches two overhead rows at once.
+
+    Raises `StatementChecksumError` on any drift; the caller's transaction is
+    then rolled back, so a broken import is never committed with a note attached.
+    """
+    rows = await db.execute(
+        select(
+            EtsyStatementLine.bucket,
+            func.sum(EtsyStatementLine.net_signed),
+            func.count(),
+        )
+        .where(
+            EtsyStatementLine.shop_id == shop.id,
+            EtsyStatementLine.period_month == period,
+        )
+        .group_by(EtsyStatementLine.bucket)
+    )
+    grouped = [(bucket, Decimal(total), count) for bucket, total, count in rows]
+
+    stored_line_count = sum(count for _, _, count in grouped)
+    result = partition_check(
+        ((bucket, total) for bucket, total, _ in grouped),
+        line_count=stored_line_count,
+    )
+
+    problems = []
+    if result.unclassified_buckets:
+        problems.append(
+            f"bucket(s) {list(result.unclassified_buckets)} are neither booked "
+            "nor deliberately unbooked — money is going nowhere"
+        )
+    parts = result.platform_fee_total + result.ads_total + result.account_fee_total
+    if result.booked_total != parts:
+        problems.append(
+            f"booked rows total {result.booked_total} but the three buckets sum "
+            f"to {parts}"
+        )
+    if result.ads_total != ads_booked or result.account_fee_total != account_booked:
+        problems.append(
+            f"overhead rows carry ads={ads_booked} account={account_booked} but "
+            f"the stored lines say ads={result.ads_total} "
+            f"account={result.account_fee_total}"
+        )
+    if stored_line_count != lines_imported:
+        problems.append(
+            f"{lines_imported} lines were parsed but {stored_line_count} are "
+            "stored for the period"
+        )
+
+    if problems:
+        raise StatementChecksumError(
+            f"Partition checksum failed for {period:%Y-%m}: " + "; ".join(problems)
+        )
+
+    return StatementPartitionChecksum(
+        stored_line_count=stored_line_count,
+        booked_cost_total=result.booked_total,
+        platform_fee_total=result.platform_fee_total,
+        unclassified_buckets=list(result.unclassified_buckets),
+        balanced=True,
+    )
+
+
 async def _get_or_create_overhead_material(
     db: AsyncSession, name: str
 ) -> OverheadMaterial:
@@ -566,4 +673,4 @@ def _bucket_totals(parsed: ParsedStatement) -> dict:
     }
 
 
-__all__ = ["import_statement", "StatementParseError"]
+__all__ = ["import_statement", "StatementChecksumError", "StatementParseError"]

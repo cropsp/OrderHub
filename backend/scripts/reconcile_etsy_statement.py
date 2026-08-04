@@ -44,7 +44,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from services.etsy_statement_parser import (  # noqa: E402
     ACCOUNT_FEE_OVERHEAD_BUCKETS,
     ADS_OVERHEAD_BUCKETS,
-    BUCKET_BUYER_FEE,
     BUCKET_DEPOSIT,
     BUCKET_REFUND,
     BUCKET_SALE,
@@ -52,16 +51,10 @@ from services.etsy_statement_parser import (  # noqa: E402
     PLATFORM_FEE_BUCKETS,
     StatementParseError,
     parse_statement_csv,
+    partition_check,
 )
 
 ZERO = Decimal("0.00")
-
-#: Buckets deliberately not booked to a fee or an overhead row. Sale and Tax
-#: establish the base; Deposit is the payout cross-check; Buyer Fee is
-#: buyer-paid; Refund revenue handling is a separate sprint.
-UNBOOKED_BUCKETS = frozenset(
-    {BUCKET_SALE, BUCKET_TAX, BUCKET_DEPOSIT, BUCKET_BUYER_FEE, BUCKET_REFUND}
-)
 
 
 def _booked(lines, buckets) -> Decimal:
@@ -91,27 +84,24 @@ def summarise(lines) -> dict:
 
 
 def check_partition(period: str, lines, failures: list[str]) -> None:
-    booked = (
-        PLATFORM_FEE_BUCKETS | ADS_OVERHEAD_BUCKETS | ACCOUNT_FEE_OVERHEAD_BUCKETS
-    )
-    known = booked | UNBOOKED_BUCKETS
-    stray = {l.bucket for l in lines} - known
-    if stray:
+    """The same invariant the importer enforces on what it wrote — one
+    definition, in `services.etsy_statement_parser.partition_check`, run here
+    over the file and there over the persisted rows."""
+    result = partition_check((l.bucket, l.net_signed) for l in lines)
+
+    if result.unclassified_buckets:
         failures.append(
-            f"{period}: bucket(s) {sorted(stray)} are neither booked nor "
-            "deliberately unbooked — money is going nowhere"
+            f"{period}: bucket(s) {list(result.unclassified_buckets)} are neither "
+            "booked nor deliberately unbooked — money is going nowhere"
         )
 
-    total = sum((l.net_signed for l in lines if l.bucket in booked), ZERO)
     parts = (
-        _booked(lines, PLATFORM_FEE_BUCKETS)
-        + _booked(lines, ADS_OVERHEAD_BUCKETS)
-        + _booked(lines, ACCOUNT_FEE_OVERHEAD_BUCKETS)
+        result.platform_fee_total + result.ads_total + result.account_fee_total
     )
-    if -total != parts:
+    if result.booked_total != parts:
         failures.append(
             f"{period}: the three booked buckets sum to {parts} but the booked "
-            f"rows total {-total}"
+            f"rows total {result.booked_total}"
         )
 
 
