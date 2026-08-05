@@ -120,7 +120,7 @@ export interface Order {
   cogs_basis_currency: string | null
   shipping_np_cost: number | null
   platform_fee: number | null
-  /** ORDER-SHIPPING-1: what the customer paid, decomposed —
+  /** ORDER-SHIPPING-1/2: what the customer paid, decomposed —
    *    total_price = Σ(qty × unit_price) − discount_total + shipping_revenue + tax_total
    *  `shipping_revenue` is what the CUSTOMER was charged, the revenue twin of
    *  `shipping_np_cost` above (what we pay Nova Poshta). `discount_total` is
@@ -129,6 +129,14 @@ export interface Order {
    *  neither do Shopify orders imported before the backfill ran. Never render a
    *  null as 0.00; see DetailFinance's derived-row fallback. */
   shipping_revenue: number | null
+  /** ORDER-SHIPPING-2: how much of the shipping charge was given away, positive.
+   *  NOT a term in the identity above — `shipping_revenue` is already net of it,
+   *  so subtracting it again double-counts. Render it as an annotation on the
+   *  shipping figure, never as its own arithmetic row. It exists because a 0.00
+   *  shipping charge cannot say whether a promo was given. */
+  shipping_discount: number | null
+  /** The discount on the GOODS only. Before ORDER-SHIPPING-2 this also folded in
+   *  shipping promos, which made a free-shipping order look like a markdown. */
   discount_total: number | null
   tax_total: number | null
   shipping_name: string | null

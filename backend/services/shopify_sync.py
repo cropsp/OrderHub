@@ -29,7 +29,19 @@ from services.catalog_service import CatalogService
 from services.encryption_service import decrypt_value
 from services.order_service import compute_platform_fee, create_order
 
-SHOPIFY_API_VERSION = "2024-04"
+# ORDER-SHIPPING-2: this was pinned to "2024-04" and had been fiction for a long
+# time. Shopify supports a version for roughly 12 months and then serves requests
+# for a sunset version with the OLDEST SUPPORTED one instead, so every call this
+# client made was answered by 2025-10 — confirmed via the `X-Shopify-API-Version`
+# response header, which echoes 2025-10 for a 2024-04 request and echoes itself
+# for any supported version. Pinned to what is actually served, so the constant
+# can be reasoned from. Behaviourally a no-op at the time of the change.
+#
+# This matters beyond tidiness: the ORDER-SHIPPING-1 reasoning about
+# `ShippingLine.discountedPriceSet` rested on being on 2024-04, and was wrong for
+# exactly this reason. Any future claim of the form "this field behaves like X on
+# our version" must be checked against the header, not against this constant.
+SHOPIFY_API_VERSION = "2025-10"
 
 # Orders per page. Shopify caps `first` at 250; 50 keeps per-page query cost well
 # under the default 1000-point bucket, leaving headroom for the nested lineItems.
@@ -76,6 +88,10 @@ query GetOrders($first: Int!, $after: String, $query: String) {
             amount
           }
         }
+        # Kept for the no-shipping-lines fallback only. This is the PRE-discount
+        # shipping charge: on a free-shipping order it reports what the carrier
+        # rate came to, not what the customer paid. ORDER-SHIPPING-2 reads the
+        # shipping lines below instead.
         totalShippingPriceSet {
           shopMoney {
             amount
@@ -89,6 +105,30 @@ query GetOrders($first: Int!, $after: String, $query: String) {
         totalTaxSet {
           shopMoney {
             amount
+          }
+        }
+        # ORDER-SHIPPING-2 — shipping billed vs shipping given away. `first: 10`
+        # because orders here carry at most 2 lines (7 such orders store-wide,
+        # all 2025); 10 is headroom, not an expectation.
+        #
+        # `discountedPriceSet` is what the customer was actually billed and
+        # `originalPriceSet` what the rate was; their difference is the shipping
+        # promo, which `totalDiscountsSet` ALSO counts. Reading both is what lets
+        # the two kinds of discount be told apart.
+        shippingLines(first: 10) {
+          edges {
+            node {
+              originalPriceSet {
+                shopMoney {
+                  amount
+                }
+              }
+              discountedPriceSet {
+                shopMoney {
+                  amount
+                }
+              }
+            }
           }
         }
         note
@@ -261,11 +301,19 @@ def check_order_balance(
                   order, and post-hoc order edits move lines without moving the
                   order totals.
 
-    The known future breaker of "items" is a cart-level FREE SHIPPING discount:
-    `ShippingLine.discountedPriceSet` only folds those in from API version
-    2024-07, and this client pins 2024-04 (SHOPIFY_API_VERSION above). No such
-    discount exists in the data today — every discountApplication on record
-    targets LINE_ITEM, never SHIPPING_LINE — but a future promo would land here.
+    The known breaker of "items" was a cart-level FREE SHIPPING discount, and it
+    is what caught the ORDER-SHIPPING-2 defect on 91890_1815 and 91890_1829 —
+    those two orders and nothing else out of 870. This check is left EXACTLY as
+    it was: it flagged a real defect and nothing spurious, which is the strongest
+    evidence it is calibrated right.
+
+    (The reasoning recorded here before ORDER-SHIPPING-2 was wrong twice over. It
+    said `ShippingLine.discountedPriceSet` folds shipping promos in only from API
+    2024-07 while this client pinned 2024-04 — but the pin never bound, Shopify
+    had long been serving 2025-10, and the field was already net. It also said no
+    such discount existed in the data; two did. Both mappers now subtract the
+    shipping promo out of `discount_total`, so a free-shipping order balances on
+    both checks instead of tripping "items".)
 
     Callers store the figures regardless and report the reason: the imbalance is
     information about an order, not grounds for refusing to import it.
@@ -293,59 +341,150 @@ def check_order_balance(
     return None
 
 
+def _shipping_from_lines(
+    lines: list, original_key: str, discounted_key: str, money_key: str
+) -> tuple[Optional[Decimal], Optional[Decimal]]:
+    """(billed, given away) from a list of shipping lines, or (None, None).
+
+    Shared by both mappers because the arithmetic is the same on either side of
+    the GraphQL/REST divide and only the key spellings differ — the whole point
+    of ORDER-SHIPPING-1 rule 3, applied one level down.
+
+    Returns None for BOTH when `lines` is None, which is the caller's signal that
+    the payload never carried shipping lines (an old fixture, a partial webhook)
+    as opposed to an order that genuinely has none. An empty list is the latter
+    and yields (0, 0): Shopify says there were no shipping lines, so nothing was
+    charged and nothing was given away.
+    """
+    if lines is None:
+        return None, None
+
+    original = Decimal("0")
+    discounted = Decimal("0")
+    for line in lines:
+        if not line:
+            continue
+        # Both spellings of the same number: GraphQL nests every money value in a
+        # `…Set { shopMoney { amount } }`, REST offers a bare string alongside the
+        # same nested set. Prefer the nested one, fall back to the bare.
+        raw_original = ((line.get(original_key) or {}).get(money_key) or {}).get("amount")
+        raw_discounted = ((line.get(discounted_key) or {}).get(money_key) or {}).get("amount")
+        original += _to_decimal(raw_original if raw_original is not None else line.get("price"))
+        discounted += _to_decimal(
+            raw_discounted if raw_discounted is not None else line.get("discounted_price")
+        )
+    return discounted, original - discounted
+
+
 def extract_money_breakdown(node: dict) -> Dict[str, Optional[Decimal]]:
-    """Pull the ORDER-SHIPPING-1 figures out of a GraphQL order node.
+    """Pull the ORDER-SHIPPING-1/2 figures out of a GraphQL order node.
 
     Shared by the sync mapper and the backfill so the two can never map the same
     payload differently. `subtotal` is returned for the balance check only and is
     never stored.
+
+        shipping_revenue  = SUM(shippingLines[].discountedPriceSet)
+        shipping_discount = SUM(originalPriceSet - discountedPriceSet)
+        discount_total    = totalDiscountsSet - shipping_discount
+        tax_total         = totalTaxSet
+
+    ORDER-SHIPPING-2 changed the first three. `totalShippingPriceSet` is the
+    PRE-discount charge and `totalDiscountsSet` counts shipping promos alongside
+    item promos, so reading them verbatim stored a shipping figure the customer
+    never paid AND booked the shipping giveaway as an item discount — two wrong
+    numbers that happened to cancel in the card's identity. Both had to move.
+
+    `discount_total` is therefore now the ITEM discount alone.
     """
     def _amount(field: str) -> Optional[Decimal]:
         return _to_decimal_or_none(
             ((node.get(field) or {}).get("shopMoney") or {}).get("amount")
         )
 
+    # `None` (key absent) and `[]` (no shipping lines) mean different things here;
+    # see _shipping_from_lines. `.get("shippingLines")` returning None must NOT
+    # be collapsed to an empty list.
+    raw_lines = node.get("shippingLines")
+    edges = None if raw_lines is None else [
+        (edge.get("node") if edge else None) or {} for edge in (raw_lines.get("edges") or [])
+    ]
+    shipping_revenue, shipping_discount = _shipping_from_lines(
+        edges, "originalPriceSet", "discountedPriceSet", "shopMoney"
+    )
+
+    if shipping_revenue is None:
+        # No shipping lines in the payload. `totalShippingPriceSet` is the best
+        # available answer and is exactly right whenever no shipping promo
+        # applied — which is every order but two, store-wide. The discount stays
+        # NULL rather than 0.00: we cannot see the split, and guessing "no promo"
+        # is the same class of defect this sprint removes.
+        shipping_revenue = _amount("totalShippingPriceSet")
+
+    discount_total = _amount("totalDiscountsSet")
+    if discount_total is not None and shipping_discount is not None:
+        discount_total -= shipping_discount
+
     return {
-        "shipping_revenue": _amount("totalShippingPriceSet"),
+        "shipping_revenue": shipping_revenue,
         # Shopify reports discounts POSITIVE; keep that sign, subtract at render.
-        "discount_total": _amount("totalDiscountsSet"),
+        "shipping_discount": shipping_discount,
+        "discount_total": discount_total,
         "tax_total": _amount("totalTaxSet"),
         "subtotal": _amount("subtotalPriceSet"),
     }
 
 
 def extract_money_breakdown_rest(data: dict) -> Dict[str, Optional[Decimal]]:
-    """The same figures out of a REST webhook payload (ORDER-SHIPPING-1).
+    """The same figures out of a REST webhook payload (ORDER-SHIPPING-1/2).
 
     Deliberately parked next to `extract_money_breakdown` rather than inside the
     webhook router: the two Shopify ingest paths read structurally different JSON
-    for the same three values, and keeping the mappings adjacent is what stops
-    one being updated without the other.
+    for the same four values, and keeping the mappings adjacent is what stops one
+    being updated without the other.
 
       GraphQL                          REST / webhook
       -----------------------------    ------------------------------------
+      shippingLines[].originalPriceSet    shipping_lines[].price_set.shop_money
+                                          (or the bare `price`)
+      shippingLines[].discountedPriceSet  shipping_lines[].discounted_price_set
+                                          (or the bare `discounted_price`)
       totalShippingPriceSet.shopMoney  total_shipping_price_set.shop_money
       totalDiscountsSet.shopMoney      total_discounts        (a bare string)
       totalTaxSet.shopMoney            total_tax              (a bare string)
       subtotalPriceSet.shopMoney       subtotal_price         (a bare string)
 
-    Note the asymmetry: only shipping arrives as a money-set in REST. If that key
-    is absent we fall back to summing `shipping_lines[].discounted_price`, which
-    is the same number Shopify totals into it.
+    Verified against the live REST payloads for 91890_1815 (shipping discounted
+    49.00 -> 0.00) and 91890_1841 (undiscounted 9.00), so all four values are
+    reachable here — no honest-NULL fallback is needed for a complete payload.
+    `total_discounts` includes the shipping promo exactly as `totalDiscountsSet`
+    does, so the same subtraction applies.
+
+    ORDER-SHIPPING-2 note: this path was ALSO wrong before, in the same
+    direction. It preferred `total_shipping_price_set` — the gross figure — and
+    only fell back to summing the (net) `discounted_price`. The two paths
+    therefore agreed on ordinary orders and disagreed on precisely the ones that
+    mattered. Both now read the shipping lines first.
     """
-    shipping = _to_decimal_or_none(
-        ((data.get("total_shipping_price_set") or {}).get("shop_money") or {}).get("amount")
+    shipping_revenue, shipping_discount = _shipping_from_lines(
+        data.get("shipping_lines"), "price_set", "discounted_price_set", "shop_money"
     )
-    if shipping is None:
-        lines = data.get("shipping_lines") or []
-        parts = [_to_decimal_or_none(ln.get("discounted_price")) for ln in lines if ln]
-        present = [p for p in parts if p is not None]
-        shipping = sum(present, Decimal("0")) if present else None
+
+    if shipping_revenue is None:
+        # Same rule as the GraphQL mapper: gross is the best available answer
+        # without lines, and the split stays unknown rather than assumed zero.
+        shipping_revenue = _to_decimal_or_none(
+            ((data.get("total_shipping_price_set") or {}).get("shop_money") or {}).get("amount")
+        )
+
+    discount_total = _to_decimal_or_none(data.get("total_discounts"))
+    if discount_total is not None and shipping_discount is not None:
+        discount_total -= shipping_discount
 
     return {
-        "shipping_revenue": shipping,
+        "shipping_revenue": shipping_revenue,
         # REST reports discounts POSITIVE too; same convention as GraphQL.
-        "discount_total": _to_decimal_or_none(data.get("total_discounts")),
+        "shipping_discount": shipping_discount,
+        "discount_total": discount_total,
         "tax_total": _to_decimal_or_none(data.get("total_tax")),
         "subtotal": _to_decimal_or_none(data.get("subtotal_price")),
     }
@@ -768,6 +907,7 @@ async def _write_order_node(
         history_comment=history_comment,
         platform_fee=platform_fee,
         shipping_revenue=breakdown["shipping_revenue"],
+        shipping_discount=breakdown["shipping_discount"],
         discount_total=breakdown["discount_total"],
         tax_total=breakdown["tax_total"],
     )
@@ -1056,8 +1196,8 @@ async def backfill_shipping_breakdown(
     until: Optional[date] = None,
     dry_run: bool = True,
 ) -> Dict[str, Any]:
-    """Fill `shipping_revenue` / `discount_total` / `tax_total` on orders that
-    predate ORDER-SHIPPING-1, from Shopify (ORDER-SHIPPING-1).
+    """Fill `shipping_revenue` / `shipping_discount` / `discount_total` /
+    `tax_total` on orders that predate ORDER-SHIPPING-1/2, from Shopify.
 
     The order sync dedups on `(external_id, shop_id)` and never revisits an
     existing row, and the `orders/updated` webhook is a no-op on one — so setting
@@ -1070,13 +1210,29 @@ async def backfill_shipping_breakdown(
     at ~1 GraphQL call per 50 orders rather than one call per order. No by-id
     fetch is needed. It never creates orders and never writes status or history.
 
-    FILL-ONLY, never refresh. A row is a write target only when all three columns
-    are NULL, and that predicate is repeated in the UPDATE so a value written
-    between the SELECT and the write is never clobbered. Re-running is therefore
-    a strict no-op. Where Shopify now DISAGREES with a stored non-NULL value the
-    run reports it and writes nothing — a post-hoc discount or a shipping edit in
-    Shopify is real, but silently moving an order an operator has already
-    reconciled is not this endpoint's call to make.
+    FILL-ONLY, never refresh. Only NULL columns are written, that predicate is
+    repeated in the UPDATE so a value written between the SELECT and the write is
+    never clobbered, and re-running is therefore a strict no-op. Where Shopify now
+    DISAGREES with a stored non-NULL value the run reports it and writes nothing —
+    a post-hoc discount or a shipping edit in Shopify is real, but silently moving
+    an order an operator has already reconciled is not this endpoint's call to
+    make.
+
+    ORDER-SHIPPING-2 added ONE more writable shape. Orders imported between the
+    ORDER-SHIPPING-1 deploy and this sprint carry the first three and are missing
+    only `shipping_discount`; an all-NULL rule would skip them forever, leaving
+    "unknown" on rows whose split is plainly visible. Such a row is filled ONLY
+    when the fresh `shipping_discount` is 0.00 — with no shipping promo the old
+    and new mappings agree exactly, so the 0.00 is coherent with what is stored.
+    When it is non-zero the row is left alone: its stored shipping is the gross
+    figure and its stored discount still folds the promo in, so writing the fourth
+    column alone would make the row claim both that shipping was charged in full
+    and that it was given away. That contradiction surfaces as drift on the other
+    two columns instead, for a human to resolve.
+
+    (No such row exists today: a sweep of all 870 orders found the store's only
+    two shipping discounts both predate that deploy. Confirm before a real run
+    with `SELECT count(*) FROM orders WHERE shipping_revenue IS NOT NULL`.)
 
     The same reporting-only treatment catches `total_price` drift, which is the
     first actual measurement of BUG-4 (orders list reads a stale total). Also
@@ -1098,12 +1254,14 @@ async def backfill_shipping_breakdown(
         "missing_in_shopify": 0,
         "updated": 0,
         "shipping_total_by_currency": {},
+        "shipping_discount_total_by_currency": {},
         "discount_total_by_currency": {},
         "tax_total_by_currency": {},
         "by_month": {},
         "unbalanced": [],
         "drift": {
             "shipping_revenue": 0,
+            "shipping_discount": 0,
             "discount_total": 0,
             "tax_total": 0,
             "total_price": 0,
@@ -1130,6 +1288,7 @@ async def backfill_shipping_breakdown(
             Order.currency,
             Order.total_price,
             Order.shipping_revenue,
+            Order.shipping_discount,
             Order.discount_total,
             Order.tax_total,
         ).where(*conditions)
@@ -1142,14 +1301,19 @@ async def backfill_shipping_breakdown(
     shop_url = str(shop.shopify_store_url)
     query_filter = _build_orders_query_filter(since, until)
 
+    # ORDER-SHIPPING-2: the four columns written, in one place, so the target
+    # scan, the aggregation and the UPDATE cannot drift from each other.
+    BREAKDOWN_FIELDS = ("shipping_revenue", "shipping_discount", "discount_total", "tax_total")
+
     remaining = set(rows)
     to_write: Dict[str, Dict[str, Optional[Decimal]]] = {}
     shipping_by_currency: Dict[str, Decimal] = {}
+    shipping_discount_by_currency: Dict[str, Decimal] = {}
     discount_by_currency: Dict[str, Decimal] = {}
     tax_by_currency: Dict[str, Decimal] = {}
     by_month: Dict[str, Dict[str, Any]] = {}
     unbalanced: list[dict] = []
-    drift = {"shipping_revenue": 0, "discount_total": 0, "tax_total": 0, "total_price": 0}
+    drift = {f: 0 for f in BREAKDOWN_FIELDS} | {"total_price": 0}
     drift_samples: list[dict] = []
     found_in_shopify = 0
 
@@ -1200,11 +1364,18 @@ async def backfill_shipping_breakdown(
             month = _report_month(node.get("createdAt"))
             bucket = by_month.setdefault(
                 month,
-                {"orders": 0, "shipping": Decimal("0"), "discount": Decimal("0"), "tax": Decimal("0")},
+                {
+                    "orders": 0,
+                    "shipping": Decimal("0"),
+                    "shipping_discount": Decimal("0"),
+                    "discount": Decimal("0"),
+                    "tax": Decimal("0"),
+                },
             )
             bucket["orders"] += 1
             for key, agg, bkey in (
                 ("shipping_revenue", shipping_by_currency, "shipping"),
+                ("shipping_discount", shipping_discount_by_currency, "shipping_discount"),
                 ("discount_total", discount_by_currency, "discount"),
                 ("tax_total", tax_by_currency, "tax"),
             ):
@@ -1224,16 +1395,40 @@ async def backfill_shipping_breakdown(
                         "shopify": float(shopify_total or 0),
                     })
 
-            is_target = (
-                row.shipping_revenue is None
-                and row.discount_total is None
-                and row.tax_total is None
-            )
-            if is_target:
-                to_write[ext] = breakdown
-                continue
+            # Two shapes of row are writable, and nothing else (ORDER-SHIPPING-2).
+            #
+            #   1. A clean slate — all four NULL. Write all four.
+            #   2. A row carrying the ORDER-SHIPPING-1 three and missing only
+            #      `shipping_discount`, WHERE THE FRESH VALUE IS ZERO. With no
+            #      shipping promo the old mapping and the new one agree exactly
+            #      (gross == net, and totalDiscountsSet is already item-only), so
+            #      recording the 0.00 is coherent with what is already stored.
+            #
+            # A row of shape 2 whose fresh `shipping_discount` is NON-zero is
+            # deliberately NOT written. Its stored `shipping_revenue` is the gross
+            # figure and its `discount_total` still folds the shipping promo in,
+            # so filling the fourth column alone would leave the row asserting
+            # both that shipping was charged in full and that it was given away.
+            # That contradiction is worse than the missing value: it is reported
+            # as drift on the other two columns and left for a human.
+            #
+            # Anything else — a partially populated row — is not a clean slate and
+            # never was a target; the three are written as a set, so a row holding
+            # one of them came from somewhere this backfill should not reconcile.
+            stored = {field: getattr(row, field) for field in BREAKDOWN_FIELDS}
+            fill: Dict[str, Optional[Decimal]] = {}
+            if all(v is None for v in stored.values()):
+                fill = {f: breakdown[f] for f in BREAKDOWN_FIELDS if breakdown[f] is not None}
+            elif (
+                stored["shipping_discount"] is None
+                and all(stored[f] is not None for f in BREAKDOWN_FIELDS if f != "shipping_discount")
+                and breakdown["shipping_discount"] == Decimal("0")
+            ):
+                fill = {"shipping_discount": breakdown["shipping_discount"]}
+            if fill:
+                to_write[ext] = fill
 
-            for field in ("shipping_revenue", "discount_total", "tax_total"):
+            for field in BREAKDOWN_FIELDS:
                 stored = getattr(row, field)
                 fresh = breakdown[field]
                 if stored is None or fresh is None:
@@ -1263,30 +1458,28 @@ async def backfill_shipping_breakdown(
 
     updated = 0
     if not dry_run:
-        for ext, breakdown in to_write.items():
+        for ext, fill in to_write.items():
             res = await db.execute(
                 update(Order)
-                # The all-NULL guard is repeated here, not just in the SELECT
+                # The IS NULL guard is repeated here, not just in the SELECT
                 # above, so a value written between the two can never be
-                # overwritten — and so a re-run stays a strict no-op.
+                # overwritten — and so a re-run stays a strict no-op. It is now
+                # per-column, matching the per-column `fill` built above: only
+                # the columns this row is actually missing are guarded, or a row
+                # needing just `shipping_discount` would match nothing and never
+                # be filled.
                 .where(
                     Order.external_id == ext,
                     Order.shop_id == shop.id,
-                    Order.shipping_revenue.is_(None),
-                    Order.discount_total.is_(None),
-                    Order.tax_total.is_(None),
+                    *[getattr(Order, field).is_(None) for field in fill],
                 )
-                .values(
-                    shipping_revenue=breakdown["shipping_revenue"],
-                    discount_total=breakdown["discount_total"],
-                    tax_total=breakdown["tax_total"],
-                )
+                .values(**fill)
             )
             updated += res.rowcount or 0
         await db.flush()
 
     logger.info(
-        "ORDER-SHIPPING-1 backfill for shop %s: matched=%d found=%d missing=%d "
+        "ORDER-SHIPPING backfill for shop %s: matched=%d found=%d missing=%d "
         "targets=%d updated=%d unbalanced=%d dry_run=%s",
         shop.id, len(rows), found_in_shopify, len(remaining),
         len(to_write), updated, len(unbalanced), dry_run,
@@ -1302,12 +1495,21 @@ async def backfill_shipping_breakdown(
         "targets": len(to_write),
         "updated": updated,
         "shipping_total_by_currency": {c: float(v) for c, v in shipping_by_currency.items()},
+        "shipping_discount_total_by_currency": {
+            c: float(v) for c, v in shipping_discount_by_currency.items()
+        },
         "discount_total_by_currency": {c: float(v) for c, v in discount_by_currency.items()},
         "tax_total_by_currency": {c: float(v) for c, v in tax_by_currency.items()},
+        # `shipping` is what was BILLED and `discount` is the ITEM discount, both
+        # post-ORDER-SHIPPING-2. Reconciling against Shopify analytics: its
+        # shipping column matches `shipping`, and its discounts column matches
+        # `discount` — analytics excludes shipping promos from discounts, which
+        # is exactly the 103.00 gap that exposed this defect in 2026-07.
         "by_month": {
             m: {
                 "orders": b["orders"],
                 "shipping": float(b["shipping"]),
+                "shipping_discount": float(b["shipping_discount"]),
                 "discount": float(b["discount"]),
                 "tax": float(b["tax"]),
             }

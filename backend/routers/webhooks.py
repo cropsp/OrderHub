@@ -124,7 +124,7 @@ async def shopify_webhook(
             # always created NEW, so there is no CANCELLED case to skip.
             platform_fee = compute_platform_fee(payload["total_price"], shop.fee_percent)
 
-            # ORDER-SHIPPING-1: same three figures as the polling sync, read from
+            # ORDER-SHIPPING-1/2: same four figures as the polling sync, read from
             # the REST payload's different field names (see
             # extract_money_breakdown_rest). Only Shopify's own invariant is
             # checkable here — this path creates no OrderItem rows, so there is
@@ -139,11 +139,11 @@ async def shopify_webhook(
             )
             if imbalance:
                 logger.warning(
-                    "ORDER-SHIPPING-1 balance check failed (%s) for webhook order %s: "
-                    "total=%s shipping=%s discount=%s tax=%s subtotal=%s",
+                    "ORDER-SHIPPING balance check failed (%s) for webhook order %s: "
+                    "total=%s shipping=%s shipping_discount=%s discount=%s tax=%s subtotal=%s",
                     imbalance, external_id, payload["total_price"],
-                    breakdown["shipping_revenue"], breakdown["discount_total"],
-                    breakdown["tax_total"], breakdown["subtotal"],
+                    breakdown["shipping_revenue"], breakdown["shipping_discount"],
+                    breakdown["discount_total"], breakdown["tax_total"], breakdown["subtotal"],
                 )
 
             create_kwargs = {}
@@ -161,6 +161,7 @@ async def shopify_webhook(
                 system_user,
                 platform_fee=platform_fee,
                 shipping_revenue=breakdown["shipping_revenue"],
+                shipping_discount=breakdown["shipping_discount"],
                 discount_total=breakdown["discount_total"],
                 tax_total=breakdown["tax_total"],
                 **create_kwargs,

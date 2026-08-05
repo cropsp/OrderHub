@@ -45,29 +45,49 @@ def _make_shop(platform=ShopPlatform.SHOPIFY, creds=True):
 
 
 def _row(external_id, *, total_price="49.50", currency="USD",
-         shipping=None, discount=None, tax=None):
+         shipping=None, shipping_discount=None, discount=None, tax=None):
     row = MagicMock()
     row.external_id = external_id
     row.currency = currency
     row.total_price = Decimal(total_price)
     row.shipping_revenue = shipping
+    row.shipping_discount = shipping_discount
     row.discount_total = discount
     row.tax_total = tax
     return row
 
 
 def _node(external_id, *, name="91890_1841", amount="49.50", subtotal="40.50",
-          shipping="9.00", discount="4.49", tax="0.00",
+          shipping="9.00", shipping_original=None, discount="4.49", tax="0.00",
           created="2026-07-30T02:44:55Z", unit="44.99", qty=1):
+    """A GraphQL order node. `shipping` is what the customer was BILLED, i.e. the
+    shipping line's discounted price; `shipping_original` is the pre-discount rate
+    and defaults to the same figure, which is the undiscounted case and what every
+    order but two looks like. Pass them apart to build a shipping promo.
+
+    `discount` is `totalDiscountsSet` as Shopify reports it — INCLUSIVE of any
+    shipping promo — so a discounted-shipping node must count it there too, the
+    way the live payload does.
+    """
     return {"node": {
         "id": f"gid://shopify/Order/{external_id}",
         "name": name,
         "createdAt": created,
         "totalPriceSet": {"shopMoney": {"amount": amount, "currencyCode": "USD"}},
         "subtotalPriceSet": {"shopMoney": {"amount": subtotal}},
-        "totalShippingPriceSet": {"shopMoney": {"amount": shipping}},
+        # The PRE-discount total, as Shopify reports it: it tracks the original
+        # rate, not what was billed. ORDER-SHIPPING-2 reads the lines instead.
+        "totalShippingPriceSet": {
+            "shopMoney": {"amount": shipping_original if shipping_original is not None else shipping}
+        },
         "totalDiscountsSet": {"shopMoney": {"amount": discount}},
         "totalTaxSet": {"shopMoney": {"amount": tax}},
+        "shippingLines": {"edges": [{"node": {
+            "originalPriceSet": {
+                "shopMoney": {"amount": shipping_original if shipping_original is not None else shipping}
+            },
+            "discountedPriceSet": {"shopMoney": {"amount": shipping}},
+        }}]},
         "lineItems": {"edges": [{"node": {
             "title": "Money Clip",
             "quantity": qty,
@@ -181,6 +201,7 @@ async def test_a_populated_row_is_never_rewritten():
     db, summary, _ = await _run(
         _make_shop(),
         [_row("7410546344092", shipping=Decimal("9.00"),
+              shipping_discount=Decimal("0.00"),
               discount=Decimal("4.49"), tax=Decimal("0.00"))],
         [_page([_node("7410546344092")])],
         dry_run=False,
@@ -192,7 +213,7 @@ async def test_a_populated_row_is_never_rewritten():
 
 @pytest.mark.asyncio
 async def test_a_partially_populated_row_is_not_a_target():
-    """The three are written as a set. A row carrying only one of them is not a
+    """The figures are written as a set. A row carrying only one of them is not a
     clean slate, and filling the gaps would mix figures from two runs."""
     _, summary, _ = await _run(
         _make_shop(),
@@ -201,6 +222,60 @@ async def test_a_partially_populated_row_is_not_a_target():
         dry_run=False,
     )
     assert summary["targets"] == 0
+
+
+@pytest.mark.asyncio
+async def test_an_order_shipping_1_row_gets_its_missing_fourth_column():
+    """ORDER-SHIPPING-2. Orders imported between the two deploys carry the first
+    three and nothing else. An all-NULL rule would skip them forever, leaving
+    `shipping_discount` reading as 'unknown' on a row whose split is plainly
+    visible — so this one shape is writable, and only this one column of it.
+    """
+    db, summary, _ = await _run(
+        _make_shop(),
+        [_row("7410546344092", shipping=Decimal("9.00"),
+              discount=Decimal("4.49"), tax=Decimal("0.00"))],
+        [_page([_node("7410546344092")])],
+        dry_run=False,
+    )
+    assert summary["targets"] == 1
+    assert summary["updated"] == 1
+    sql = _updates(db)[0].lower()
+    assert "shipping_discount" in sql
+    # The three it already carries are NOT rewritten, even though the run has
+    # fresh values for them in hand.
+    assert "shipping_revenue" not in sql.split("where")[0]
+    assert "discount_total" not in sql.split("where")[0]
+    assert "tax_total" not in sql.split("where")[0]
+
+
+@pytest.mark.asyncio
+async def test_an_order_shipping_1_row_with_a_real_promo_is_refused():
+    """The other half of the rule, and the one that protects the invariant.
+
+    Such a row stores the GROSS shipping (49.00) and a `discount_total` that still
+    folds the promo in. Writing shipping_discount=49.00 beside them would leave
+    the row asserting both that shipping was charged in full AND that it was
+    given away — a contradiction worse than the missing value. It is refused and
+    surfaces as drift on the two columns that are actually wrong.
+
+    No such row exists today: the store's only two shipping discounts both
+    predate the ORDER-SHIPPING-1 deploy. This guards the case that appears if one
+    lands before the backfill is run.
+    """
+    db, summary, _ = await _run(
+        _make_shop(),
+        [_row("1", total_price="369.29", shipping=Decimal("49.00"),
+              discount=Decimal("49.00"), tax=Decimal("0.00"))],
+        [_page([_node("1", name="91890_1815", amount="369.29", subtotal="369.29",
+                      shipping="0.00", shipping_original="49.00", discount="49.00",
+                      unit="369.29")])],
+        dry_run=False,
+    )
+    assert summary["targets"] == 0
+    assert _updates(db) == []
+    assert summary["drift"]["shipping_revenue"] == 1   # stored 49.00, now 0.00
+    assert summary["drift"]["discount_total"] == 1     # stored 49.00, now 0.00
 
 
 # ---------- drift: reported, never written ----------
@@ -213,6 +288,7 @@ async def test_reports_drift_without_writing_it():
     db, summary, _ = await _run(
         _make_shop(),
         [_row("7410546344092", shipping=Decimal("5.00"),
+              shipping_discount=Decimal("0.00"),
               discount=Decimal("4.49"), tax=Decimal("0.00"))],
         [_page([_node("7410546344092")])],  # Shopify now says 9.00
         dry_run=False,
@@ -246,11 +322,13 @@ async def test_no_drift_when_shopify_agrees():
     _, summary, _ = await _run(
         _make_shop(),
         [_row("7410546344092", shipping=Decimal("9.00"),
+              shipping_discount=Decimal("0.00"),
               discount=Decimal("4.49"), tax=Decimal("0.00"))],
         [_page([_node("7410546344092")])],
     )
     assert summary["drift"] == {
-        "shipping_revenue": 0, "discount_total": 0, "tax_total": 0, "total_price": 0,
+        "shipping_revenue": 0, "shipping_discount": 0, "discount_total": 0,
+        "tax_total": 0, "total_price": 0,
     }
 
 
@@ -312,12 +390,37 @@ async def test_months_bucket_in_the_shop_timezone_not_utc():
 
 
 @pytest.mark.asyncio
-async def test_month_buckets_carry_the_three_figures():
+async def test_month_buckets_carry_the_four_figures():
     _, summary, _ = await _run(
         _make_shop(), [_row("1")], [_page([_node("1")])],
     )
     bucket = summary["by_month"]["2026-07"]
-    assert bucket == {"orders": 1, "shipping": 9.0, "discount": 4.49, "tax": 0.0}
+    assert bucket == {
+        "orders": 1, "shipping": 9.0, "shipping_discount": 0.0,
+        "discount": 4.49, "tax": 0.0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_month_buckets_split_a_shipping_promo_out_of_the_discount():
+    """91890_1815's real shape. Shopify's `totalDiscountsSet` reports 49.00, all
+    of it the shipping promo — the bucket must show it as shipping given away and
+    leave the ITEM discount at zero, because that is the column Shopify analytics
+    will be compared against. Booking it as an item discount is the whole defect.
+    """
+    _, summary, _ = await _run(
+        _make_shop(), [_row("1")],
+        [_page([_node("1", name="91890_1815", amount="369.29", subtotal="369.29",
+                      shipping="0.00", shipping_original="49.00", discount="49.00",
+                      unit="369.29", created="2026-07-22T00:05:24Z")])],
+    )
+    assert summary["by_month"]["2026-07"] == {
+        "orders": 1, "shipping": 0.0, "shipping_discount": 49.0,
+        "discount": 0.0, "tax": 0.0,
+    }
+    assert summary["shipping_discount_total_by_currency"] == {"USD": 49.0}
+    # And it now balances on both checks, where before it tripped "items".
+    assert summary["unbalanced"] == []
 
 
 @pytest.mark.asyncio
@@ -327,8 +430,8 @@ async def test_totals_include_rows_that_are_not_write_targets():
     the first and neither would tie to Shopify."""
     _, summary, _ = await _run(
         _make_shop(),
-        [_row("1", shipping=Decimal("9.00"), discount=Decimal("4.49"),
-              tax=Decimal("0.00"))],
+        [_row("1", shipping=Decimal("9.00"), shipping_discount=Decimal("0.00"),
+              discount=Decimal("4.49"), tax=Decimal("0.00"))],
         [_page([_node("1")])],
     )
     assert summary["targets"] == 0

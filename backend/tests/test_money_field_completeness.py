@@ -63,7 +63,14 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # (test_order_cost_fields_match_censor_set below), so a `cost` verdict here
     # would force censoring and drag every order route back through the
     # view_costs gate for revenue the caller is entitled to.
+    #
+    # ORDER-SHIPPING-2's `shipping_discount` is classified with them and for the
+    # same reason: it is a component of the same decomposition, travels on the
+    # same order payload, and is derivable from figures the caller already sees
+    # in full. Gating it alone would hide the reason a shipping charge is 0.00
+    # from someone allowed to see the 0.00.
     "shipping_revenue": "revenue",
+    "shipping_discount": "revenue",
     "discount_total": "revenue",
     "tax_total": "revenue",
     # cost (itemised)

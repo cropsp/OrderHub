@@ -26,6 +26,7 @@ function makeOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
     // ORDER-SHIPPING-1: null by default = an order no channel reported these
     // for, which is the derived-fallback path.
     shipping_revenue: null,
+    shipping_discount: null,
     discount_total: null,
     tax_total: null,
     shipping_name: null,
@@ -230,6 +231,7 @@ describe('DetailFinance — ORDER-SHIPPING-1 captured figures', () => {
       { id: 'i1', order_id: 'order-1', title: 'Money Clip', quantity: 1, unit_price: 44.99, currency: 'USD' },
     ] as unknown as OrderDetail['items'],
     shipping_revenue: 9,
+    shipping_discount: 0,
     discount_total: 4.49,
     tax_total: 0,
   }
@@ -244,6 +246,19 @@ describe('DetailFinance — ORDER-SHIPPING-1 captured figures', () => {
   it('shows the discount on its own row, as a negative', () => {
     render(<DetailFinance order={makeOrder(order1841)} />)
     expect(screen.getByTestId('discount-row')).toHaveTextContent('−4.49')
+  })
+
+  it('labels the discount as an ITEM discount', () => {
+    // ORDER-SHIPPING-2 narrowed what this column means; the label has to say so,
+    // or a reader sees "Discount 0.00" on a free-shipping order and concludes no
+    // discount was given at all.
+    render(<DetailFinance order={makeOrder(order1841)} />)
+    expect(screen.getByText('Item discount')).toBeInTheDocument()
+  })
+
+  it('says nothing about a shipping discount when there was none', () => {
+    render(<DetailFinance order={makeOrder(order1841)} />)
+    expect(screen.queryByTestId('shipping-discount-note')).toBeNull()
   })
 
   it('makes the rows add up to the order total', () => {
@@ -285,6 +300,106 @@ describe('DetailFinance — ORDER-SHIPPING-1 captured figures', () => {
       />,
     )
     expect(screen.getByTestId('tax-row')).toHaveTextContent('6.93')
+  })
+})
+
+describe('DetailFinance — ORDER-SHIPPING-2 shipping promo', () => {
+  // Order 91890_1815, verbatim: 369.29 of goods, a 49.00 shipping charge given
+  // away in full, nothing off the goods. Before this sprint the card showed
+  // "Discount −49.00" and "Shipping 49.00" — two wrong numbers that cancelled.
+  const order1815 = {
+    currency: 'USD',
+    total_price: 369.29,
+    items: [
+      { id: 'i1', order_id: 'order-1', title: 'Bundle', quantity: 1, unit_price: 369.29, currency: 'USD' },
+    ] as unknown as OrderDetail['items'],
+    shipping_revenue: 0,
+    shipping_discount: 49,
+    discount_total: 0,
+    tax_total: 0,
+  }
+
+  it('shows shipping as the 0.00 the customer actually paid', () => {
+    render(<DetailFinance order={makeOrder(order1815)} />)
+    expect(screen.getByTestId('shipping-row')).toHaveTextContent('0.00')
+  })
+
+  it('shows no item discount, because none was given on the goods', () => {
+    render(<DetailFinance order={makeOrder(order1815)} />)
+    expect(screen.queryByTestId('discount-row')).toBeNull()
+  })
+
+  it('notes the shipping discount without a minus sign', () => {
+    // Informational, not arithmetic: Shipping is already net of it. A "−49.00"
+    // here would invite the reader to subtract it a second time.
+    render(<DetailFinance order={makeOrder(order1815)} />)
+    const note = screen.getByTestId('shipping-discount-note')
+    expect(note).toHaveTextContent('49.00')
+    expect(note.textContent).not.toContain('−')
+  })
+
+  it('still adds up: 369.29 − 0 + 0 + 0 = 369.29', () => {
+    render(<DetailFinance order={makeOrder(order1815)} />)
+    expect(screen.getAllByText('369.29').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('does the same for 91890_1829', () => {
+    render(
+      <DetailFinance
+        order={makeOrder({
+          currency: 'USD',
+          total_price: 199.98,
+          items: [
+            { id: 'i1', order_id: 'order-1', title: 'Pair', quantity: 2, unit_price: 99.99, currency: 'USD' },
+          ] as unknown as OrderDetail['items'],
+          shipping_revenue: 0,
+          shipping_discount: 54,
+          discount_total: 0,
+          tax_total: 0,
+        })}
+      />,
+    )
+    expect(screen.getByTestId('shipping-row')).toHaveTextContent('0.00')
+    expect(screen.getByTestId('shipping-discount-note')).toHaveTextContent('54.00')
+    expect(screen.queryByTestId('discount-row')).toBeNull()
+  })
+
+  it('shows both notes when goods and shipping were both discounted', () => {
+    // Never observed in the data; pinned because it is the case where the two
+    // kinds of discount could be confused for each other in the UI.
+    render(
+      <DetailFinance
+        order={makeOrder({
+          currency: 'USD',
+          total_price: 90,
+          items: [
+            { id: 'i1', order_id: 'order-1', title: 'X', quantity: 1, unit_price: 100, currency: 'USD' },
+          ] as unknown as OrderDetail['items'],
+          shipping_revenue: 0,
+          shipping_discount: 20,
+          discount_total: 10,
+          tax_total: 0,
+        })}
+      />,
+    )
+    expect(screen.getByTestId('discount-row')).toHaveTextContent('−10.00')
+    expect(screen.getByTestId('shipping-discount-note')).toHaveTextContent('20.00')
+  })
+
+  it('stays quiet on a zero shipping discount', () => {
+    render(
+      <DetailFinance
+        order={makeOrder({
+          currency: 'USD',
+          total_price: 26.99,
+          shipping_revenue: 0,
+          shipping_discount: 0,
+          discount_total: 0,
+          tax_total: 0,
+        })}
+      />,
+    )
+    expect(screen.queryByTestId('shipping-discount-note')).toBeNull()
   })
 })
 

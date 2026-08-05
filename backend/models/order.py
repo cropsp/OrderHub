@@ -161,22 +161,34 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     shipping_np_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     platform_fee: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
-    # ORDER-SHIPPING-1 — what the customer paid, decomposed. Revenue side, NOT
-    # costs: these three are components of `total_price` (contrast
+    # ORDER-SHIPPING-1/2 — what the customer paid, decomposed. Revenue side, NOT
+    # costs: these four are components of `total_price` (contrast
     # `shipping_np_cost` two lines up, which is what we pay Nova Poshta), so they
     # are not censored by VIEW_COSTS.
     #
     #   total_price = SUM(item.quantity * item.unit_price)
     #                 - discount_total + shipping_revenue + tax_total
     #
-    # `discount_total` is stored POSITIVE, the sign Shopify reports it in; the
-    # subtraction happens at render time.
+    # `discount_total` and `shipping_discount` are stored POSITIVE, the sign
+    # Shopify reports them in; the subtraction happens at render time.
+    #
+    # ORDER-SHIPPING-2 split the two kinds of discount apart:
+    #
+    #   shipping_revenue  = SUM(shippingLines[].discountedPriceSet)  — billed
+    #   shipping_discount = SUM(original - discounted)               — given away
+    #   discount_total    = totalDiscountsSet - shipping_discount    — ITEM only
+    #
+    # `shipping_discount` is NOT a term in the identity above: it is already
+    # reflected in `shipping_revenue` being the net figure. It records that a
+    # shipping promo happened at all, which a 0.00 shipping charge cannot.
+    # Subtracting it again anywhere double-counts.
     #
     # NULL means UNKNOWN, never 0.00 — Etsy and manual orders carry no such
     # figures, and so do Shopify orders imported before this sprint until the
     # backfill runs. Only the Shopify sync, the Shopify webhook and that backfill
     # ever write them; there is deliberately no manual write path.
     shipping_revenue: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    shipping_discount: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     discount_total: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     tax_total: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 

@@ -512,18 +512,21 @@ async def backfill_shop_shipping(
     current_user: User = Depends(require_role(UserRole.OWNER)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Capture Shopify shipping / discount / tax on existing orders (ORDER-SHIPPING-1).
+    """Capture Shopify shipping / shipping discount / item discount / tax on
+    existing orders (ORDER-SHIPPING-1/2).
 
     The sync prices an order only at creation and dedups on
     `(external_id, shop_id)`, and the `orders/updated` webhook no-ops on an
-    existing row — so the three new columns are populated by the mappers for new
+    existing row — so the four columns are populated by the mappers for new
     orders only. This is the catch-up for everything already imported.
 
-    FILL-ONLY: a row is written only when all three columns are NULL, and the
-    guard is repeated in the UPDATE, so re-running is a strict no-op. Where
-    Shopify now disagrees with a stored value the run REPORTS it and writes
-    nothing — including `total_price` drift, which is the first measurement of
-    BUG-4.
+    FILL-ONLY, per column: a column is written only when it is NULL on that row,
+    and the guard is repeated in the UPDATE, so re-running is a strict no-op. The
+    per-column rule matters for rows imported between the ORDER-SHIPPING-1 and -2
+    deploys, which carry the first three and are missing only
+    `shipping_discount`. Where Shopify now disagrees with a stored value the run
+    REPORTS it and writes nothing — including `total_price` drift, which is the
+    first measurement of BUG-4.
 
     `dry_run=true` (the default) reports the full impact without writing:
     per-currency totals, per-month buckets in the SHOP's timezone so they tie to

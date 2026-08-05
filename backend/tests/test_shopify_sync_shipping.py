@@ -1,9 +1,9 @@
-"""ORDER-SHIPPING-1 — capturing Shopify shipping / discount / tax on the order.
+"""ORDER-SHIPPING-1/2 — capturing Shopify shipping / discount / tax on the order.
 
 Three things are under test here, and they fail for different reasons:
 
   1. The MAPPERS. Both Shopify ingest paths read structurally different JSON for
-     the same three values, and rule 3 of the spec exists because fixing one and
+     the same four values, and rule 3 of the spec exists because fixing one and
      forgetting the other is the obvious way to get this wrong. GraphQL and REST
      are covered side by side.
   2. NULL vs 0.00. A missing figure must stay NULL. `_to_decimal` maps absence to
@@ -12,7 +12,21 @@ Three things are under test here, and they fail for different reasons:
      residual this sprint removes had.
   3. The BALANCE CHECK. The identity was verified against 28 live Lamamarka
      orders; these pin it as arithmetic, including the shipping-discount case
-     that does not occur today but would double-subtract if it ever did.
+     that used to double-subtract.
+
+ORDER-SHIPPING-2 note on provenance. The fixtures here are real order shapes,
+read off the live store through the CRM's own client:
+
+    91890_1815  100% shipping promo, 49.00 -> 0.00, no item discount
+    91890_1829  the same, 54.00 -> 0.00
+    91890_1841  the control: 9.00 shipping, 4.49 item discount, no promo
+    91890_1368  two shipping lines, 10.00 + 12.00, undiscounted
+    91890_1287  a "Free Shipping" line priced 0.00 with NO discount at all
+
+Those are every distinct shape the store contains — a sweep of all 870 orders
+found exactly two shipping discounts, both 100%, both single-line. Cases marked
+NEVER OBSERVED below are constructed: they do not occur in the data and are
+pinned because they are what will appear first when they do.
 
 Same mocking style as test_shopify_sync_fees.py: AsyncMock + MagicMock, patch the
 fetch seam with canned page bodies, patch create_order and read its kwargs. No
@@ -79,6 +93,28 @@ def _line(unit, qty=1, title="Item"):
     }
 
 
+def _ship_line(original, discounted=None, allocated=None):
+    """One `shippingLines` edge, in the live payload's shape.
+
+    `discountAllocations` mirrors what Shopify actually returns and is Shopify's
+    OWN figure for how much came off this line — an independent statement of the
+    same number our mapper derives by subtraction. The mapper does not read it;
+    it is here so a test can check the derivation against it.
+    """
+    node = {
+        "originalPriceSet": {"shopMoney": {"amount": original}},
+        "discountedPriceSet": {
+            "shopMoney": {"amount": discounted if discounted is not None else original}
+        },
+        "discountAllocations": [],
+    }
+    if allocated is not None:
+        node["discountAllocations"] = [
+            {"allocatedAmountSet": {"shopMoney": {"amount": allocated}}}
+        ]
+    return {"node": node}
+
+
 def _order_node(
     *,
     order_id=7410546344092,
@@ -89,9 +125,16 @@ def _order_node(
     discount="4.49",
     tax="0.00",
     lines=None,
+    ship_lines=None,
     omit_breakdown=False,
+    omit_shipping_lines=False,
 ):
-    """Order 91890_1841 by default — the order the bug report names."""
+    """Order 91890_1841 by default — the order the bug report names.
+
+    `shipping` is `totalShippingPriceSet` (the PRE-discount charge). `ship_lines`
+    overrides the shipping lines; by default they are one undiscounted line at
+    that same figure, which is what every order but two looks like.
+    """
     node = {
         "id": f"gid://shopify/Order/{order_id}",
         "name": name,
@@ -113,6 +156,10 @@ def _order_node(
         node["totalShippingPriceSet"] = {"shopMoney": {"amount": shipping}}
         node["totalDiscountsSet"] = {"shopMoney": {"amount": discount}}
         node["totalTaxSet"] = {"shopMoney": {"amount": tax}}
+        if not omit_shipping_lines:
+            node["shippingLines"] = {
+                "edges": ship_lines if ship_lines is not None else [_ship_line(shipping)]
+            }
     return {"node": node}
 
 
@@ -151,6 +198,12 @@ def test_orders_query_requests_the_breakdown():
         "totalDiscountsSet",
         "totalTaxSet",
         "subtotalPriceSet",
+        # ORDER-SHIPPING-2. Without these two the mapper cannot tell a shipping
+        # charge from a shipping giveaway, which is precisely how the defect got
+        # through: the document asked only for the pre-discount total.
+        "shippingLines",
+        "originalPriceSet",
+        "discountedPriceSet",
     ):
         assert field in ORDERS_QUERY, f"{field} missing from ORDERS_QUERY"
 
@@ -165,12 +218,203 @@ def test_orders_query_uses_shop_money_only():
 # ---------- GraphQL mapper ----------
 
 
-def test_graphql_mapper_reads_the_three_figures():
+def test_graphql_mapper_reads_the_four_figures():
     b = extract_money_breakdown(_order_node()["node"])
     assert b["shipping_revenue"] == Decimal("9.00")
+    assert b["shipping_discount"] == Decimal("0.00")
     assert b["discount_total"] == Decimal("4.49")
     assert b["tax_total"] == Decimal("0.00")
     assert b["subtotal"] == Decimal("40.50")
+
+
+# ---------- ORDER-SHIPPING-2: shipping promo vs item promo ----------
+
+
+def _order_1815():
+    """91890_1815, the live shape. 369.29 of goods, a 49.00 shipping charge fully
+    discounted away, and `totalDiscountsSet` reporting that 49.00 as if it were a
+    discount on the goods."""
+    return _order_node(
+        order_id=7387326316700, name="91890_1815",
+        amount="369.29", subtotal="369.29",
+        shipping="49.00", discount="49.00", tax="0.00",
+        ship_lines=[_ship_line("49.00", "0.00", allocated="49.00")],
+        lines=[_line("369.29")],
+    )["node"]
+
+
+def test_a_shipping_promo_is_not_an_item_discount():
+    """The defect, in one assertion. Before ORDER-SHIPPING-2 this order stored
+    shipping 49.00 (never paid) and discount 49.00 (never given on the goods)."""
+    b = extract_money_breakdown(_order_1815())
+    assert b["shipping_revenue"] == Decimal("0.00")    # what the customer paid
+    assert b["shipping_discount"] == Decimal("49.00")  # what was given away
+    assert b["discount_total"] == Decimal("0.00")      # nothing came off the goods
+
+
+def test_the_shipping_promo_order_now_balances():
+    """Rule 5: the balance check is untouched, and both of its checks must pass
+    on the very orders that used to trip it. 369.29 + 0 + 0 = 369.29."""
+    node = _order_1815()
+    b = extract_money_breakdown(node)
+    assert check_order_balance(
+        total=Decimal("369.29"),
+        shipping=b["shipping_revenue"],
+        discount=b["discount_total"],
+        tax=b["tax_total"],
+        subtotal=b["subtotal"],
+        items_gross=items_gross_from_node(node),
+    ) is None
+
+
+def test_the_second_promo_order_too():
+    """91890_1829 — the other one the sweep found. Same shape, different money."""
+    b = extract_money_breakdown(_order_node(
+        order_id=7395353329820, name="91890_1829",
+        amount="199.98", subtotal="199.98",
+        shipping="54.00", discount="54.00", tax="0.00",
+        ship_lines=[_ship_line("54.00", "0.00", allocated="54.00")],
+        lines=[_line("99.99", qty=2)],
+    )["node"])
+    assert b["shipping_revenue"] == Decimal("0.00")
+    assert b["shipping_discount"] == Decimal("54.00")
+    assert b["discount_total"] == Decimal("0.00")
+
+
+def test_the_derivation_matches_shopifys_own_allocation():
+    """`original - discounted` is our derivation; `discountAllocations` is
+    Shopify's own statement of the same number. On both live promo orders they
+    agree exactly, which is why the subtraction is trustworthy for a PARTIAL or
+    fixed-amount discount too — Shopify allocates per line and reports what it
+    allocated, so the difference picks up that line's share and nothing else."""
+    for node in (_order_1815(),):
+        allocated = sum(
+            Decimal(a["allocatedAmountSet"]["shopMoney"]["amount"])
+            for edge in node["shippingLines"]["edges"]
+            for a in edge["node"]["discountAllocations"]
+        )
+        assert extract_money_breakdown(node)["shipping_discount"] == allocated
+
+
+def test_an_ordinary_order_is_untouched_by_the_new_arithmetic():
+    """Rule 3: no regression where shipping carries no discount. 91890_1841 keeps
+    exactly the figures ORDER-SHIPPING-1 gave it."""
+    b = extract_money_breakdown(_order_node()["node"])
+    assert b["shipping_revenue"] == Decimal("9.00")
+    assert b["discount_total"] == Decimal("4.49")
+    assert b["shipping_discount"] == Decimal("0.00")
+
+
+def test_multiple_shipping_lines_sum():
+    """91890_1368's real shape: two lines, 10.00 + 12.00, neither discounted.
+    Seven such orders exist, all 2025. The mapper must total them, not take the
+    first."""
+    b = extract_money_breakdown(_order_node(
+        name="91890_1368", amount="82.00", subtotal="60.00",
+        shipping="22.00", discount="0.00",
+        ship_lines=[_ship_line("10.00"), _ship_line("12.00")],
+        lines=[_line("60.00")],
+    )["node"])
+    assert b["shipping_revenue"] == Decimal("22.00")
+    assert b["shipping_discount"] == Decimal("0.00")
+
+
+def test_a_zero_priced_free_shipping_line_is_not_a_discount():
+    """91890_1287's real shape. Free shipping reaches us two structurally
+    different ways — a line priced 0.00 with no allocation, and a line discounted
+    to 0.00 — and only the second is money given away. Reporting 8.00 of
+    "shipping discount" here would invent a promo that never happened."""
+    b = extract_money_breakdown(_order_node(
+        name="91890_1287", amount="58.00", subtotal="50.00",
+        shipping="8.00", discount="0.00",
+        ship_lines=[_ship_line("0.00"), _ship_line("8.00")],
+        lines=[_line("50.00")],
+    )["node"])
+    assert b["shipping_revenue"] == Decimal("8.00")
+    assert b["shipping_discount"] == Decimal("0.00")
+
+
+def test_an_item_discount_and_a_shipping_promo_together():
+    """NEVER OBSERVED on real data — confirmed absent across all 870 orders. It is
+    pinned because it is the first combination that will appear (the promo is
+    automatic and store-wide) and the one where a sign error hides: both kinds of
+    discount arrive summed in `totalDiscountsSet`, and only the shipping part may
+    be subtracted out.
+
+    Items 100.00, 10.00 off the goods, 20.00 shipping fully discounted, so
+    Shopify reports totalDiscounts 30.00 and the customer pays 90.00.
+    """
+    node = _order_node(
+        amount="90.00", subtotal="90.00",
+        shipping="20.00", discount="30.00", tax="0.00",
+        ship_lines=[_ship_line("20.00", "0.00", allocated="20.00")],
+        lines=[_line("100.00")],
+    )["node"]
+    b = extract_money_breakdown(node)
+    assert b["shipping_revenue"] == Decimal("0.00")
+    assert b["shipping_discount"] == Decimal("20.00")
+    assert b["discount_total"] == Decimal("10.00")   # NOT 30.00, and not -10.00
+    # The card's identity still closes: 100 - 10 + 0 + 0 = 90.
+    assert check_order_balance(
+        total=Decimal("90.00"), shipping=b["shipping_revenue"],
+        discount=b["discount_total"], tax=b["tax_total"],
+        subtotal=b["subtotal"], items_gross=items_gross_from_node(node),
+    ) is None
+
+
+def test_a_partial_shipping_discount():
+    """NEVER OBSERVED — every shipping promo in the store is 100%. The formula is
+    a subtraction, not a percentage, so a partial discount needs no special case:
+    12.00 billed of a 20.00 rate is 8.00 given away."""
+    b = extract_money_breakdown(_order_node(
+        amount="112.00", subtotal="100.00",
+        shipping="20.00", discount="8.00", tax="0.00",
+        ship_lines=[_ship_line("20.00", "12.00", allocated="8.00")],
+        lines=[_line("100.00")],
+    )["node"])
+    assert b["shipping_revenue"] == Decimal("12.00")
+    assert b["shipping_discount"] == Decimal("8.00")
+    assert b["discount_total"] == Decimal("0.00")
+
+
+def test_a_fixed_amount_shipping_discount_across_multiple_lines():
+    """NEVER OBSERVED — no fixed-amount shipping discount and no discounted
+    multi-line order exists. A fixed amount spread ACROSS lines is reported by
+    Shopify already split per line, so summing the per-line differences recovers
+    the whole discount without the mapper knowing how it was allocated."""
+    b = extract_money_breakdown(_order_node(
+        amount="115.00", subtotal="100.00",
+        shipping="25.00", discount="10.00", tax="0.00",
+        ship_lines=[
+            _ship_line("10.00", "6.00", allocated="4.00"),
+            _ship_line("15.00", "9.00", allocated="6.00"),
+        ],
+        lines=[_line("100.00")],
+    )["node"])
+    assert b["shipping_revenue"] == Decimal("15.00")
+    assert b["shipping_discount"] == Decimal("10.00")
+    assert b["discount_total"] == Decimal("0.00")
+
+
+def test_shipping_lines_absent_leaves_the_discount_unknown():
+    """An old payload that never carried shipping lines. Shipping falls back to
+    the pre-discount total — right for every order without a promo, which is all
+    but two — but the SPLIT is unknown, and unknown is NULL. Writing 0.00 would
+    assert no promo was given, which is the class of guess this sprint removes."""
+    b = extract_money_breakdown(_order_node(omit_shipping_lines=True)["node"])
+    assert b["shipping_revenue"] == Decimal("9.00")
+    assert b["shipping_discount"] is None
+    # ...and with the split unknown, the item discount cannot be derived either,
+    # so it stays exactly as Shopify reported it.
+    assert b["discount_total"] == Decimal("4.49")
+
+
+def test_no_shipping_lines_at_all_is_a_real_zero():
+    """Present but empty is Shopify saying there were no shipping lines — nothing
+    charged, nothing given away. Distinct from the key being absent above."""
+    b = extract_money_breakdown(_order_node(shipping="0.00", ship_lines=[])["node"])
+    assert b["shipping_revenue"] == Decimal("0")
+    assert b["shipping_discount"] == Decimal("0")
 
 
 def test_graphql_mapper_keeps_the_discount_positive():
@@ -213,38 +457,92 @@ def test_items_gross_multiplies_by_quantity():
 # ---------- REST / webhook mapper (rule 3: both paths, or neither) ----------
 
 
-def test_rest_mapper_reads_the_same_figures_from_snake_case():
-    b = extract_money_breakdown_rest({
+def _rest_1841():
+    """91890_1841's live REST payload, trimmed to the money."""
+    return {
         "total_shipping_price_set": {"shop_money": {"amount": "9.00"}},
+        "shipping_lines": [{
+            "price": "9.00", "discounted_price": "9.00",
+            "price_set": {"shop_money": {"amount": "9.00"}},
+            "discounted_price_set": {"shop_money": {"amount": "9.00"}},
+            "discount_allocations": [],
+        }],
         "total_discounts": "4.49",
         "total_tax": "0.00",
         "subtotal_price": "40.50",
-    })
+    }
+
+
+def _rest_1815():
+    """91890_1815's live REST payload. Note `total_discounts` reports 49.00 —
+    inclusive of the shipping promo, exactly as `totalDiscountsSet` does, which
+    is what makes the same subtraction correct on this side."""
+    return {
+        "total_shipping_price_set": {"shop_money": {"amount": "49.00"}},
+        "shipping_lines": [{
+            "title": "Standard Shipping",
+            "price": "49.00", "discounted_price": "0.00",
+            "price_set": {"shop_money": {"amount": "49.00"}},
+            "discounted_price_set": {"shop_money": {"amount": "0.00"}},
+            "discount_allocations": [{"amount": "49.00"}],
+        }],
+        "total_discounts": "49.00",
+        "total_tax": "0.00",
+        "subtotal_price": "369.29",
+    }
+
+
+def test_rest_mapper_reads_the_same_figures_from_snake_case():
+    b = extract_money_breakdown_rest(_rest_1841())
     assert b["shipping_revenue"] == Decimal("9.00")
+    assert b["shipping_discount"] == Decimal("0.00")
     assert b["discount_total"] == Decimal("4.49")
     assert b["tax_total"] == Decimal("0.00")
     assert b["subtotal"] == Decimal("40.50")
 
 
-def test_rest_mapper_falls_back_to_shipping_lines():
-    """Only shipping arrives as a money-set in REST. If that key is absent the
-    shipping lines carry the same number."""
+def test_rest_mapper_splits_a_shipping_promo_too():
+    """ORDER-SHIPPING-2 rule 4: both paths, or neither. This payload is the one
+    that used to be read as shipping 49.00 / discount 49.00 on BOTH sides."""
+    b = extract_money_breakdown_rest(_rest_1815())
+    assert b["shipping_revenue"] == Decimal("0.00")
+    assert b["shipping_discount"] == Decimal("49.00")
+    assert b["discount_total"] == Decimal("0.00")
+
+
+def test_rest_mapper_reads_bare_price_strings():
+    """REST states each shipping figure twice — a bare string and a money-set.
+    Older payloads carry only the bare form."""
     b = extract_money_breakdown_rest({
         "shipping_lines": [
-            {"discounted_price": "5.00"},
-            {"discounted_price": "4.00"},
+            {"price": "5.00", "discounted_price": "5.00"},
+            {"price": "4.00", "discounted_price": "4.00"},
         ],
         "total_discounts": "0.00",
         "total_tax": "0.00",
     })
     assert b["shipping_revenue"] == Decimal("9.00")
+    assert b["shipping_discount"] == Decimal("0.00")
 
 
 def test_rest_mapper_maps_absence_to_none_not_zero():
     b = extract_money_breakdown_rest({"id": 1})
     assert b["shipping_revenue"] is None
+    assert b["shipping_discount"] is None
     assert b["discount_total"] is None
     assert b["tax_total"] is None
+
+
+def test_rest_mapper_leaves_the_split_unknown_without_lines():
+    """Same rule as GraphQL: no lines means the split is unknowable, and unknown
+    is NULL. The gross total is still the best available shipping figure."""
+    b = extract_money_breakdown_rest({
+        "total_shipping_price_set": {"shop_money": {"amount": "9.00"}},
+        "total_discounts": "4.49",
+    })
+    assert b["shipping_revenue"] == Decimal("9.00")
+    assert b["shipping_discount"] is None
+    assert b["discount_total"] == Decimal("4.49")
 
 
 def test_both_mappers_agree_on_the_same_order():
@@ -252,14 +550,24 @@ def test_both_mappers_agree_on_the_same_order():
     identical figures — an order landing on the webhook instead of the poll is
     priced the same."""
     gql = extract_money_breakdown(_order_node()["node"])
-    rest = extract_money_breakdown_rest({
-        "total_shipping_price_set": {"shop_money": {"amount": "9.00"}},
-        "total_discounts": "4.49",
-        "total_tax": "0.00",
-        "subtotal_price": "40.50",
-    })
-    for key in ("shipping_revenue", "discount_total", "tax_total", "subtotal"):
+    rest = extract_money_breakdown_rest(_rest_1841())
+    for key in ("shipping_revenue", "shipping_discount", "discount_total",
+                "tax_total", "subtotal"):
         assert gql[key] == rest[key], key
+
+
+def test_both_mappers_agree_on_a_shipping_discounted_order():
+    """The parity fixture that did not exist, which is why the defect got through
+    (ORDER-SHIPPING-2 rule 4). No fixture here carried a shipping discount, so
+    the two paths could disagree on exactly the orders that mattered and the
+    parity test still passed. 91890_1815, both shapes, same four answers."""
+    gql = extract_money_breakdown(_order_1815())
+    rest = extract_money_breakdown_rest(_rest_1815())
+    for key in ("shipping_revenue", "shipping_discount", "discount_total",
+                "tax_total", "subtotal"):
+        assert gql[key] == rest[key], key
+    assert gql["shipping_revenue"] == Decimal("0.00")
+    assert gql["shipping_discount"] == Decimal("49.00")
 
 
 # ---------- balance check ----------
@@ -316,15 +624,19 @@ def test_balance_flags_a_short_item_snapshot():
 
 
 def test_balance_catches_a_double_subtracted_shipping_discount():
-    """The one future scenario that breaks the identity. Shopify's
-    ShippingLine.discountedPriceSet only folds in cart-level free-shipping
-    discounts from API 2024-07, and this client pins 2024-04 — so a free-shipping
-    promo could report shipping ALREADY net of a discount that totalDiscountsSet
-    also counts. No such order exists in the data today (every discount on record
-    targets LINE_ITEM), but if one lands, it must not pass silently.
+    """The scenario that DID break the identity, and the check that caught it.
 
-    Here: 44.99 items, a 9.00 shipping charge fully discounted to 0.00, so the
-    customer paid 44.99 — but totalDiscounts reports 9.00 as well.
+    The rationale recorded here before ORDER-SHIPPING-2 was wrong twice over. It
+    said `ShippingLine.discountedPriceSet` folds cart-level free-shipping
+    discounts in only from API 2024-07 while this client pinned 2024-04 — but the
+    pin never bound (Shopify had long been serving 2025-10) and the field was
+    already net. It also said no such order existed; two did, 91890_1815 and
+    91890_1829, and this check is what flagged them out of 870.
+
+    The assertion is unchanged and stays: it is now the regression guard for a
+    mapper that goes back to feeding a shipping promo in as an item discount.
+    Here: 44.99 of items, a 9.00 shipping charge fully discounted to 0.00, so the
+    customer paid 44.99 — but the discount is reported as 9.00 on the goods too.
     """
     assert check_order_balance(
         total=Decimal("44.99"),

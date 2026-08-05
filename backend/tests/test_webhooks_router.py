@@ -200,10 +200,20 @@ async def test_webhook_maps_absence_to_none_not_zero():
 
 @pytest.mark.asyncio
 async def test_webhook_keeps_a_real_zero():
+    """0.00 is a fact ("shipped free"), not absence — it must survive as 0.00 and
+    never collapse to None.
+
+    ORDER-SHIPPING-2: the shipping lines are zeroed alongside the money-set. A
+    real payload states shipping once, consistently, in both places; overriding
+    only the money-set built a body Shopify would never send, and now that the
+    mapper reads the lines first it was the lines' 9.00 being asserted against.
+    """
     body = _payload(total_shipping_price_set={"shop_money": {"amount": "0.00"}},
+                    shipping_lines=[{"price": "0.00", "discounted_price": "0.00"}],
                     total_price="40.50")
     mock_create = await _post(body)
     assert mock_create.await_args.kwargs["shipping_revenue"] == Decimal("0.00")
+    assert mock_create.await_args.kwargs["shipping_discount"] == Decimal("0.00")
 
 
 @pytest.mark.asyncio

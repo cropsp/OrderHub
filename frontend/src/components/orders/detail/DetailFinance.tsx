@@ -105,9 +105,12 @@ export function DetailFinance({ order }: DetailFinanceProps) {
             shipping is a fact worth seeing. */}
         {captured ? (
           <>
+            {/* ORDER-SHIPPING-2 relabelled this: it is the discount on the GOODS
+                alone. It used to carry the shipping promo too, which is what let
+                a free-shipping order read as if the goods had been marked down. */}
             {order.discount_total != null && order.discount_total !== 0 && (
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-zinc-400">Discount</span>
+                <span className="text-[11px] font-medium text-zinc-400">Item discount</span>
                 <span className="text-sm font-medium text-zinc-300" data-testid="discount-row">
                   −{formatMoney(order.discount_total)}{' '}
                   <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
@@ -123,6 +126,21 @@ export function DetailFinance({ order }: DetailFinanceProps) {
                   <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
                 </span>
               </div>
+            )}
+
+            {/* ORDER-SHIPPING-2 — INFORMATIONAL, not arithmetic. `Shipping` above
+                is already net of this, so it deliberately carries no −  sign and
+                sits as a caption rather than a row: a reader who subtracts it a
+                second time lands the whole promo short. It exists because a
+                shipping charge of 0.00 cannot, on its own, distinguish "we never
+                charged for shipping" from "we gave 49.00 of it away".
+                Hidden at 0 (and at null), like Item discount and Tax — a
+                "Shipping discount 0.00" caption on every order is noise. */}
+            {order.shipping_discount != null && order.shipping_discount !== 0 && (
+              <p className="text-[10px] italic text-zinc-500 -mt-1.5" data-testid="shipping-discount-note">
+                ⓘ Includes {formatMoney(order.shipping_discount)} {order.currency} of
+                shipping discount, already deducted above.
+              </p>
             )}
 
             {order.tax_total != null && order.tax_total !== 0 && (

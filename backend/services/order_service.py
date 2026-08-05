@@ -471,6 +471,7 @@ async def create_order(
     history_comment: str = "Order manually created",
     platform_fee: Decimal | None = None,
     shipping_revenue: Decimal | None = None,
+    shipping_discount: Decimal | None = None,
     discount_total: Decimal | None = None,
     tax_total: Decimal | None = None,
 ) -> Order:
@@ -491,14 +492,15 @@ async def create_order(
     so putting a cost field there would open a non-owner write path. Importers
     pass it explicitly; manual order entry leaves it None.
 
-    `shipping_revenue` / `discount_total` / `tax_total` (ORDER-SHIPPING-1) are
-    keyword-only for a DIFFERENT reason — they are revenue, not costs, so the
-    non-owner-write argument above does not apply. The invariant being protected
-    is that these three are only ever written from a channel payload. They are
-    facts reported by Shopify, and `OrderCreate` is the public POST body, where a
-    manual creator could invent a shipping figure indistinguishable from a
-    captured one. They are absent from `OrderUpdate` for the same reason: there
-    is no manual write path at all. NULL means unknown, never 0.00.
+    `shipping_revenue` / `shipping_discount` / `discount_total` / `tax_total`
+    (ORDER-SHIPPING-1/2) are keyword-only for a DIFFERENT reason — they are
+    revenue, not costs, so the non-owner-write argument above does not apply. The
+    invariant being protected is that these four are only ever written from a
+    channel payload. They are facts reported by Shopify, and `OrderCreate` is the
+    public POST body, where a manual creator could invent a shipping figure
+    indistinguishable from a captured one. They are absent from `OrderUpdate` for
+    the same reason: there is no manual write path at all. NULL means unknown,
+    never 0.00.
     """
     # Customupsert -> Create order -> Default History
     customer = await upsert_customer(
@@ -538,6 +540,7 @@ async def create_order(
         customer_note=data.customer_note,
         platform_fee=platform_fee,
         shipping_revenue=shipping_revenue,
+        shipping_discount=shipping_discount,
         discount_total=discount_total,
         tax_total=tax_total,
     )
