@@ -4645,6 +4645,102 @@ executed in production; the next person to need it will be its first user. Filed
 
 ---
 
+### WB-TRACK-1 — Nova Poshta delivery tracking for WesternBid parcels (closed 2026-08-05)
+
+**Merged fast-forward onto `main` = `a6e69e6`, deployed to prod 2026-08-05.** Migration
+`c7e1b4d93f28`, single head. Live smoke run against all 77 prod NovaPost parcels. Tables
+`wb_parcel_tracking` (18 cols) + `wb_tracking_event`, both FKs `ON DELETE CASCADE`.
+
+**Problem.** Twenty to thirty parcels in flight; a manager opened the WesternBid cabinet and checked
+each by hand. WB structurally cannot help — `WB-1` established it exposes no tracking-event endpoint
+and only two Fulfillment-Center webhooks, and its `Status` covers only its own leg
+(`Parcel created` / `Sent from Ukraine warehouse` / `Parcel canceled`). Nothing after the Lviv
+consolidation warehouse.
+
+**The finding that made it cheap.** Nova Poshta's `TrackingDocument.getStatusDocuments` **requires
+no API key**, resolves the international `595…` numbers WesternBid issues, and takes 100 documents
+per call. Seventy-seven parcels is therefore **one HTTP request per day** — counted, not claimed
+(the smoke wrapped `httpx.AsyncClient.post`). It also disproves a standing assumption: such a poll
+does **not** need a shop's NP credentials, which matters because Lamamarka Shopify has none.
+Available without a key: `Status`, `StatusCode`, `DateCreated`, `TrackingUpdateDate`, `DateScan`,
+`ScheduledDeliveryDate`, `RecipientDateTime`, `CityRecipient`, `UndeliveryReasons` — 123 fields.
+The permanent `"Please enter a valid phone number…"` warning withholds none of them, and passing the
+order's `shipping_phone` does not clear it; it is a dead end, recorded so nobody chases it twice.
+
+**Decisions worth preserving:**
+
+- **Two attention signals, and the prod data justified keeping both — but not equally.**
+  *Overdue* = `ScheduledDeliveryDate` past and not delivered; it leads because it is Nova Poshta's
+  own commitment rather than our guess. *Stalled* = `TrackingUpdateDate` older than N days.
+  **On the smoke snapshot stalled was a strict subset of overdue — it caught no parcel overdue
+  missed.** It is insurance against a generous scheduled date, not a second producer today. Record
+  this so a future reader does not mistake it for load-bearing; if it never produces independently,
+  that is grounds to reconsider, not evidence it works.
+- **Code 111 (failed delivery, recipient absent) gets its own `problem` bucket immediately**, rather
+  than waiting for a retry window. The asymmetry decided it: a false alarm costs one glance, a
+  missed failed delivery costs the parcel when it returns to sender. The 24-hour-retry refinement
+  was **deliberately deferred to collect evidence rather than rejected** — the transition log will
+  show empirically how often 111 self-resolves, and NP Global hands the last mile to a US carrier
+  whose retry behaviour we have never observed. Filed as `WB-TRACK-1-followup-1`.
+- **Code 80 keeps the last known status, flags, and keeps polling** — never silently skipped (that
+  is the blind-instrument pattern this project has been bitten by twice) and never folded into
+  `untracked`, which means "a carrier we cannot query at all" and would lose the distinction.
+- **Carrier is recorded from `shipping_type`, NOT from `Identifier`.** `Identifier` takes exactly
+  three values — `WesternBid` (84), `NovaPost` (77), `UPS` (6) — but the `UPS` bucket **also carries
+  a USPS `9261…` number**, so keying carrier off it would have labelled a USPS parcel as UPS
+  permanently. `Identifier` is fine for *selecting* the NP number; it is not a carrier field. This
+  is exactly the trap the spec's "enumerate the real values, do not assume" rule existed to catch,
+  and it was there.
+- **`UndeliveryReasons` is always empty** — `[]` on every delivered parcel and `''` on the one
+  failed delivery. Returns must be detected from `StatusCode` alone. The spec assumed otherwise.
+
+**Verification.** 872 backend + 79 MCP tests, both completeness guards, migration round-trip at a
+single head. Live assertions are pinned to the **terminal** parcel only — `59500007067740`, code 9,
+`np_delivered_at` 2026-08-02 21:22:47Z (03.08.2026 00:22:47 Kyiv) — because in-flight parcels
+change: `59500007112662` moved from code 5 to a code-80 stub *during planning*, which is precisely
+why transient parcels are illustrative fixtures and never strict assertions. Idempotency proven on
+prod: second run `polled=56 created=0 changed=0`, i.e. 77 − 21 delivered, so terminal parcels leave
+the set permanently and unchanged ones write no rows.
+
+**Prod distribution, and the question it settled.** 84 parcels: 21 delivered, 54 moving, 1 problem,
+1 no_data, 7 untracked. Within the 63 non-delivered: **12 overdue (19%), 4 stalled (6.3%), 51 clean
+(81%)** — 11 of the 12 overdue by more than a day, the worst at 11.98d. **The signal is selective**,
+which was genuinely in doubt: the dev run had flagged 9 of 10 non-delivered. That turned out to be a
+stale-sample artefact — dev's WB mirror froze on 2026-07-30, so every dev parcel had aged past its
+promise. `WB-TRACK-2`'s exception-first design therefore holds; had prod matched dev, that page
+would have degraded into an ordinary list and needed recalibration first.
+
+**Corrections to the brief, both from reading rather than assuming:**
+
+- **Scheduler isolation is not what the brief claimed.** The planning brief asserted
+  `max_instances=1` / `coalesce=True` protect the other four jobs. They do not — read out of the
+  installed `apscheduler==3.10.4`, cross-job isolation comes from
+  `executors/base_py3.py:run_coroutine_job`, which wraps the coroutine in `except BaseException`,
+  converts it to `EVENT_JOB_ERROR` and returns normally, while `AsyncIOExecutor._do_submit_job`
+  gives each job its own task. `max_instances`/`coalesce` bound this job **against itself over
+  time** — worth having, since the NP call can reach ~90s with retries — but they are
+  self-isolation, not cross-job. The job also catches and rolls back its own exceptions.
+- **Two status codes are undocumented where anyone would look.** Prod exercised codes 1, 5, 115 and
+  121 that dev never saw; **115 (arrived at customs) and 121 (sent onward after customs) appear
+  nowhere on Nova Poshta's developer portal** — only on the NovaPost *international* portal. Both
+  classify as `moving`, correctly. Also honest: 17 parcels sat on code 4 at Boryspil at planning
+  time and had all moved to 5 by the poll, so code 4 exists in this population but is absent from
+  the recorded snapshot.
+
+**Code 80 remains unexplained.** `59500007112662` has stubbed continuously since planning — 9 fields,
+empty status, no dates, no recovery — on both dev and prod, and WB's own mirror still shows it as
+`Parcel created / Paid`. Prod first observed it *after* it went quiet, so there is no last-known
+status to preserve and the field is legitimately empty. Whether 80 means number-reassigned,
+waybill-deleted or data-purged is unknown; NP documents nothing, so the UI label stays neutral
+rather than overclaiming. Checking the WB cabinet for this one parcel would likely answer it.
+
+**Follow-ups filed:** `WB-TRACK-1-followup-1`. `NP-FIX-5` restored below — **this sprint leaves it
+standing but removes most of its cost**: the keyless client, Kyiv date parsing, transition log and
+classification service are all population-agnostic, so only candidate selection from
+`orders.ttn_number` and the order-card surface remain.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -4701,6 +4797,10 @@ in this document where applicable, to avoid duplication.
 | ORDER-SHIPPING-2 | Shipping-line discounts booked as item discounts + shipping overstated | **DONE 2026-08-05** — merged `37ce327`, deployed, backfill run (445 orders written, one pass). See the closure entry above. Row kept so the table stays exhaustive. |
 | ORDER-SHIPPING-OVERWRITE | The shipping backfill is fill-only; a row it refuses stays wrong permanently | From ORDER-SHIPPING-2 (2026-08-05). The backfill writes a column only when it is NULL, and refuses a row imported between the two deploys whose fresh `shipping_discount` is non-zero (it would otherwise assert both that shipping was charged in full and that it was given away). That branch has **never executed** — the deploy window produced no orders — but its standing cost is that a refused row is not repairable by re-running, since the next run refuses identically. The four columns are channel-reported facts with **no human input to protect**, unlike `platform_fee` where "never overwrite a hand-entered value" is load-bearing. So the cleaner rule is an unconditional overwrite from source, which makes the contradictory row impossible rather than guarded against, and makes any future mapper fix repairable by simply re-running. Small; do it the next time this code is opened. |
 | BACKFILL-ROUTE-UNEXERCISED | `POST /shops/{id}/backfill-shipping` has never executed in production | From ORDER-SHIPPING-2 (2026-08-05). All three runs (two dry, one real) went through a temporary in-container script calling the service function directly, which was the right trade for a one-time catch-up — but it means the route, its `require_role(OWNER)` guard, its shop-validity checks (`shops.py:542-556`) and its `get_db` commit-on-return path have never run outside tests. The next person to need this endpoint — most likely after a mapper change, under time pressure — will be its first user. Retire the risk cheaply: call it once with `dry_run=true` and an OWNER token at any convenient moment. Note the token is in-memory only (`frontend/src/api/client.ts:26`, not localStorage) and lives 15 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`); read it from DevTools → Network → any `/api/` request → `authorization` header. From inside the server use `127.0.0.1:8000`, not `localhost` (which resolves to `::1`). |
+| WB-TRACK-1-followup-1 | A retry window before code 111 counts as a `problem` | From `WB-TRACK-1` (2026-08-05). Code 111 ("failed delivery, recipient absent") is classified as `problem` **immediately**, deliberately: a false alarm costs one glance, a missed failed delivery costs the parcel when it returns to sender. But couriers commonly retry the next day, and NP Global hands the last mile to a US carrier whose retry behaviour we have **never observed** — so a delay threshold today would encode a guess, which is the failure mode this project has paid for twice. The transition log (`wb_tracking_event`, one row per status change) is now collecting exactly the evidence needed: how often 111 resolves within 24h without intervention. Revisit once there are enough 111s to see a pattern; one parcel (Excelsior, since 05-08 02:10) is not a distribution. Refining this is **enabled**, not pending. |
+| WB-TRACK-CODE-80 | Nova Poshta code 80 — a tracking number that stops resolving mid-journey | From `WB-TRACK-1` (2026-08-05). `59500007112662` went from code 5 ("прямує до Garnet Valley") to a 9-field stub — empty status, no dates — **during sprint planning**, and has not recovered on either dev or prod since. WB's own mirror still shows it as `Parcel created / Paid`. Handled safely (last known status kept, flagged, polling continues, transition logged) but **not understood**: NP documents nothing for 80, so whether it means number-reassigned, waybill-deleted-by-sender or data-purged-on-a-schedule is unknown, and the UI label is deliberately neutral rather than overclaiming. Cheapest path to an answer is looking up this one parcel in the WesternBid cabinet. Until then, watch whether a second parcel ever does this — a one-off and a recurring class need different responses. |
+| NP-FIX-5 | Background tracking poll for **domestic** NP TTNs on orders (4h batch + manual refresh button) | **Restored to this table 2026-08-05** — designed in the 2026-05 Nova Poshta audit (§7 Q4, `docs/integrations/nova-poshta.md:350`), never built, and at some point silently dropped out of the backlog entirely; surfaced again while scoping `WB-TRACK-1`. It targets a **different population**: `orders.ttn_number` (KoraKlenu, domestic UA) rather than WesternBid's international parcels, with its own candidate query and its own surface (the order card). `WB-TRACK-1` leaves it standing but **removes most of its cost and its blocker** — the keyless NP client, the Kyiv date parsing, the transition log and the classification service are all population-agnostic and already built, and the assumption that such a poll needs the shop's NP API key is now **disproven** (`getStatusDocuments` works with `apiKey: ""`). What remains is candidate selection from `orders.ttn_number` plus the order-card UI. Sequence after `WB-TRACK-2`, since the classification surface should settle first. |
+| WB-TRACK-2 | A parcel-monitoring page — where anyone in the system watches deliveries | Scoped 2026-08-05 alongside `WB-TRACK-1` (spec in `task.md`), deliberately sequenced second. **Prod distribution now known (2026-08-05), and it validates the design:** of 63 non-delivered parcels, 12 (19%) raise a signal and 51 (81%) are clean — so an exception-first page shows a short, actionable list rather than everything. Dev had suggested 9-of-10, which would have killed this design; that was a stale-sample artefact (dev's WB mirror froze 2026-07-30). Full state counts to design against: 21 delivered, 54 moving, 1 problem, 1 no_data, 7 untracked. **Not a nice-to-have: it is the only workable surface.** Delivery status cannot live on the order card, because `wb_parcel.order_id` is set only when a label was fetched through OrderHub (`shipping.py:609-615`) — so it is NULL for most parcels and an order-side view is blocked on `WB-2`, while a parcel-side view is not. Extend the existing `/westernbid` page rather than adding a new one: it already has the list, the sidebar entry and the access path. Note this changes that page's purpose — its current headline column is WB's own `Status`, which still reads `Parcel created` on a parcel that has been moving for a week, and becomes noise once real delivery status lands. Design: **exception-first**, not a sortable table — "needs attention" (overdue / stalled / returned) on top with a count, "in transit" collapsed to a single summary line, "delivered" for a few days then gone; untracked carriers (UPS, USPS — roughly a tenth of volume) shown explicitly as untracked. **Deferred for one specific reason:** after a week of `WB-TRACK-1` running we will know the real distribution of states, so the page gets designed around what actually occurs instead of three guessed groups of which two would always be empty. Audience is "any user in the system" (Sergii, 2026-08-05), so it inherits ordinary role/shop access — see `WB-TRACK-1` OQ6 on whether parcels are shop-scoped at all. |
 | SHOPIFY-VERSION-DRIFT | The Shopify API version floats to whatever Shopify's oldest supported version is, silently, every ~3 months | Found during ORDER-SHIPPING-2 planning (2026-08-05). `SHOPIFY_API_VERSION` does not bind once the pinned version sunsets — Shopify serves the oldest supported one and says so only in the `X-Shopify-API-Version` response header. Pinning `2025-10` in ORDER-SHIPPING-2 makes the constant **true today** but does **not** fix this: when 2025-10 sunsets (~Oct 2026) the same silent fallback returns, and the integration changes behaviour with no code change and no signal. The real fix is a check that the served version matches the pin — assert the response header in the client, or a scheduled probe that alerts on mismatch. Bundle with the monitoring work in Sprint 11; until then the only defence is remembering this row exists. |
 | WEBHOOK-MAPPER-DEGRADED | The Shopify webhook path produces structurally incomplete orders | Surfaced by ORDER-SHIPPING-1 (2026-08-05). `routers/webhooks.py:96-115` builds its payload with **no `items`** and **no `order_number`**, so a webhook-created order lands with zero line items and a NULL order number, while the polling path (`shopify_sync.py:517-542`) sets both. Three consequences: the card's "Items subtotal" reads 0.00; `finance_service`'s residual books that order's **entire** `total_price` as shipping revenue; and ORDER-SHIPPING-1's `"items"` balance check is skipped there by design, so nothing detects it. **Apparently dormant** — every order inspected on prod carries both a `91890_XXXX` number and line items, suggesting all current orders arrived via polling — but that is an observation, not a query. Settle it first: count orders with `order_number IS NULL` or with no `order_items` rows. If non-zero, this is a live money bug, not a latent one. |
 | SHOPIFY-HISTORY-GAP | The CRM holds 445 of the store's 831 Shopify orders; 37 orders from 2025-08…12 are simply absent | Found during the ORDER-SHIPPING-1 dry run (2026-08-05). DB orders all start 2026-01; Shopify reports orders in 2025-08 (14), 2025-09 (17), 2025-11 (4) and 2025-12 (2) that were never imported, so those months read as zero revenue in the CRM while analytics shows 396.50 of sales. The backfill's `missing_in_shopify: 0` only proves every DB order exists upstream — the reverse direction is not something any current job checks. Decide whether the 2026-01 cutoff was intentional (a SHOPIFY-BACKFILL window) or an accident, and whether the older history is worth importing at all. Note the interaction: importing them retroactively moves historical revenue, so it is a finance-visible change, not a quiet top-up. |
