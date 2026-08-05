@@ -28,6 +28,7 @@ EXPECTED_TOOLS = {
     "get_product",
     "get_product_bom",
     "compute_product_cost",
+    "check_parcel_delivery",
 }
 
 
@@ -122,6 +123,7 @@ async def test_read_tools_do_not_write_to_the_action_log():
         ("get_product", {"product_id": "p1"}, "/api/products/p1"),
         ("get_product_bom", {"product_id": "p1"}, "/api/products/p1/bom"),
         ("compute_product_cost", {"product_id": "p1"}, "/api/products/p1/bom/cost"),
+        ("check_parcel_delivery", {}, "/api/westernbid/tracking"),
     ],
 )
 async def test_tool_maps_to_its_endpoint(tool, args, expected_path):

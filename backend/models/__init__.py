@@ -16,6 +16,7 @@ from models.app_setting import (
     GOOGLE_ADDRESS_VALIDATION_API_KEY,
     PLAINTEXT_SETTING_KEYS,
     SECRET_SETTING_KEYS,
+    WB_TRACKING_STALLED_DAYS,
     WESTERNBID_API_KEY,
     WESTERNBID_LOGIN,
 )
@@ -53,6 +54,7 @@ from models.access_audit import AccessAudit
 from models.fx_rate_audit import FxRateAudit
 from models.agent_action_log import AgentActionLog
 from models.wb_parcel import WbParcel
+from models.wb_tracking import WbParcelTracking, WbTrackingEvent
 
 __all__ = [
     "Base",
@@ -68,6 +70,7 @@ __all__ = [
     "GOOGLE_ADDRESS_VALIDATION_API_KEY",
     "PLAINTEXT_SETTING_KEYS",
     "SECRET_SETTING_KEYS",
+    "WB_TRACKING_STALLED_DAYS",
     "WESTERNBID_API_KEY",
     "WESTERNBID_LOGIN",
     "Shop",
@@ -107,4 +110,6 @@ __all__ = [
     "FxRateAudit",
     "AgentActionLog",
     "WbParcel",
+    "WbParcelTracking",
+    "WbTrackingEvent",
 ]

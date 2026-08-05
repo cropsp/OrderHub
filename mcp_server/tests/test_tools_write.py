@@ -20,6 +20,7 @@ READ_TOOLS = {
     "list_material_movements", "list_receipts_by_invoice",
     "list_overhead_materials", "list_overhead_expenses",
     "list_products", "get_product", "get_product_bom", "compute_product_cost",
+    "check_parcel_delivery",
 }
 WRITE_TOOLS = {
     "create_material", "update_material", "archive_material",
@@ -85,10 +86,12 @@ def _line(material_id, qty, name=None):
 
 @pytest.mark.asyncio
 async def test_exact_registered_tool_surface():
-    """Pins the whole surface: warehouse + catalog only.
+    """Pins the whole surface: warehouse + catalog, plus one read-only shipping tool.
 
-    Orders, shipping, users, shops and finance are deliberately absent — every
-    one has irreversible real-world side effects.
+    Orders, users, shops and finance are deliberately absent — every one has
+    irreversible real-world side effects. `check_parcel_delivery` (WB-TRACK-1) is
+    the single exception to the warehouse/catalog scope and earns it by being a
+    pure read of carrier status: it mutates nothing here or at Nova Poshta.
     """
     mcp, client, _ = _build({})
     names = {t.name for t in await mcp.list_tools()}

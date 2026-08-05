@@ -180,6 +180,13 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "np_default_weight_kg": "neutral",
     "total_volume_cm3": "neutral",
     "volume_cm3": "neutral",
+    # WB-TRACK-1: elapsed-day counts on the delivery tracking surface. Float
+    # rather than int so "0.6 days overdue" does not round to "on time", and
+    # classified explicitly rather than dodging this guard by making them ints —
+    # the whole point is that a new numeric field forces a decision. Nothing on
+    # /api/westernbid/tracking carries a currency amount.
+    "days_overdue": "neutral",
+    "days_since_movement": "neutral",
 }
 
 NON_NEUTRAL = {"revenue", "cost", "margin", "money"}

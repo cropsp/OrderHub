@@ -57,6 +57,12 @@ FX_RATE_DATE = "fx_rate_date"
 # Written only on a SUCCESSFUL fetch, or staleness detection is meaningless.
 FX_FETCHED_AT = "fx_fetched_at"
 
+# ── WB-TRACK-1 ─────────────────────────────────────────────────────────────
+# Days without a Nova Poshta scan before an undelivered parcel counts as
+# "stalled". Configuration, never a literal in a condition (task rule 4).
+# Non-secret, so plaintext. Default lives in services/wb_tracking_service.py.
+WB_TRACKING_STALLED_DAYS = "wb_tracking_stalled_days"
+
 
 # Storage discipline, asserted by tests. Making `value_encrypted` nullable (to
 # admit plaintext rows) removed the schema-level guarantee that secrets are
@@ -76,6 +82,7 @@ PLAINTEXT_SETTING_KEYS = frozenset(
         FX_UAH_PER_USD_CACHED,
         FX_RATE_DATE,
         FX_FETCHED_AT,
+        WB_TRACKING_STALLED_DAYS,
     }
 )
 

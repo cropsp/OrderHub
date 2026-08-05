@@ -233,3 +233,50 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         # `in` is a Python keyword, so it cannot be written as a kwarg literal.
         params = {"in": in_currency} if in_currency else {}
         return dump(await client.get(f"/api/products/{product_id}/bom/cost", **params))
+
+    # ── delivery tracking (WB-TRACK-1) ─────────────────────
+
+    @mcp.tool()
+    async def check_parcel_delivery(state: str | None = None) -> str:
+        """Delivery status of the WesternBid parcels currently in flight.
+
+        Answers "what has arrived, what is still moving, what is stuck" from Nova
+        Poshta's own tracking, which WesternBid itself cannot provide — WB's
+        status only covers its leg to the Lviv warehouse and stops exactly where
+        delivery begins.
+
+        `counts` always describes the full set even when `state` filters the
+        rows. Each parcel carries a `state` plus two INDEPENDENT attention flags;
+        a parcel can be flagged by either or both:
+
+          * `is_overdue` — Nova Poshta's own `scheduled_delivery_at` has passed
+            and the parcel is not delivered. Their commitment, not our estimate.
+            `days_overdue` says by how much; report the worst first.
+          * `is_stalled` — no carrier scan for `stalled_days` days. This catches
+            a parcel sitting in a warehouse inside a generous delivery window,
+            which `is_overdue` alone would miss.
+
+        States:
+          * `delivered` — arrived; `delivered_at` is when the recipient got it.
+          * `moving`    — in transit, nothing wrong.
+          * `problem`   — Nova Poshta reports a failed delivery attempt, refusal,
+            return or storage expiry. Needs a human, not a wait.
+          * `no_data`   — Nova Poshta has stopped returning data for a number
+            that previously worked. Say exactly that; do NOT tell the owner the
+            parcel was deleted, canceled or reassigned — NP documents no reason
+            and we do not know which it is. `status_text` still holds the last
+            status we saw, and `no_data_since` when it went quiet.
+          * `untracked` — a UPS or USPS parcel. Nova Poshta cannot track these
+            and this sprint does not either. Never omit them from an answer:
+            report them and say they must be checked by hand.
+
+        `status_text` is Nova Poshta's own Ukrainian wording, verbatim. Quote it
+        rather than paraphrasing — it names the city the parcel is in.
+
+        `polled_at` is when the daily job last ran. If it is null or old, say so
+        before reporting anything as "still moving": nothing has been refreshed.
+
+        Args:
+            state: optionally filter to one of the states above.
+        """
+        return dump(await client.get("/api/westernbid/tracking", state=state))

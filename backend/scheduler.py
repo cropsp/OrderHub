@@ -17,7 +17,8 @@ from models.app_setting import FX_FETCHED_AT, FX_UAH_PER_USD_CACHED
 from models.shop import Shop, ShopPlatform
 from models.user import User
 from models.wb_parcel import WbParcel
-from services import fx_service
+from services import fx_service, wb_tracking_service
+from services.np_tracking import NovaPoshtaTrackingClient
 from services.shopify_sync import sync_shop_orders, sync_shop_refunds
 from services.westernbid import (
     WB_MAX_PAGE_SIZE,
@@ -273,6 +274,48 @@ async def run_westernbid_poll():
             await db.rollback()
 
 
+async def run_wb_tracking_poll():
+    """Poll Nova Poshta for delivery status of in-flight WB parcels (WB-TRACK-1).
+
+    Fifth scheduler job, daily. Unlike `run_westernbid_poll` there is NO
+    credential branch: `TrackingDocument.getStatusDocuments` needs no API key,
+    which is the whole point — tracking is not tied to any shop's Nova Poshta
+    credentials and works for shops that have none.
+
+    Batched at 100 documents per request, so the ~30 parcels in flight are one
+    HTTP call per day, never one call per parcel.
+    """
+    logger.info("Starting WB tracking poll job...")
+
+    async with async_session_factory() as db:
+        try:
+            candidates = await wb_tracking_service.select_candidates(db)
+            if not candidates:
+                await db.commit()  # persist any aged-out retirements
+                logger.info("WB tracking poll: no parcels to track")
+                return
+
+            client = NovaPoshtaTrackingClient()
+            records = await client.get_status_documents(
+                [c.tracking_number for c in candidates]
+            )
+            summary = await wb_tracking_service.record_poll(db, candidates, records)
+            await db.commit()
+            logger.info(
+                "WB tracking poll complete: polled=%d created=%d changed=%d "
+                "delivered=%d no_data=%d missing=%d",
+                summary["polled"],
+                summary["created"],
+                summary["changed"],
+                summary["delivered"],
+                summary["no_data"],
+                summary["missing"],
+            )
+        except Exception as e:
+            logger.error(f"WB tracking poll failed: {e}")
+            await db.rollback()
+
+
 async def run_fx_rate_refresh():
     """Refresh the cached UAH/USD rate from NBU (FX-CONVERSION).
 
@@ -370,6 +413,16 @@ def start_scheduler():
     # a fresh database with no rate — and therefore no COGS on USD orders — for 24
     # hours after deploy. FX_MIN_REFETCH_HOURS inside the job keeps that startup
     # fetch idempotent across restarts.
+    # Nova Poshta delivery tracking (WB-TRACK-1) — fifth job, daily. NP scans a
+    # healthy parcel at least once a day (p90 of observed gaps is 1.17 days), so
+    # a daily poll loses nothing, and the whole in-flight set is one request.
+    scheduler.add_job(
+        run_wb_tracking_poll,
+        'interval',
+        days=1,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.add_job(
         run_fx_rate_refresh,
         'interval',
