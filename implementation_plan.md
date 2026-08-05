@@ -4404,6 +4404,124 @@ whatever files it is given. It is an operator gate run before an import, not a C
 
 ---
 
+### ORDER-SHIPPING-1 — capture Shopify shipping / discount / tax on the order (closed 2026-08-05)
+
+**Merged fast-forward, `af3c3b1` → `b7a74a5`, deployed to prod 2026-08-05.** Migration
+`a7c2e9f14b83`, single head. **The backfill has NOT been run** — not with `dry_run=false`, and the
+one read-only dry run found a defect that must be fixed first (`ORDER-SHIPPING-2`, in flight).
+
+> On the `af3c3b1` gap: the previous release block records prod `main` as `6e2ec78`, and that was
+> correct for **prod**. Git's `main` was one commit ahead — `af3c3b1`, docs-only (`git diff
+> --name-only` returns no non-`.md` path), the very commit that wrote that release block. No code
+> divergence. Recorded because a brief built on "main = 6e2ec78" would otherwise look wrong.
+
+**Problem.** The shipping price a customer paid was stored nowhere. `ORDERS_QUERY` asked only for
+`totalPriceSet`, and the order card reconstructed shipping as `total − Σ(qty × unit_price)`. That
+residual silently absorbs discounts and tax, so it was correct only when both were zero. Measured
+on prod before the fix: `91890_1841` rendered 4.51 where the real shipping was 9.00 (a 4.49 discount
+ate the difference); `91890_1072` produced a negative residual and rendered `—` under a tooltip
+claiming the order total was missing, which was false. Store-wide over 365 days: 5 019.40 shipping,
+619.61 discounts, 55.60 tax — roughly $675 of non-shipping money reported as "Shipping / other",
+concentrated on exactly the discounted orders.
+
+**What shipped.** Three nullable `Numeric(10,2)` columns (`shipping_revenue`, `discount_total`,
+`tax_total`), populated by both Shopify ingest paths and an OWNER-only backfill
+(`POST /shops/{id}/backfill-shipping`, `dry_run` defaulting true). The card renders stored facts;
+the residual survives only as a fallback, relabelled **"Shipping / other (derived)"** with a note
+that it absorbs discount and tax, so a derived number can never again be mistaken for a captured
+one. Suites 805 backend (+68) / 168 frontend (+9); `tsc` 21 and lint byte-identical against `main`.
+
+**Decisions worth preserving:**
+
+- **`_to_decimal_or_none`, not `_to_decimal`.** The file's existing helper maps absence to
+  `Decimal("0")`, which is right for a total that must exist and catastrophic for these columns: it
+  would write "this order shipped free" for every payload that never mentioned shipping. NULL vs
+  0.00 is the load-bearing distinction of the whole sprint, and the money guard classifies all three
+  as `revenue` (not `view_costs`-gated) because they are components of `total_price`, which any
+  viewer of the order already sees.
+- **Two mappers, side by side, with a parity test.** `extract_money_breakdown` (GraphQL camelCase)
+  and `extract_money_breakdown_rest` (webhook snake_case) live adjacent in `shopify_sync.py`
+  precisely because the failure mode of rule 3 is fixing one and forgetting the other. **The parity
+  test has a proven blind spot** — see the defect below.
+- **`check_order_balance` runs two independent checks.** `"shopify"` (`subtotal + shipping + tax =
+  total`, Shopify's own invariant, since `subtotalPriceSet` is already net of discounts) and
+  `"items"` (`items_gross − discount + shipping + tax = total`, the identity the card renders).
+  They fail for different reasons and only the first means the stored figures are suspect. It fires
+  on nothing when all three values are absent — absence is already reported by the columns staying
+  NULL — and skips the `"items"` leg when there are no line items. **That second guard silences the
+  check on webhook-created orders, which is exactly where the known gap lives**; accepted, but it
+  means that path has no automated detector.
+- **Month bucketing in `Europe/Kiev`, deliberately diverging from `finance_service`.** The backfill
+  report reconciles against Shopify analytics, which buckets in the shop's timezone;
+  `SHOPIFY-REFUNDS-followup-2` measured what UTC bucketing costs ($39.99 wrong in 2024-12). So the
+  same money is now bucketed two ways in one codebase: Kyiv in this report, UTC in the P&L. **The
+  two will not agree per-month, and that is not a bug in either** — it is followup-2 becoming
+  concrete. Anyone comparing the backfill report to the Finance page must know this first.
+
+**The deploy blocker, caught before the swap.** `REPORT_TZ = ZoneInfo("Europe/Kiev")` is
+module-level, and the deploy image (`python:3.12-slim`) ships no `/usr/share/zoneinfo` and had no
+`tzdata` wheel. The import chain `main.py → scheduler → shopify_sync` would have raised before
+uvicorn bound — a crash-loop, not a degraded feature. Fixed by pinning `tzdata==2026.3` and gated in
+a throwaway container before the image swap. **Side effect: it also closed a pre-existing prod bug** —
+`routers/shipping.py:236` makes the identical `ZoneInfo` call at request time, outside any `try`, so
+NP TTN creation would have thrown an unhandled 500. Real, but **dormant**: prod has no MANUAL/UA shop
+(Lamamarka ETSY, Lamamarka Shopify, Vine&Roses ETSY), and NP TTNs are a KoraKlenu/dev workflow, so it
+is unlikely ever to have fired.
+
+**The dry run, and the defect it found (2026-08-05, read-only, nothing written).** 445 Shopify orders
+matched, 0 missing upstream, 0 written; the run issues one SELECT and skips the UPDATE entirely, so
+it holds no row locks (the `backfill_platform_fees` idiom, not STATEMENT-IMPORT's write-then-roll-back).
+Tax tied in **every** month; discounts tied everywhere except 2026-07. Two orders failed the
+`"shopify"` check and nothing else did:
+
+| Order | subtotal | shippingLine orig → disc | totalDiscountsSet | targetType | total |
+|---|---|---|---|---|---|
+| `91890_1815` | 369.29 | 49.00 → **0.00** | 49.00 | `SHIPPING_LINE` 100% | 369.29 |
+| `91890_1829` | 199.98 | 54.00 → **0.00** | 54.00 | `SHIPPING_LINE` 100% | 199.98 |
+
+`totalShippingPriceSet` is the **pre-discount** charge and `totalDiscountsSet` **includes** shipping
+discounts, so we would have stored shipping the customer never paid and booked a shipping promo as an
+item discount. 2026-07's discount gap was exactly 103.00 = 54 + 49 — one mechanism explaining both of
+that month's divergences. **The remaining monthly deltas are all identified and benign:** +14.50 in
+2026-04 (`91890_1559` is `test: true`), +10.00 in 2026-03 and +8.00 in 2026-05 (refunded in-month),
++8.00 in 2026-07 (`91890_1660` refund reversal, created May). Zero CANCELLED orders exist, so that
+hypothesis is dead and explains nothing.
+
+**The methodological lesson, which matters more than the defect.** The plan asserted no shipping
+discount existed in this store, citing "every `discountApplications.targetType` is `LINE_ITEM`". That
+was wrong, and the *method* is why: the claim rested on sampling the top-25 orders by ShopifyQL's
+`discounts` column, and **analytics does not count shipping discounts in that column** — so the
+sample was structurally blind to the exact case it was meant to rule out. A verification instrument
+that cannot see the thing it is verifying returns a clean result either way.
+
+**The API version pin is inert.** `SHOPIFY_API_VERSION = "2024-04"` does not bind: every response
+returns `X-Shopify-API-Version: 2025-10`, verified by echo-testing four versions (2025-10 / 2026-01 /
+2026-04 / 2026-07 each echo themselves; 2099-01 404s). 2024-04 is long sunset and Shopify serves the
+oldest supported version instead. So there was never a conflict with the docs' "as of 2024-07"
+wording — the pin was the illusion. `discountedPriceSet` returns the true 0.00 on all four supported
+versions, so `ORDER-SHIPPING-2` does not rest on one version's quirk. Two comments
+(`shopify_sync.py:264-268` and a test docstring in `test_shopify_sync_shipping.py:318-336`) still
+encode the disproven premise; the test's assertion is correct, only its rationale is wrong. Both are
+being corrected in `ORDER-SHIPPING-2`, along with pinning `2025-10` — behaviourally a no-op today.
+**That pin does not fix the drift** (see `SHOPIFY-VERSION-DRIFT` below).
+
+**Verified through the CRM's own client, and that mattered.** The original observation came from a
+different Shopify client on a version it chose itself. Re-verified via `call_shopify_graphql`
+(`shopify_sync.py:518`) with the app's own constant and decrypted token: every figure reproduced
+exactly, and the control order `91890_1841` behaved as predicted. The premise held — but it held on
+evidence, not on the earlier claim, and the earlier claim's version attribution was wrong.
+
+**Not verified.** UI check (b) — an order synced *after* the deploy rendering captured values —
+remains open. `91890_1873` was created 11:23:37 and the deploy completed 11:35:44, so it synced under
+the old code and stays NULL until the backfill; the sync skips existing orders, so it will never be
+revisited. Not blocking: the render path is covered by 9 vitest tests pinned to live data, and the
+mapper is far better exercised by the dry run's 445 orders.
+
+**Follow-ups filed below:** `ORDER-SHIPPING-2` (in flight), `SHOPIFY-VERSION-DRIFT`,
+`WEBHOOK-MAPPER-DEGRADED`, `SHOPIFY-HISTORY-GAP`, `PROD-LOGS-EPHEMERAL`.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -4457,6 +4575,11 @@ in this document where applicable, to avoid duplication.
 | BOM-COSTQUERY-DEADWIRE | `BomEditor.tsx` never renders the server-computed BOM cost | Surfaced during BOM-WASTE-1 (2026-08-02). `useBomCost`'s `.data` is never displayed — its only uses are `refetch()` + `isFetching` for the "Refresh cost" button spinner (`BomEditor.tsx:214-221`); the footer always shows the client-side `liveCost`. So `compute_bom_cost` never reaches that screen, and "Refresh cost" refetches a number nobody shows. BOM-WASTE-1 made the client math waste-inclusive so the footer is now correct; rewiring the footer to server data was deliberately NOT done because it would kill the live preview of unsaved rows. File: either render the server cost for saved state alongside the live preview, or drop the dead query + button. Low-priority. |
 | SHOP-FEE-1 | Per-shop `fee_percent` → `order.platform_fee` (Shopify + WB) | **MERGED to `main` AND DEPLOYED to prod 2026-08-04** (`6130eaf`, rebased from `2e502e8` — patch-identical per `git range-diff`; migration `e1a4c7b93d28` applied). **UI smoke passed** (fee input renders, no-op save round-trips, order payment summary intact). **Still functionally unverified: no shop has a rate, so the fee-computation path has never executed.** Originally built 2026-08-03 on `feat/shop-fee`. See the Release status block below for the full record. `Shop.fee_percent` Numeric(5,2) nullable → `platform_fee` computed at order creation from total_price (polling sync + webhook), passed keyword-only to `create_order` (off the public POST body), censored for non-VIEW_COSTS, OWNER-only dry-run backfill endpoint. No behaviour change until a rate is set. **Waiting on Sergii's WB net-received figures** to set the Lamamarka Shopify rate (Shopify+WB ≈ 8% headline) + manual smoke. The `.gitignore` secrets guard and the `docs/integrations/mcp-server.md` runbook fixes shipped in the same range (`9810a8c`, `228b016`). Etsy was out of SHOP-FEE-1 scope — it is closed by STATEMENT-IMPORT instead. |
 | STATEMENT-IMPORT | Import Etsy payment-account statement CSV → exact per-order fees + ads | **BUILT 2026-08-04 — see the closure entry above. Branch `feat/statement-import`, six commits, NOT merged/deployed; migration head `f2b8d6c40a15`.** The rest of this row records the pre-build decision and is superseded by the closure entry where they differ. **Decided 2026-08-04** after the Etsy fee analysis (CC over Jan–Jun statements, 210 orders): **Etsy takes 32.5% all-in** — fees+VAT **19.4%** (stable; incl. ~5.4% VAT on fees) + advertising **13.1%** (variable; the entire monthly swing); offsite-ads orders 34% vs 16% non-offsite (bimodal → a flat % is a compromise). Build an importer: parse the statement CSV, match fee/ad lines to orders by `Order #`, set **exact `order.platform_fee`** (transaction/processing/listing/shipping + VAT + offsite ads) and book **daily Etsy Ads (+VAT) → shop overhead** (period marketing). Idempotent re-import. Complements SHOP-FEE-1 (flat % stays for Shopify/WB). **Parser spec:** SIGNED sums NOT abs() (credits/refunds are positive), partition Marketing offsite-vs-Etsy-Ads with a loud assert, handle Deposit + Buyer Fee types. Statement CSVs are financial/PII — keep OUT of the repo (`docs/finance/` is git-ignored as of `9810a8c`). **Split revised 2026-08-04: ALL advertising — offsite AND daily Etsy Ads — books to marketing overhead; `platform_fee` carries `Fee` + `VAT` rows only.** This supersedes the "offsite per-order → platform_fee" wording above. **`task.md` written 2026-08-04**, deliberately under-specified with 8 Open Questions for CC to resolve in plan mode; the load-bearing ones are the idempotency key (the CSV has no line id and byte-identical rows legitimately repeat — a composite hash collapses them and under-books the fee) and whether VAT-on-advertising follows the fee bucket or the ad bucket (it moves money between the 19.4% / 13.1% targets — Sergii decides). Numbers + methodology now live in the repo at `docs/finance/etsy-fee-analysis-2026-h1.md`, which is the sprint's reconciliation gate. |
+| ORDER-SHIPPING-2 | Shipping-line discounts booked as item discounts + shipping overstated | **IN FLIGHT 2026-08-05** — not deferred, listed so the table stays exhaustive. Spec in `task.md`. Adds a fourth column `shipping_discount` and switches to `shipping_revenue = Σ shippingLines[].discountedPriceSet`, `discount_total = totalDiscountsSet − shipping_discount`. **The ORDER-SHIPPING-1 backfill is blocked until this ships** — running it now writes wrong figures onto 445 orders. Also carries the `2025-10` pin and the two stale comments. |
+| SHOPIFY-VERSION-DRIFT | The Shopify API version floats to whatever Shopify's oldest supported version is, silently, every ~3 months | Found during ORDER-SHIPPING-2 planning (2026-08-05). `SHOPIFY_API_VERSION` does not bind once the pinned version sunsets — Shopify serves the oldest supported one and says so only in the `X-Shopify-API-Version` response header. Pinning `2025-10` in ORDER-SHIPPING-2 makes the constant **true today** but does **not** fix this: when 2025-10 sunsets (~Oct 2026) the same silent fallback returns, and the integration changes behaviour with no code change and no signal. The real fix is a check that the served version matches the pin — assert the response header in the client, or a scheduled probe that alerts on mismatch. Bundle with the monitoring work in Sprint 11; until then the only defence is remembering this row exists. |
+| WEBHOOK-MAPPER-DEGRADED | The Shopify webhook path produces structurally incomplete orders | Surfaced by ORDER-SHIPPING-1 (2026-08-05). `routers/webhooks.py:96-115` builds its payload with **no `items`** and **no `order_number`**, so a webhook-created order lands with zero line items and a NULL order number, while the polling path (`shopify_sync.py:517-542`) sets both. Three consequences: the card's "Items subtotal" reads 0.00; `finance_service`'s residual books that order's **entire** `total_price` as shipping revenue; and ORDER-SHIPPING-1's `"items"` balance check is skipped there by design, so nothing detects it. **Apparently dormant** — every order inspected on prod carries both a `91890_XXXX` number and line items, suggesting all current orders arrived via polling — but that is an observation, not a query. Settle it first: count orders with `order_number IS NULL` or with no `order_items` rows. If non-zero, this is a live money bug, not a latent one. |
+| SHOPIFY-HISTORY-GAP | The CRM holds 445 of the store's 831 Shopify orders; 37 orders from 2025-08…12 are simply absent | Found during the ORDER-SHIPPING-1 dry run (2026-08-05). DB orders all start 2026-01; Shopify reports orders in 2025-08 (14), 2025-09 (17), 2025-11 (4) and 2025-12 (2) that were never imported, so those months read as zero revenue in the CRM while analytics shows 396.50 of sales. The backfill's `missing_in_shopify: 0` only proves every DB order exists upstream — the reverse direction is not something any current job checks. Decide whether the 2026-01 cutoff was intentional (a SHOPIFY-BACKFILL window) or an accident, and whether the older history is worth importing at all. Note the interaction: importing them retroactively moves historical revenue, so it is a finance-visible change, not a quiet top-up. |
+| PROD-LOGS-EPHEMERAL | `/app/logs` is not a volume mount on prod — every rebuild destroys the backend log | Noted during the ORDER-SHIPPING-1 deploy (2026-08-05); the pre-deploy log was preserved by hand at `~/server.log.pre-20260805` only because it was asked for. Since `backend/logs/server.log` is the *only* real log (docker stdout carries a fraction — see AI_ONBOARDING §9), a rebuild erases the evidence trail for whatever went wrong before it. Fix is a bind mount or named volume in `docker-compose.prod.yml` (server-only file). Small; do it before the next deploy that matters. Related baseline fact: the preserved log was **not** error-free — 16 ERRORs from SSL cert-verify failures across five cycles on 2026-08-04 17:08–18:08, fully recovered, cause unestablished. Do not assume a clean baseline when diffing logs. |
 
 ---
 
