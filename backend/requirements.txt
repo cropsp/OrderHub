@@ -28,6 +28,17 @@ tenacity==9.1.4
 pycountry==24.6.1
 python-dotenv==1.0.1
 aiofiles==23.2.1
+# Nothing imports this directly — `zoneinfo` falls back to it when the host has no
+# IANA database, which is exactly the deploy image (python:3.12-slim ships no
+# /usr/share/zoneinfo). Verified absent there on 2026-08-05: ZoneInfo("Europe/Kiev")
+# raised ZoneInfoNotFoundError inside the running prod backend.
+# Two call sites depend on it, and they fail differently:
+#   services/shopify_sync.REPORT_TZ — module level, so a miss is an ImportError at
+#     boot (main.py -> scheduler -> shopify_sync), i.e. a restart loop, not a
+#     degraded feature.
+#   routers/shipping.py TTN payload  — call time, so a miss is a 500 on TTN create.
+# Do not drop as unused.
+tzdata==2026.3
 # NOTE: the MCP SDK is deliberately NOT here. The MCP server is a separate stdio
 # process under mcp_server/ with its own venv (it needs pydantic>=2.11, which
 # would force this app off its pinned 2.10.4). Nothing in this app imports `mcp`.
