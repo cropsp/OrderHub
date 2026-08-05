@@ -60,6 +60,31 @@ class ShopPlatformFeeBackfillRequest(BaseModel):
         return self
 
 
+class ShopShippingBackfillRequest(BaseModel):
+    """ORDER-SHIPPING-1: capture shipping/discount/tax on orders that predate it.
+
+    `since`/`until` bound the run by `Order.ordered_at` — NOT the
+    COALESCE(shipped_at, ordered_at) the platform-fee backfill uses. This run is
+    reconciled against Shopify's order feed, so it has to select the same orders
+    the Shopify-side `created_at` page filter does. Both optional: unset walks the
+    shop's whole history.
+    """
+
+    since: date | None = None
+    until: date | None = None
+    # dry_run defaults TRUE, like every other shop backfill. This one is
+    # fill-only and never overwrites, but it still writes three money columns
+    # across the shop's whole history — a real write must be an explicit
+    # dry_run=false after reading the per-month reconciliation.
+    dry_run: bool = True
+
+    @model_validator(mode="after")
+    def _check_range(self) -> "ShopShippingBackfillRequest":
+        if self.since is not None and self.until is not None and self.until < self.since:
+            raise ValueError("until must be on or after since")
+        return self
+
+
 # STATEMENT-IMPORT: Etsy orders are priced from the payment statement, which
 # carries the exact per-order fee, so a flat rate must never also fire on them —
 # the two paths would both write `platform_fee` and the statement's accuracy

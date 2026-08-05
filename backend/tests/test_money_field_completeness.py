@@ -45,6 +45,27 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     "total_price": "revenue",
     "unit_price": "revenue",
     "price": "revenue",
+    # ORDER-SHIPPING-1: what the customer paid, decomposed. `revenue`, NOT
+    # `cost` — the verdict `platform_fee` two blocks down carries. That one is a
+    # fee we PAY out of the order; these three are components of `total_price`
+    # itself, which is classified `revenue` right above and has never been
+    # censored, so gating them would hide part of a number the same caller can
+    # already see in full.
+    #
+    # `discount_total` is the one worth arguing: it is a revenue DEDUCTION, and
+    # `total_refunds` below — also a revenue deduction — is classified `money`.
+    # The difference is where it travels. `total_refunds` rides finance routes
+    # gated by view_finance; this rides the order, beside `total_price`, for
+    # anyone allowed to see the order at all. Same kind as its neighbours here.
+    #
+    # Deliberately NOT added to ORDER_COST_FIELDS: that set is compared for
+    # EQUALITY against the `cost`-classified fields of OrderResponse
+    # (test_order_cost_fields_match_censor_set below), so a `cost` verdict here
+    # would force censoring and drag every order route back through the
+    # view_costs gate for revenue the caller is entitled to.
+    "shipping_revenue": "revenue",
+    "discount_total": "revenue",
+    "tax_total": "revenue",
     # cost (itemised)
     "production_cost": "cost",
     "shipping_np_cost": "cost",

@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import uuid
+from decimal import Decimal
 from fastapi import APIRouter, Request, Header, HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,7 +18,11 @@ from constants import SYSTEM_USER_ID
 from database import get_db
 from models.shop import Shop, ShopPlatform
 from services.encryption_service import decrypt_value
-from services.shopify_sync import call_shopify_graphql # For fetching full details if needed
+from services.shopify_sync import (  # For fetching full details if needed
+    call_shopify_graphql,
+    check_order_balance,
+    extract_money_breakdown_rest,
+)
 from schemas.order import OrderCreate
 from services.order_service import compute_platform_fee, create_order, update_order
 from models.order import Order
@@ -118,6 +123,29 @@ async def shopify_webhook(
             # here instead of there is priced identically. Webhook orders are
             # always created NEW, so there is no CANCELLED case to skip.
             platform_fee = compute_platform_fee(payload["total_price"], shop.fee_percent)
+
+            # ORDER-SHIPPING-1: same three figures as the polling sync, read from
+            # the REST payload's different field names (see
+            # extract_money_breakdown_rest). Only Shopify's own invariant is
+            # checkable here — this path creates no OrderItem rows, so there is
+            # no line-item subtotal to reconcile against.
+            breakdown = extract_money_breakdown_rest(data)
+            imbalance = check_order_balance(
+                total=Decimal(str(payload["total_price"])),
+                shipping=breakdown["shipping_revenue"],
+                discount=breakdown["discount_total"],
+                tax=breakdown["tax_total"],
+                subtotal=breakdown["subtotal"],
+            )
+            if imbalance:
+                logger.warning(
+                    "ORDER-SHIPPING-1 balance check failed (%s) for webhook order %s: "
+                    "total=%s shipping=%s discount=%s tax=%s subtotal=%s",
+                    imbalance, external_id, payload["total_price"],
+                    breakdown["shipping_revenue"], breakdown["discount_total"],
+                    breakdown["tax_total"], breakdown["subtotal"],
+                )
+
             create_kwargs = {}
             if platform_fee is not None:
                 # Literal "platform_fee: <amt>" token — see _FINANCIAL_COMMENT_RE
@@ -132,6 +160,9 @@ async def shopify_webhook(
                 OrderCreate(**payload),
                 system_user,
                 platform_fee=platform_fee,
+                shipping_revenue=breakdown["shipping_revenue"],
+                discount_total=breakdown["discount_total"],
+                tax_total=breakdown["tax_total"],
                 **create_kwargs,
             )
             logger.info(f"Created new order {external_id} via webhook.")

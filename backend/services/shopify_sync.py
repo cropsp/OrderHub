@@ -10,12 +10,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import logging
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 
 logger = logging.getLogger(__name__)
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import Date, cast, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models.shop import Shop, ShopPlatform
@@ -60,6 +61,34 @@ query GetOrders($first: Int!, $after: String, $query: String) {
           shopMoney {
             amount
             currencyCode
+          }
+        }
+        # ORDER-SHIPPING-1 — what the customer paid, decomposed. shopMoney only,
+        # matching the convention of every other money field in this file.
+        #
+        # `subtotalPriceSet` is fetched but NOT stored: it is already NET of
+        # discounts, so it exists here purely to check Shopify's own invariant
+        # (subtotal + shipping + tax == total). The stored decomposition is
+        # against the PRE-discount line-item prices below, which is what the
+        # order card sums.
+        subtotalPriceSet {
+          shopMoney {
+            amount
+          }
+        }
+        totalShippingPriceSet {
+          shopMoney {
+            amount
+          }
+        }
+        totalDiscountsSet {
+          shopMoney {
+            amount
+          }
+        }
+        totalTaxSet {
+          shopMoney {
+            amount
           }
         }
         note
@@ -174,6 +203,169 @@ def _to_decimal(raw: Any) -> Decimal:
         return Decimal(str(raw))
     except (InvalidOperation, ValueError):
         return Decimal("0")
+
+
+def _to_decimal_or_none(raw: Any) -> Optional[Decimal]:
+    """Like `_to_decimal`, but absence stays absent (ORDER-SHIPPING-1).
+
+    `_to_decimal` maps a missing value to `Decimal("0")`, which is correct for a
+    total that must exist but catastrophic for the nullable money columns: it
+    would write 0.00 — "this order shipped free" — where the truth is "the
+    payload never told us". NULL is the only honest answer there, so this variant
+    is what the shipping/discount/tax mappers use.
+
+    Shopify's MoneyBag fields are non-null, so a real order node always yields a
+    real figure (0.00 included, which IS a fact). None here means the key was
+    absent: an older API version, a REST payload that omits it, or a partial
+    fixture.
+    """
+    if raw in (None, ""):
+        return None
+    try:
+        return Decimal(str(raw))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+# ORDER-SHIPPING-1 — money is stored at 2dp, so anything under a cent is
+# rounding, not an imbalance.
+BALANCE_TOLERANCE = Decimal("0.01")
+
+
+def check_order_balance(
+    *,
+    total: Optional[Decimal],
+    shipping: Optional[Decimal],
+    discount: Optional[Decimal],
+    tax: Optional[Decimal],
+    subtotal: Optional[Decimal] = None,
+    items_gross: Optional[Decimal] = None,
+) -> Optional[str]:
+    """Does the captured decomposition add up? Returns a reason, or None if it does.
+
+    Two independent checks, because they fail for different reasons and only one
+    of them means the captured figures are suspect:
+
+      "shopify" — subtotal + shipping + tax != total. This is Shopify's OWN
+                  invariant (`subtotalPriceSet` is already net of discounts), so
+                  a failure means the three figures we are about to store are
+                  internally inconsistent. Verified to hold on 28/28 live
+                  Lamamarka orders, including every one of the top-25 by discount
+                  value.
+
+      "items"   — items_gross - discount + shipping + tax != total, where
+                  items_gross is SUM(qty * PRE-discount unit price). This is the
+                  identity the order card renders. It can fail while "shopify"
+                  passes, and then the problem is our line-item snapshot rather
+                  than the money: `lineItems(first: 50)` truncates a >50-line
+                  order, and post-hoc order edits move lines without moving the
+                  order totals.
+
+    The known future breaker of "items" is a cart-level FREE SHIPPING discount:
+    `ShippingLine.discountedPriceSet` only folds those in from API version
+    2024-07, and this client pins 2024-04 (SHOPIFY_API_VERSION above). No such
+    discount exists in the data today — every discountApplication on record
+    targets LINE_ITEM, never SHIPPING_LINE — but a future promo would land here.
+
+    Callers store the figures regardless and report the reason: the imbalance is
+    information about an order, not grounds for refusing to import it.
+    """
+    if total is None:
+        return None
+    # Nothing was captured, so there is no decomposition to disagree with the
+    # total. Absence is already reported by the columns staying NULL; flagging it
+    # here as well would turn every payload that predates these fields into a
+    # false positive.
+    if shipping is None and discount is None and tax is None:
+        return None
+    ship = shipping or Decimal("0")
+    disc = discount or Decimal("0")
+    vat = tax or Decimal("0")
+
+    if subtotal is not None:
+        if abs(subtotal + ship + vat - total) > BALANCE_TOLERANCE:
+            return "shopify"
+    # No items means nothing to reconcile against — the webhook path creates no
+    # OrderItem rows at all, and a 0 subtotal there would be a false positive.
+    if items_gross is not None and items_gross > 0:
+        if abs(items_gross - disc + ship + vat - total) > BALANCE_TOLERANCE:
+            return "items"
+    return None
+
+
+def extract_money_breakdown(node: dict) -> Dict[str, Optional[Decimal]]:
+    """Pull the ORDER-SHIPPING-1 figures out of a GraphQL order node.
+
+    Shared by the sync mapper and the backfill so the two can never map the same
+    payload differently. `subtotal` is returned for the balance check only and is
+    never stored.
+    """
+    def _amount(field: str) -> Optional[Decimal]:
+        return _to_decimal_or_none(
+            ((node.get(field) or {}).get("shopMoney") or {}).get("amount")
+        )
+
+    return {
+        "shipping_revenue": _amount("totalShippingPriceSet"),
+        # Shopify reports discounts POSITIVE; keep that sign, subtract at render.
+        "discount_total": _amount("totalDiscountsSet"),
+        "tax_total": _amount("totalTaxSet"),
+        "subtotal": _amount("subtotalPriceSet"),
+    }
+
+
+def extract_money_breakdown_rest(data: dict) -> Dict[str, Optional[Decimal]]:
+    """The same figures out of a REST webhook payload (ORDER-SHIPPING-1).
+
+    Deliberately parked next to `extract_money_breakdown` rather than inside the
+    webhook router: the two Shopify ingest paths read structurally different JSON
+    for the same three values, and keeping the mappings adjacent is what stops
+    one being updated without the other.
+
+      GraphQL                          REST / webhook
+      -----------------------------    ------------------------------------
+      totalShippingPriceSet.shopMoney  total_shipping_price_set.shop_money
+      totalDiscountsSet.shopMoney      total_discounts        (a bare string)
+      totalTaxSet.shopMoney            total_tax              (a bare string)
+      subtotalPriceSet.shopMoney       subtotal_price         (a bare string)
+
+    Note the asymmetry: only shipping arrives as a money-set in REST. If that key
+    is absent we fall back to summing `shipping_lines[].discounted_price`, which
+    is the same number Shopify totals into it.
+    """
+    shipping = _to_decimal_or_none(
+        ((data.get("total_shipping_price_set") or {}).get("shop_money") or {}).get("amount")
+    )
+    if shipping is None:
+        lines = data.get("shipping_lines") or []
+        parts = [_to_decimal_or_none(ln.get("discounted_price")) for ln in lines if ln]
+        present = [p for p in parts if p is not None]
+        shipping = sum(present, Decimal("0")) if present else None
+
+    return {
+        "shipping_revenue": shipping,
+        # REST reports discounts POSITIVE too; same convention as GraphQL.
+        "discount_total": _to_decimal_or_none(data.get("total_discounts")),
+        "tax_total": _to_decimal_or_none(data.get("total_tax")),
+        "subtotal": _to_decimal_or_none(data.get("subtotal_price")),
+    }
+
+
+def items_gross_from_node(node: dict) -> Decimal:
+    """SUM(quantity * PRE-discount unit price) over a GraphQL order node.
+
+    Mirrors what `OrderItem.unit_price` will hold (the mapper stores
+    `originalUnitPriceSet`), which is what the order card sums for its "Items
+    subtotal" row — so this is the left-hand side of the "items" balance check.
+    """
+    total = Decimal("0")
+    for li_edge in ((node.get("lineItems") or {}).get("edges")) or []:
+        li = (li_edge.get("node") if li_edge else None) or {}
+        unit = _to_decimal(
+            ((li.get("originalUnitPriceSet") or {}).get("shopMoney") or {}).get("amount")
+        )
+        total += unit * Decimal(str(int(li.get("quantity") or 1)))
+    return total
 
 
 def map_shopify_status(
@@ -514,6 +706,32 @@ async def _write_order_node(
         # designers, who see import comments verbatim.
         history_comment += f", platform_fee: {platform_fee} @ {shop.fee_percent}%"
 
+    # ORDER-SHIPPING-1: capture what the customer paid, decomposed, instead of
+    # leaving the card to reconstruct shipping as total - items (which silently
+    # absorbs the discount and the tax). Stored as reported; never derived here.
+    breakdown = extract_money_breakdown(node)
+    imbalance = check_order_balance(
+        total=_to_decimal_or_none(money.get("amount")),
+        shipping=breakdown["shipping_revenue"],
+        discount=breakdown["discount_total"],
+        tax=breakdown["tax_total"],
+        subtotal=breakdown["subtotal"],
+        items_gross=items_gross_from_node(node),
+    )
+    if imbalance:
+        # Store anyway and flag: an imbalance is information about the order, not
+        # grounds for refusing it. "items" almost always means our line-item
+        # snapshot is short (>50 lines, or a post-hoc order edit), which leaves
+        # the three captured figures perfectly good.
+        counters["unbalanced"] = counters.get("unbalanced", 0) + 1
+        logger.warning(
+            "ORDER-SHIPPING-1 balance check failed (%s) for order %s (%s): "
+            "total=%s shipping=%s discount=%s tax=%s subtotal=%s",
+            imbalance, node.get("name"), external_id,
+            money.get("amount"), breakdown["shipping_revenue"],
+            breakdown["discount_total"], breakdown["tax_total"], breakdown["subtotal"],
+        )
+
     order_create_payload = OrderCreate(
         external_id=external_id,
         shop_id=shop.id,
@@ -549,6 +767,9 @@ async def _write_order_node(
         completed_at=completed_at,
         history_comment=history_comment,
         platform_fee=platform_fee,
+        shipping_revenue=breakdown["shipping_revenue"],
+        discount_total=breakdown["discount_total"],
+        tax_total=breakdown["tax_total"],
     )
     logger.info(
         "Synced order %s → %s: %s",
@@ -603,7 +824,14 @@ async def sync_shop_orders(
 
     catalog_service = CatalogService(db)
     catalog_cache: Dict[str, Dict[str, Any]] = {}
-    counters: Dict[str, int] = {"products_created": 0, "variants_created": 0}
+    counters: Dict[str, int] = {
+        "products_created": 0,
+        "variants_created": 0,
+        # ORDER-SHIPPING-1: orders whose captured shipping/discount/tax did not
+        # reconcile to the total. Written anyway; counted so a mapping drift
+        # surfaces in the import report rather than only in the log.
+        "unbalanced": 0,
+    }
     errors: list[dict] = []
     by_month: Dict[str, Dict[str, int]] = {}
     by_status: Dict[str, int] = {}
@@ -713,6 +941,7 @@ async def sync_shop_orders(
         by_month=by_month,
         by_status=by_status,
         items_without_sku=items_without_sku,
+        unbalanced=counters["unbalanced"],
     )
 
 
@@ -794,6 +1023,301 @@ async def backfill_order_numbers(db: AsyncSession, shop: Shop) -> Dict[str, int]
         shop.id, updated, examined,
     )
     return {"updated": updated, "examined": examined}
+
+
+# ORDER-SHIPPING-1: the report buckets months in the SHOP's timezone, because it
+# is reconciled against Shopify analytics, which reports in that timezone.
+# SHOPIFY-REFUNDS-followup-2 records what bucketing the same money in UTC costs:
+# 2024-12 came out $39.99 wrong. `Europe/Kiev` is the spelling used everywhere
+# else in this codebase (see the Nova Poshta service).
+REPORT_TZ = ZoneInfo("Europe/Kiev")
+
+# Cap on the worked examples carried in the report. Enough to diagnose a mapping
+# bug by hand; not enough to turn a 677-order run into an unreadable payload.
+MAX_REPORT_SAMPLES = 20
+
+
+def _report_month(created_raw: Optional[str]) -> str:
+    """Shopify `createdAt` (UTC ISO) → "YYYY-MM" in the reporting timezone."""
+    if not created_raw:
+        return "unknown"
+    try:
+        dt = datetime.fromisoformat(created_raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "unknown"
+    return dt.astimezone(REPORT_TZ).strftime("%Y-%m")
+
+
+async def backfill_shipping_breakdown(
+    db: AsyncSession,
+    shop: Shop,
+    *,
+    since: Optional[date] = None,
+    until: Optional[date] = None,
+    dry_run: bool = True,
+) -> Dict[str, Any]:
+    """Fill `shipping_revenue` / `discount_total` / `tax_total` on orders that
+    predate ORDER-SHIPPING-1, from Shopify (ORDER-SHIPPING-1).
+
+    The order sync dedups on `(external_id, shop_id)` and never revisits an
+    existing row, and the `orders/updated` webhook is a no-op on one — so setting
+    the columns in the mappers prices new orders only. This is the path that
+    reaches the ~677 already imported.
+
+    Paging is `backfill_order_numbers`' — the same `ORDERS_QUERY`, page size,
+    `_fetch_orders_page` throttle retries and proactive cost backoff — because it
+    needs the same thing: walk the shop's orders once and UPDATE matching rows,
+    at ~1 GraphQL call per 50 orders rather than one call per order. No by-id
+    fetch is needed. It never creates orders and never writes status or history.
+
+    FILL-ONLY, never refresh. A row is a write target only when all three columns
+    are NULL, and that predicate is repeated in the UPDATE so a value written
+    between the SELECT and the write is never clobbered. Re-running is therefore
+    a strict no-op. Where Shopify now DISAGREES with a stored non-NULL value the
+    run reports it and writes nothing — a post-hoc discount or a shipping edit in
+    Shopify is real, but silently moving an order an operator has already
+    reconciled is not this endpoint's call to make.
+
+    The same reporting-only treatment catches `total_price` drift, which is the
+    first actual measurement of BUG-4 (orders list reads a stale total). Also
+    reported, never acted on.
+
+    Windowing is by `Order.ordered_at`, NOT `COALESCE(shipped_at, ordered_at)` as
+    in `backfill_platform_fees`: that one bounds what it re-prices in the P&L, so
+    it uses the expression finance buckets by. This one is reconciled against
+    Shopify's order feed, so it has to sit on the same clock as the Shopify-side
+    `created_at` page filter, or the two ends of the comparison would select
+    different orders.
+
+    `dry_run` defaults TRUE. Everything is computed either way; only the UPDATE
+    is skipped, so the report is what a real run would do.
+    """
+    empty: Dict[str, Any] = {
+        "matched": 0,
+        "found_in_shopify": 0,
+        "missing_in_shopify": 0,
+        "updated": 0,
+        "shipping_total_by_currency": {},
+        "discount_total_by_currency": {},
+        "tax_total_by_currency": {},
+        "by_month": {},
+        "unbalanced": [],
+        "drift": {
+            "shipping_revenue": 0,
+            "discount_total": 0,
+            "tax_total": 0,
+            "total_price": 0,
+        },
+        "drift_samples": [],
+        "dry_run": dry_run,
+    }
+    if shop.platform != ShopPlatform.SHOPIFY:
+        return empty
+    if not shop.shopify_store_url or not shop.shopify_access_token_encrypted:
+        return empty
+
+    # Every order in the window, not just the write targets: drift is only
+    # measurable against rows that already carry a value.
+    conditions = [Order.shop_id == shop.id]
+    if since is not None:
+        conditions.append(cast(Order.ordered_at, Date) >= since)
+    if until is not None:
+        conditions.append(cast(Order.ordered_at, Date) <= until)
+
+    result = await db.execute(
+        select(
+            Order.external_id,
+            Order.currency,
+            Order.total_price,
+            Order.shipping_revenue,
+            Order.discount_total,
+            Order.tax_total,
+        ).where(*conditions)
+    )
+    rows = {r.external_id: r for r in result.all() if r.external_id}
+    if not rows:
+        return empty
+
+    token = decrypt_value(shop.shopify_access_token_encrypted)
+    shop_url = str(shop.shopify_store_url)
+    query_filter = _build_orders_query_filter(since, until)
+
+    remaining = set(rows)
+    to_write: Dict[str, Dict[str, Optional[Decimal]]] = {}
+    shipping_by_currency: Dict[str, Decimal] = {}
+    discount_by_currency: Dict[str, Decimal] = {}
+    tax_by_currency: Dict[str, Decimal] = {}
+    by_month: Dict[str, Dict[str, Any]] = {}
+    unbalanced: list[dict] = []
+    drift = {"shipping_revenue": 0, "discount_total": 0, "tax_total": 0, "total_price": 0}
+    drift_samples: list[dict] = []
+    found_in_shopify = 0
+
+    after: Optional[str] = None
+    while remaining:
+        body = await _fetch_orders_page(
+            shop_url,
+            token,
+            {"first": ORDERS_PAGE_SIZE, "after": after, "query": query_filter},
+        )
+        conn = (body.get("data") or {}).get("orders") or {}
+        edges = conn.get("edges") or []
+        page_info = conn.get("pageInfo") or {}
+
+        for edge in edges:
+            node = (edge.get("node") if edge else None) or {}
+            ext = _parse_shopify_gid(node.get("id"))
+            row = rows.get(ext)
+            if row is None or ext not in remaining:
+                continue
+            remaining.discard(ext)
+            found_in_shopify += 1
+
+            breakdown = extract_money_breakdown(node)
+            shopify_total = _to_decimal_or_none(
+                ((node.get("totalPriceSet") or {}).get("shopMoney") or {}).get("amount")
+            )
+
+            imbalance = check_order_balance(
+                total=shopify_total,
+                shipping=breakdown["shipping_revenue"],
+                discount=breakdown["discount_total"],
+                tax=breakdown["tax_total"],
+                subtotal=breakdown["subtotal"],
+                items_gross=items_gross_from_node(node),
+            )
+            if imbalance and len(unbalanced) < MAX_REPORT_SAMPLES:
+                unbalanced.append({
+                    "order_number": node.get("name"),
+                    "external_id": ext,
+                    "reason": imbalance,
+                })
+
+            # Totals + per-month buckets cover every matched order, written or
+            # not, so the figures reconcile against Shopify analytics for the
+            # whole window rather than only the part this run happens to fill.
+            currency = row.currency or "USD"
+            month = _report_month(node.get("createdAt"))
+            bucket = by_month.setdefault(
+                month,
+                {"orders": 0, "shipping": Decimal("0"), "discount": Decimal("0"), "tax": Decimal("0")},
+            )
+            bucket["orders"] += 1
+            for key, agg, bkey in (
+                ("shipping_revenue", shipping_by_currency, "shipping"),
+                ("discount_total", discount_by_currency, "discount"),
+                ("tax_total", tax_by_currency, "tax"),
+            ):
+                value = breakdown[key]
+                if value is not None:
+                    agg[currency] = agg.get(currency, Decimal("0")) + value
+                    bucket[bkey] += value
+
+            # Reported, never written (see docstring).
+            if _to_decimal(row.total_price) != (shopify_total or Decimal("0")):
+                drift["total_price"] += 1
+                if len(drift_samples) < MAX_REPORT_SAMPLES:
+                    drift_samples.append({
+                        "order_number": node.get("name"),
+                        "field": "total_price",
+                        "stored": float(_to_decimal(row.total_price)),
+                        "shopify": float(shopify_total or 0),
+                    })
+
+            is_target = (
+                row.shipping_revenue is None
+                and row.discount_total is None
+                and row.tax_total is None
+            )
+            if is_target:
+                to_write[ext] = breakdown
+                continue
+
+            for field in ("shipping_revenue", "discount_total", "tax_total"):
+                stored = getattr(row, field)
+                fresh = breakdown[field]
+                if stored is None or fresh is None:
+                    continue
+                if _to_decimal(stored) != fresh:
+                    drift[field] += 1
+                    if len(drift_samples) < MAX_REPORT_SAMPLES:
+                        drift_samples.append({
+                            "order_number": node.get("name"),
+                            "field": field,
+                            "stored": float(_to_decimal(stored)),
+                            "shopify": float(fresh),
+                        })
+
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+
+        # Same proactive throttle backoff as sync_shop_orders.
+        cost = (body.get("extensions") or {}).get("cost") or {}
+        throttle = cost.get("throttleStatus") or {}
+        available = throttle.get("currentlyAvailable")
+        requested = float(cost.get("requestedQueryCost") or 0)
+        restore = float(throttle.get("restoreRate") or DEFAULT_RESTORE_RATE) or DEFAULT_RESTORE_RATE
+        if available is not None and float(available) < requested:
+            await asyncio.sleep((requested - float(available)) / restore)
+
+    updated = 0
+    if not dry_run:
+        for ext, breakdown in to_write.items():
+            res = await db.execute(
+                update(Order)
+                # The all-NULL guard is repeated here, not just in the SELECT
+                # above, so a value written between the two can never be
+                # overwritten — and so a re-run stays a strict no-op.
+                .where(
+                    Order.external_id == ext,
+                    Order.shop_id == shop.id,
+                    Order.shipping_revenue.is_(None),
+                    Order.discount_total.is_(None),
+                    Order.tax_total.is_(None),
+                )
+                .values(
+                    shipping_revenue=breakdown["shipping_revenue"],
+                    discount_total=breakdown["discount_total"],
+                    tax_total=breakdown["tax_total"],
+                )
+            )
+            updated += res.rowcount or 0
+        await db.flush()
+
+    logger.info(
+        "ORDER-SHIPPING-1 backfill for shop %s: matched=%d found=%d missing=%d "
+        "targets=%d updated=%d unbalanced=%d dry_run=%s",
+        shop.id, len(rows), found_in_shopify, len(remaining),
+        len(to_write), updated, len(unbalanced), dry_run,
+    )
+
+    return {
+        "matched": len(rows),
+        "found_in_shopify": found_in_shopify,
+        # In the DB but absent from Shopify's order feed — deleted upstream, or
+        # outside the page filter. Their columns stay NULL, which reads correctly
+        # as "unknown".
+        "missing_in_shopify": len(remaining),
+        "targets": len(to_write),
+        "updated": updated,
+        "shipping_total_by_currency": {c: float(v) for c, v in shipping_by_currency.items()},
+        "discount_total_by_currency": {c: float(v) for c, v in discount_by_currency.items()},
+        "tax_total_by_currency": {c: float(v) for c, v in tax_by_currency.items()},
+        "by_month": {
+            m: {
+                "orders": b["orders"],
+                "shipping": float(b["shipping"]),
+                "discount": float(b["discount"]),
+                "tax": float(b["tax"]),
+            }
+            for m, b in sorted(by_month.items())
+        },
+        "unbalanced": unbalanced,
+        "drift": drift,
+        "drift_samples": drift_samples,
+        "dry_run": dry_run,
+    }
 
 
 async def sync_shop_refunds(

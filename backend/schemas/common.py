@@ -49,3 +49,8 @@ class ImportResult(BaseModel):
     # Created/would-create line items with NO resolvable variant, i.e. no usable
     # SKU snapshot → no eventual link back to a BOM for cost recomputation.
     items_without_sku: int = 0
+    # ORDER-SHIPPING-1: imported orders whose captured shipping/discount/tax did
+    # not reconcile to total_price. They ARE imported and the figures ARE stored
+    # (an imbalance is usually a truncated line-item snapshot, not bad money) —
+    # this counter is how a real mapping drift becomes visible.
+    unbalanced: int = 0

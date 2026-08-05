@@ -42,6 +42,12 @@ CLASSIFIED: dict[str, str] = {
     # platform_fee (a FINANCIAL_FIELDS column, owner-gated on the update path)
     # and moves every future partner-payout base.
     "POST /api/shops/{shop_id}/backfill-platform-fees": "owner-only",
+    # ORDER-SHIPPING-1: OWNER-only like the platform-fee backfill, but for a
+    # different reason — shipping_revenue/discount_total/tax_total are revenue,
+    # not FINANCIAL_FIELDS costs, so there is no owner-gated write path to match.
+    # The gate is that one call rewrites money across a shop's entire order
+    # history, and it is reconciled against Shopify by the owner alone.
+    "POST /api/shops/{shop_id}/backfill-shipping": "owner-only",
     "GET /api/shops/{shop_id}/finance": "guarded",
     "GET /api/shops/{shop_id}/products": "guarded",
     "POST /api/shops/{shop_id}/products": "guarded",

@@ -68,6 +68,15 @@ class OrderBase(BaseModel):
     shipping_np_cost: float | None = None
     platform_fee: float | None = None
 
+    # ORDER-SHIPPING-1: what the customer paid, decomposed. Revenue-side
+    # components of `total_price` above, so NOT censored by VIEW_COSTS and
+    # deliberately absent from ORDER_COST_FIELDS. `discount_total` is positive;
+    # the caller subtracts. NULL means unknown (Etsy / manual / not yet
+    # backfilled) and must never be rendered as 0.00.
+    shipping_revenue: float | None = None
+    discount_total: float | None = None
+    tax_total: float | None = None
+
     # Shipping
     shipping_name: str | None = None
     shipping_phone: str | None = None

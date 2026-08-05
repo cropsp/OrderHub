@@ -120,6 +120,17 @@ export interface Order {
   cogs_basis_currency: string | null
   shipping_np_cost: number | null
   platform_fee: number | null
+  /** ORDER-SHIPPING-1: what the customer paid, decomposed —
+   *    total_price = Σ(qty × unit_price) − discount_total + shipping_revenue + tax_total
+   *  `shipping_revenue` is what the CUSTOMER was charged, the revenue twin of
+   *  `shipping_np_cost` above (what we pay Nova Poshta). `discount_total` is
+   *  positive; subtract it when rendering.
+   *  null means UNKNOWN, not 0 — Etsy/manual orders carry no such figures, and
+   *  neither do Shopify orders imported before the backfill ran. Never render a
+   *  null as 0.00; see DetailFinance's derived-row fallback. */
+  shipping_revenue: number | null
+  discount_total: number | null
+  tax_total: number | null
   shipping_name: string | null
   shipping_phone: string | null
   shipping_street_1: string | null

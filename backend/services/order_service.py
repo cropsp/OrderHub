@@ -90,8 +90,11 @@ def compute_platform_fee(total_price, fee_percent) -> Decimal | None:
 
     The base is `Order.total_price`, the full customer charge (inclusive of
     shipping and tax, gross of refunds) — the amount the merchant of record
-    actually receives and commissions. It is also the only monetary total the
-    Order carries; there is no stored subtotal to choose instead.
+    actually receives and commissions. ORDER-SHIPPING-1 added
+    `shipping_revenue` / `discount_total` / `tax_total`, so a narrower base is
+    now expressible; the gross base is kept DELIBERATELY. The channel commissions
+    the whole charge, and re-basing the fee would silently re-price every order
+    already in the P&L.
 
     Both arguments go through `Decimal(str(x))` so a float total never
     contaminates the result with binary-float error, and a non-numeric argument
@@ -467,6 +470,9 @@ async def create_order(
     completed_at: datetime | None = None,
     history_comment: str = "Order manually created",
     platform_fee: Decimal | None = None,
+    shipping_revenue: Decimal | None = None,
+    discount_total: Decimal | None = None,
+    tax_total: Decimal | None = None,
 ) -> Order:
     """Create an order + its opening audit row.
 
@@ -484,6 +490,15 @@ async def create_order(
     which has no owner gate on FINANCIAL_FIELDS (the gate lives in update_order),
     so putting a cost field there would open a non-owner write path. Importers
     pass it explicitly; manual order entry leaves it None.
+
+    `shipping_revenue` / `discount_total` / `tax_total` (ORDER-SHIPPING-1) are
+    keyword-only for a DIFFERENT reason — they are revenue, not costs, so the
+    non-owner-write argument above does not apply. The invariant being protected
+    is that these three are only ever written from a channel payload. They are
+    facts reported by Shopify, and `OrderCreate` is the public POST body, where a
+    manual creator could invent a shipping figure indistinguishable from a
+    captured one. They are absent from `OrderUpdate` for the same reason: there
+    is no manual write path at all. NULL means unknown, never 0.00.
     """
     # Customupsert -> Create order -> Default History
     customer = await upsert_customer(
@@ -522,6 +537,9 @@ async def create_order(
         shipping_warehouse_ref=data.shipping_warehouse_ref,
         customer_note=data.customer_note,
         platform_fee=platform_fee,
+        shipping_revenue=shipping_revenue,
+        discount_total=discount_total,
+        tax_total=tax_total,
     )
     db.add(order)
     await db.flush()

@@ -21,6 +21,7 @@ from schemas.shop import (
     ShopBackfillRequest,
     ShopPlatformFeeBackfillRequest,
     ShopRefundBackfillRequest,
+    ShopShippingBackfillRequest,
     ShopCreate,
     ShopUpdate,
     ShopResponse,
@@ -36,6 +37,7 @@ from services.partner_payout_service import find_settlements_overlapping_period
 from services.shopify_sync import (
     sync_shop_orders,
     backfill_order_numbers,
+    backfill_shipping_breakdown,
     sync_shop_refunds,
 )
 from services.order_service import backfill_platform_fees
@@ -501,6 +503,70 @@ async def backfill_shop_platform_fees(
         "fee_percent": float(shop.fee_percent),
         "overlapping_settlements": overlapping_settlements,
     }
+
+
+@router.post("/{shop_id}/backfill-shipping")
+async def backfill_shop_shipping(
+    shop_id: uuid.UUID,
+    body: ShopShippingBackfillRequest,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Capture Shopify shipping / discount / tax on existing orders (ORDER-SHIPPING-1).
+
+    The sync prices an order only at creation and dedups on
+    `(external_id, shop_id)`, and the `orders/updated` webhook no-ops on an
+    existing row — so the three new columns are populated by the mappers for new
+    orders only. This is the catch-up for everything already imported.
+
+    FILL-ONLY: a row is written only when all three columns are NULL, and the
+    guard is repeated in the UPDATE, so re-running is a strict no-op. Where
+    Shopify now disagrees with a stored value the run REPORTS it and writes
+    nothing — including `total_price` drift, which is the first measurement of
+    BUG-4.
+
+    `dry_run=true` (the default) reports the full impact without writing:
+    per-currency totals, per-month buckets in the SHOP's timezone so they tie to
+    Shopify analytics directly, any order whose figures do not reconcile, and the
+    drift counts. Read that before writing.
+
+    OWNER-only, matching `backfill-platform-fees` rather than the OWNER/MANAGER
+    siblings. These are revenue-side columns, not FINANCIAL_FIELDS costs, so the
+    write-gate argument does not carry over; the reason is that this run rewrites
+    money across a shop's entire order history in one call, and every consumer of
+    that money is an owner surface.
+    """
+    result = await db.execute(select(Shop).where(Shop.id == shop_id, Shop.is_active == True))  # noqa: E712
+    shop = result.scalar_one_or_none()
+    if not shop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found")
+
+    if shop.platform != ShopPlatform.SHOPIFY:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Shipping backfill only applies to Shopify shops.",
+        )
+    if not shop.shopify_store_url or not shop.shopify_access_token_encrypted:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Shop is missing Shopify credentials.",
+        )
+
+    try:
+        summary = await backfill_shipping_breakdown(
+            db, shop, since=body.since, until=body.until, dry_run=body.dry_run
+        )
+        # Real write commits via get_db on return; dry-run must persist nothing.
+        if body.dry_run:
+            await db.rollback()  # belt-and-suspenders: dry-run writes nothing
+    except Exception as e:
+        logger.error(f"[SHOPS] Shipping backfill failed for shop {shop_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Shipping backfill failed: {str(e)}",
+        )
+
+    return {"status": "success", **summary}
 
 
 @router.post("/{shop_id}/backfill-product-images")

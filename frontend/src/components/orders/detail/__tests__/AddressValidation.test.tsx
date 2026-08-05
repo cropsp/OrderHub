@@ -19,6 +19,7 @@ function makeOrder(overrides: Partial<OrderDetail> = {}): OrderDetail {
     id: 'order-1', external_id: 'EXT-1', shop_id: 'shop-1', customer_id: 'cust-1',
     status: 'new' as OrderDetail['status'], title: 'T', total_price: 100, currency: 'USD',
     production_cost: null, computed_production_cost: null, shipping_np_cost: null, platform_fee: null,
+    shipping_revenue: null, discount_total: null, tax_total: null,
     shipping_name: 'Jane', shipping_phone: null, shipping_street_1: '10 Education Cir', shipping_street_2: null,
     shipping_city: 'Cambridge', shipping_state: 'MA', shipping_zip: '02141', shipping_country: 'US',
     shipping_city_ref: null, shipping_warehouse_ref: null, assigned_designer_id: null, assigned_at: null,

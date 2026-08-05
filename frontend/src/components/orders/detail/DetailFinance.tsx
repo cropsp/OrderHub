@@ -22,12 +22,32 @@ export function DetailFinance({ order }: DetailFinanceProps) {
   // amount) is "not set" — deriving shipping = total − items from it invents a
   // negative "Shipping / other" and presents 0.00 as fact. Guard against both.
   const totalKnown = order.total_price != null && order.total_price > 0;
-  // Shipping/other = the gap between what the customer paid and the line items.
+
+  // ORDER-SHIPPING-1: the channel now tells us what the customer paid for
+  // shipping, and how much of the total was discount and tax. When those are
+  // stored we render facts. `captured` is true if ANY of the three arrived —
+  // they are written as a set by the Shopify mappers and the backfill, so a
+  // partial set means a payload was short, not that the order had no shipping.
+  const captured =
+    order.shipping_revenue != null ||
+    order.discount_total != null ||
+    order.tax_total != null;
+
+  // The pre-ORDER-SHIPPING-1 residual, kept ONLY as the fallback for orders no
+  // channel reports these figures for (Etsy, manual, and Shopify orders not yet
+  // backfilled). It silently absorbs discount and tax, so it is labelled as
+  // derived wherever it renders and never sits under a "Shipping" heading.
   // Only meaningful when the total is known and not below the items subtotal
   // (a negative derived shipping cost is never rendered as fact).
   const shippingOther = orderTotal - itemsSubtotal;
   const showShipping = totalKnown && shippingOther > 0;
   const showNoFee = totalKnown && shippingOther === 0;
+  // Distinguishes the two ways the residual can be unusable. Both used to share
+  // one tooltip that claimed the total was missing — which was a lie whenever
+  // the total was present and the line items simply exceeded it.
+  const derivedUnavailableReason = !totalKnown
+    ? 'Order total not set — shipping cannot be derived'
+    : 'Line items exceed the order total — no shipping can be derived';
 
   const manualCost = order.production_cost;
   const computedCost = order.computed_production_cost;
@@ -77,20 +97,73 @@ export function DetailFinance({ order }: DetailFinanceProps) {
           </span>
         </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium text-zinc-400">Shipping / other</span>
-          {showNoFee ? (
-            <span className="text-sm text-zinc-400 italic">No fee</span>
-          ) : showShipping ? (
-            <span className="text-sm font-medium text-zinc-300">
-              {formatMoney(shippingOther)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+        {/* ORDER-SHIPPING-1 — captured: one row per stored fact, so the rows add
+            up to the order total. A null row is omitted entirely rather than
+            printed as 0.00 (same rule as Platform fee below). Discount and Tax
+            additionally hide at exactly 0, where they carry no information and
+            the arithmetic is unchanged; Shipping renders at 0.00 because free
+            shipping is a fact worth seeing. */}
+        {captured ? (
+          <>
+            {order.discount_total != null && order.discount_total !== 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-zinc-400">Discount</span>
+                <span className="text-sm font-medium text-zinc-300" data-testid="discount-row">
+                  −{formatMoney(order.discount_total)}{' '}
+                  <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+                </span>
+              </div>
+            )}
+
+            {order.shipping_revenue != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-zinc-400">Shipping</span>
+                <span className="text-sm font-medium text-zinc-300" data-testid="shipping-row">
+                  {formatMoney(order.shipping_revenue)}{' '}
+                  <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+                </span>
+              </div>
+            )}
+
+            {order.tax_total != null && order.tax_total !== 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-zinc-400">Tax</span>
+                <span className="text-sm font-medium text-zinc-300" data-testid="tax-row">
+                  {formatMoney(order.tax_total)}{' '}
+                  <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+                </span>
+              </div>
+            )}
+          </>
+        ) : (
+          /* No channel figures for this order. Fall back to the residual, but
+             say so: the label and the footnote are what stop an inference being
+             read as a captured fact. */
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-zinc-400">
+              Shipping / other (derived)
             </span>
-          ) : (
-            <span className="text-sm text-zinc-600" title="Order total not set — shipping cannot be derived">
-              —
-            </span>
-          )}
-        </div>
+            {showNoFee ? (
+              <span className="text-sm text-zinc-400 italic">No fee</span>
+            ) : showShipping ? (
+              <span className="text-sm font-medium text-zinc-300" data-testid="derived-shipping-row">
+                {formatMoney(shippingOther)} <span className="text-[10px] text-zinc-600 uppercase ml-0.5">{order.currency}</span>
+              </span>
+            ) : (
+              <span className="text-sm text-zinc-600" title={derivedUnavailableReason}>
+                —
+              </span>
+            )}
+          </div>
+        )}
+
+        {!captured && showShipping && (
+          <p className="text-[10px] italic text-zinc-600 -mt-1" data-testid="derived-note">
+            ⓘ Derived as total − items, so it also absorbs any discount or tax.
+            This order predates shipping capture, or its channel reports no
+            shipping figure.
+          </p>
+        )}
 
         <div className="flex items-center justify-between">
           <span className="text-[11px] font-semibold text-zinc-400">Order total</span>

@@ -297,6 +297,15 @@ async def _run_shipping_aggregate(
     shipping_revenue = SUM(total_price - items_subtotal_per_order)
     shipping_cost    = SUM(COALESCE(shipping_np_cost, 0))
     shipping_net     = shipping_revenue - shipping_cost
+
+    ORDER-SHIPPING-1 note — this derivation is knowingly left in place. There is
+    now a real `Order.shipping_revenue` column, and this residual is NOT it: it
+    absorbs tax and discounts too (total_price is gross of tax and net of
+    discount, while items_subtotal uses the PRE-discount unit price), and the
+    COALESCE below books an item-less order's entire total as shipping. Switching
+    the KPI to the stored column would move historical P&L figures, so it was
+    scoped out deliberately and needs its own reconciliation sprint. Until then
+    this card and the order card disagree on the same shop, by design.
     """
     date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
     items_subq = (
