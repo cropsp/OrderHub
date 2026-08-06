@@ -403,24 +403,37 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # FX rate refresh (FX-CONVERSION) — fourth job, daily. NBU publishes one
-    # official rate per banking day, so anything more frequent is wasted.
-    #
-    # next_run_time is the one deviation from the jobs above, and it is deliberate:
-    # an 'interval' job first fires AFTER the interval, so a daily job would leave
-    # a fresh database with no rate — and therefore no COGS on USD orders — for 24
-    # hours after deploy. FX_MIN_REFETCH_HOURS inside the job keeps that startup
-    # fetch idempotent across restarts.
     # Nova Poshta delivery tracking (WB-TRACK-1) — fifth job, daily. NP scans a
     # healthy parcel at least once a day (p90 of observed gaps is 1.17 days), so
     # a daily poll loses nothing, and the whole in-flight set is one request.
+    #
+    # next_run_time follows the FX job below, for the same reason: an 'interval'
+    # job first fires AFTER the interval, so without it the poll is deferred a
+    # full 24 hours by every backend restart — making tracking freshness a
+    # function of how often we deploy. That was not theoretical. Between the
+    # WB-TRACK-1 deploy and WB-TRACK-2 the scheduled poll never fired once in
+    # production; all 77 tracking rows came from a one-off run, and the
+    # monitoring page would have opened on data as old as the last restart.
+    #
+    # Unlike FX there is no FX_MIN_REFETCH_HOURS equivalent making the startup
+    # fetch idempotent, and none is needed: a restart costs exactly one batched
+    # keyless request, and `record_poll` writes an event only on an OBSERVED
+    # CHANGE, so re-polling an unchanged parcel writes nothing.
     scheduler.add_job(
         run_wb_tracking_poll,
         'interval',
         days=1,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(timezone.utc),
     )
+    # FX rate refresh (FX-CONVERSION) — fourth job, daily. NBU publishes one
+    # official rate per banking day, so anything more frequent is wasted.
+    #
+    # next_run_time is deliberate: a daily interval job would otherwise leave a
+    # fresh database with no rate — and therefore no COGS on USD orders — for 24
+    # hours after deploy. FX_MIN_REFETCH_HOURS inside the job keeps that startup
+    # fetch idempotent across restarts.
     scheduler.add_job(
         run_fx_rate_refresh,
         'interval',
