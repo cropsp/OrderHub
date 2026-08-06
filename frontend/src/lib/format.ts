@@ -31,6 +31,18 @@ export function formatDateTime(input: DateInput): string {
   return d ? format(d, 'dd.MM.yyyy HH:mm') : EM_DASH;
 }
 
+/**
+ * An elapsed-day count as "12.6d" (WB-TRACK-2).
+ *
+ * Display only. The number itself is always computed server-side — the delivery
+ * monitor never subtracts dates, because "overdue" and "stalled" are defined
+ * once in `wb_tracking_service` and shared with the MCP tool.
+ */
+export function formatDays(days: number | null | undefined): string {
+  if (days == null || !Number.isFinite(days)) return EM_DASH;
+  return `${days.toFixed(1)}d`;
+}
+
 /** MM.yyyy — numeric month/year, em-dash when missing/invalid. */
 export function formatMonthYear(input: DateInput): string {
   const d = toDate(input);

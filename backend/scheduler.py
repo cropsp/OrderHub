@@ -18,7 +18,6 @@ from models.shop import Shop, ShopPlatform
 from models.user import User
 from models.wb_parcel import WbParcel
 from services import fx_service, wb_tracking_service
-from services.np_tracking import NovaPoshtaTrackingClient
 from services.shopify_sync import sync_shop_orders, sync_shop_refunds
 from services.westernbid import (
     WB_MAX_PAGE_SIZE,
@@ -284,23 +283,22 @@ async def run_wb_tracking_poll():
 
     Batched at 100 documents per request, so the ~30 parcels in flight are one
     HTTP call per day, never one call per parcel.
+
+    The poll itself lives in `wb_tracking_service.run_poll` (WB-TRACK-2) because
+    the manual refresh route calls the very same function. This job owns only
+    the session, the logging and the error contract.
     """
     logger.info("Starting WB tracking poll job...")
 
     async with async_session_factory() as db:
         try:
-            candidates = await wb_tracking_service.select_candidates(db)
-            if not candidates:
-                await db.commit()  # persist any aged-out retirements
+            summary = await wb_tracking_service.run_poll(db)
+            # Commits either way: with nothing to poll there may still be
+            # aged-out retirements stamped by `select_candidates`.
+            await db.commit()
+            if not summary["polled"] and not summary["missing"]:
                 logger.info("WB tracking poll: no parcels to track")
                 return
-
-            client = NovaPoshtaTrackingClient()
-            records = await client.get_status_documents(
-                [c.tracking_number for c in candidates]
-            )
-            summary = await wb_tracking_service.record_poll(db, candidates, records)
-            await db.commit()
             logger.info(
                 "WB tracking poll complete: polled=%d created=%d changed=%d "
                 "delivered=%d no_data=%d missing=%d",

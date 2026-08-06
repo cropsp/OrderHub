@@ -20,14 +20,18 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.app_setting import AppSetting, WB_TRACKING_STALLED_DAYS
 from models.order import Order
 from models.wb_parcel import WbParcel
 from models.wb_tracking import WbParcelTracking, WbTrackingEvent
-from services.np_tracking import is_no_data, parse_np_datetime
+from services.np_tracking import (
+    NovaPoshtaTrackingClient,
+    is_no_data,
+    parse_np_datetime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +108,14 @@ NOVAPOST_IDENTIFIER = "NovaPost"
 # choice is maximally insensitive to where the line falls.
 DEFAULT_STALLED_DAYS = 3
 
+# Minimum gap between manual `POST /tracking/refresh` polls (WB-TRACK-2).
+# Enforced SERVER-side against the freshness signal itself — see
+# `load_last_polled_at` — so a disabled button stays a hint rather than a guard.
+# 5 minutes: long enough that a page anyone with the role can open cannot be
+# turned into a loop against a third-party endpoint, short enough that a manager
+# looking at a 12-day-overdue parcel is never told to come back later.
+MANUAL_POLL_COOLDOWN_MINUTES = 5
+
 # A parcel this old stops being polled whatever state it is in, so a parcel
 # stuck in March is not re-polled forever. The worst end-to-end transit ever
 # observed is 31.3 days (p90 11.4), so 60 is ~2x the worst case.
@@ -142,6 +154,30 @@ def extract_novapost_number(parcel: WbParcel) -> str | None:
             if number:
                 return number
     return None
+
+
+def carrier_tracking_numbers(parcel: WbParcel) -> list[dict]:
+    """Every well-formed `{Identifier, TrackingNumber}` element, verbatim (WB-TRACK-2).
+
+    The complement of `extract_novapost_number`, and deliberately NOT a second
+    selection rule: it filters only on shape, never on Identifier. The UPS and
+    ConsolidationOptimum numbers it returns are the ONLY thing an operator can
+    act on for the 7 `untracked` parcels, which by definition have no Nova
+    Poshta number to show.
+
+    Defensive for the same reason as its sibling: `tracking_numbers` is JSONB
+    mirrored from WB, and bare strings have been seen in it.
+    """
+    numbers: list[dict] = []
+    for element in parcel.tracking_numbers or []:
+        if not isinstance(element, dict):
+            continue
+        number = (element.get("TrackingNumber") or "").strip()
+        if not number:
+            continue
+        identifier = (element.get("Identifier") or "").strip() or None
+        numbers.append({"Identifier": identifier, "TrackingNumber": number})
+    return numbers
 
 
 async def load_stalled_days(db: AsyncSession) -> int:
@@ -371,6 +407,49 @@ async def record_poll(
     return summary
 
 
+async def load_last_polled_at(db: AsyncSession) -> datetime | None:
+    """When the poller last successfully touched any parcel (WB-TRACK-2).
+
+    The same value `classify_parcels` reports as `polled_at`, read on its own so
+    the refresh route can check the cooldown without classifying 84 parcels
+    first. None means the job has never run — which is never a cooldown.
+    """
+    return (
+        await db.execute(select(func.max(WbParcelTracking.last_polled_at)))
+    ).scalar_one()
+
+
+async def run_poll(db: AsyncSession) -> dict[str, int]:
+    """Select, fetch and record one full tracking poll (WB-TRACK-2).
+
+    THE poll. The daily scheduler job and the manual refresh route both call
+    this and neither reimplements it — the same rule `classify_parcels` follows
+    for the classification, applied to the write path: one definition, two
+    callers, no parallel path that can drift.
+
+    Does NOT commit. Each caller owns its transaction boundary — the scheduler
+    commits explicitly, the route lets `get_db` commit — and the aged-out
+    retirements written by `select_candidates` need committing even when there
+    is nothing left to poll, which is why the empty case still returns normally.
+    """
+    candidates = await select_candidates(db)
+    if not candidates:
+        return {
+            "polled": 0,
+            "created": 0,
+            "changed": 0,
+            "delivered": 0,
+            "no_data": 0,
+            "missing": 0,
+        }
+
+    client = NovaPoshtaTrackingClient()
+    records = await client.get_status_documents(
+        [c.tracking_number for c in candidates]
+    )
+    return await record_poll(db, candidates, records)
+
+
 @dataclass
 class ClassifiedParcel:
     """One parcel as both consumers need it.
@@ -385,6 +464,9 @@ class ClassifiedParcel:
     shipment_id: UUID
     order_id: UUID | None
     order_number: str | None
+    # Every carrier number WB reported. `tracking_number` above is the Nova
+    # Poshta one and is None for `untracked`; this is what the page shows there.
+    tracking_numbers: list[dict]
 
     state: str
     status_code: str | None
@@ -405,6 +487,7 @@ class ClassifiedParcel:
     no_data_since: datetime | None
 
     wb_status: str | None
+    payment_status: str | None
     wb_created_at: datetime | None
 
 
@@ -507,6 +590,7 @@ async def classify_parcels(
                 shipment_id=parcel.shipment_id,
                 order_id=parcel.order_id,
                 order_number=order_numbers.get(parcel.order_id),
+                tracking_numbers=carrier_tracking_numbers(parcel),
                 state=state,
                 status_code=tracking.status_code if tracking else None,
                 status_text=tracking.status_text if tracking else None,
@@ -525,6 +609,7 @@ async def classify_parcels(
                 delivered_at=tracking.np_delivered_at if tracking else None,
                 no_data_since=tracking.no_data_since if tracking else None,
                 wb_status=parcel.wb_status,
+                payment_status=parcel.payment_status,
                 wb_created_at=parcel.wb_created_at,
             )
         )
