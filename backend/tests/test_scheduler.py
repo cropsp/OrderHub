@@ -142,3 +142,102 @@ async def test_run_shopify_sync_silent_on_zero_imported(caplog):
     assert not any(r.levelname == "WARNING" for r in scheduler_records)
     db.commit.assert_awaited_once()
     db.rollback.assert_not_called()
+
+
+# ── Startup-fire completeness guard ────────────────────────
+#
+# The same defect shipped twice in two days: run_wb_tracking_poll (fixed in
+# 086e713) and run_shopify_refund_sync were both registered as daily 'interval'
+# jobs with no next_run_time, so every backend restart deferred them another 24
+# hours. Two instances is a pattern, so this guard forces the question to be
+# answered for every job — the way test_route_scope_completeness.py and
+# test_money_field_completeness.py force a verdict on new routes and money fields.
+#
+# It deliberately does NOT require a startup fire. A daily job may have good
+# reason to wait out its first interval; it just has to say so.
+#
+#   startup:<reason>  → registered with next_run_time; fires once at boot.
+#   deferred:<reason> → deliberately waits a full interval before its first run.
+#
+# A new job FAILS here until classified, a removed job FAILS as stale, and a
+# verdict that disagrees with the actual registration FAILS too — so the list
+# cannot quietly drift away from the code.
+STARTUP_POLICY: dict[str, str] = {
+    "run_shopify_sync": "deferred: 15-min interval, a boot fire would save 15 min",
+    "run_westernbid_poll": "deferred: 15-min interval, same as the order sync",
+    "run_shopify_refund_sync": (
+        "startup: daily; a re-run is one paginated Shopify read and zero writes "
+        "(refund ids pre-loaded and skipped, insert is ON CONFLICT DO NOTHING)"
+    ),
+    "run_wb_tracking_poll": (
+        "startup: daily; one batched keyless request, and record_poll writes an "
+        "event only on an observed change"
+    ),
+    "run_fx_rate_refresh": (
+        "startup: daily; FX_MIN_REFETCH_HOURS inside the job bounds the re-fetch"
+    ),
+}
+
+
+class _RecordingScheduler:
+    """Stands in for AsyncIOScheduler: records add_job calls, never starts."""
+
+    def __init__(self, *args, **kwargs):
+        self.jobs: list[tuple] = []
+
+    def add_job(self, func, trigger=None, **kwargs):
+        self.jobs.append((func, trigger, kwargs))
+
+    def start(self):
+        pass
+
+
+def _registered_jobs() -> dict[str, dict]:
+    """Job name -> add_job kwargs, without starting a real scheduler."""
+    recorder = _RecordingScheduler()
+    with patch("scheduler.AsyncIOScheduler", return_value=recorder):
+        from scheduler import start_scheduler
+        start_scheduler()
+    return {func.__name__: kwargs for func, _trigger, kwargs in recorder.jobs}
+
+
+def test_every_scheduled_job_declares_a_startup_verdict():
+    jobs = _registered_jobs()
+    assert jobs, "start_scheduler registered no jobs — the recorder patch broke"
+
+    unclassified = sorted(set(jobs) - set(STARTUP_POLICY))
+    assert not unclassified, (
+        f"Scheduled job(s) with no startup verdict: {unclassified}. "
+        "Add 'startup:<reason>' (register it with next_run_time so it fires at "
+        "boot) or 'deferred:<reason>' (it deliberately waits a full interval) to "
+        "STARTUP_POLICY."
+    )
+
+    stale = sorted(set(STARTUP_POLICY) - set(jobs))
+    assert not stale, f"STARTUP_POLICY lists jobs that are no longer registered: {stale}"
+
+
+def test_startup_verdicts_match_the_actual_registration():
+    jobs = _registered_jobs()
+    mismatched = []
+    for name, verdict in STARTUP_POLICY.items():
+        if name not in jobs:
+            continue  # covered by the staleness assertion above
+        fires_at_startup = jobs[name].get("next_run_time") is not None
+        if verdict.startswith("startup:") and not fires_at_startup:
+            mismatched.append(f"{name}: declared 'startup' but has no next_run_time")
+        elif verdict.startswith("deferred:") and fires_at_startup:
+            mismatched.append(f"{name}: declared 'deferred' but sets next_run_time")
+    assert not mismatched, "STARTUP_POLICY disagrees with the code: " + "; ".join(mismatched)
+
+
+def test_startup_verdicts_carry_a_reason():
+    """'deferred:' alone must not be a way to dodge the question."""
+    bad = []
+    for name, verdict in STARTUP_POLICY.items():
+        prefix, _, reason = verdict.partition(":")
+        if prefix not in {"startup", "deferred"}:
+            bad.append(f"{name}: verdict must start with 'startup:' or 'deferred:'")
+        elif not reason.strip():
+            bad.append(f"{name}: verdict gives no reason")
+    assert not bad, "; ".join(bad)

@@ -393,15 +393,36 @@ def start_scheduler():
         max_instances=1,
         coalesce=True,
     )
-    # Refund sync (SHOPIFY-REFUNDS) — third job, daily. Refunds settle into monthly
-    # partner payouts, so up-to-a-day latency is fine; a daily cadence keeps the
-    # per-shop refund re-scan cheap versus the 15-min order sync.
+    # Refund sync (SHOPIFY-REFUNDS) — third job, daily. A refund settles into the
+    # finance net_profit KPI and the dashboard revenue card, both of which net
+    # SUM(order_refunds.amount) by refund date, so up-to-a-day latency is fine and
+    # a daily cadence keeps the per-shop re-scan cheap next to the 15-min sync.
+    #
+    # next_run_time follows the tracking and FX jobs below, for the same reason:
+    # an 'interval' job first fires AFTER the interval, so without it the sync is
+    # deferred a full 24 hours by every backend restart. In production it wrote
+    # nothing at all between the 2026-07-27 deploy and 2026-08-06 — all 3 rows in
+    # order_refunds carry created_at = 2026-07-27, from the one-off
+    # /backfill-refunds retro-fix.
+    #
+    # LATENT, not live: Shopify reports 59.98 of returns across the last 120 days,
+    # so almost nothing was actually missed. Fixed because the mechanism is real
+    # and the correction is one kwarg. (The note here previously claimed refunds
+    # settle into monthly partner payouts. They do not — partner_payout_service
+    # dispatches to compute_net_profit_product_only / compute_revenue_items_minus_
+    # fees, and neither reads order_refunds.)
+    #
+    # Safe to fire on every restart: sync_shop_refunds pre-loads the shop's stored
+    # shopify_refund_ids and skips a known refund before any SQL, and the insert is
+    # ON CONFLICT DO NOTHING on uq_order_refund_shopify_id. A re-run's whole
+    # footprint is one paginated Shopify read and zero writes.
     scheduler.add_job(
         run_shopify_refund_sync,
         'interval',
         days=1,
         max_instances=1,
         coalesce=True,
+        next_run_time=datetime.now(timezone.utc),
     )
     # Nova Poshta delivery tracking (WB-TRACK-1) — fifth job, daily. NP scans a
     # healthy parcel at least once a day (p90 of observed gaps is 1.17 days), so
