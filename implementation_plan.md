@@ -4402,6 +4402,74 @@ whatever files it is given. It is an operator gate run before an import, not a C
 **Follow-ups filed below:** `STATEMENT-UI-TESTS`, `ETSY-REFUNDS`, `AGENT-GRANT-REPLACE`,
 `AGENT-SCOPE-AUTOGRANT`.
 
+#### The first production import — executed 2026-08-06 (this closes the sprint's last open item)
+
+STATEMENT-IMPORT shipped on 2026-08-04 and then sat **unused for two days**: `etsy_statement_line`
+held 0 rows and not one Etsy order carried a `platform_fee`, so profit was overstated on every one
+of them. Sergii imported the Etsy **order** CSVs and then the seven monthly statements
+(`2026-01`…`2026-07`) through the `/imports` UI on Lamamarka ETSY — Preview → Confirm per month,
+chronological. Verification ran read-only against prod (`default_transaction_read_only=on`).
+
+**The reconciliation ties to the cent on all six targets**, Jan–Jun measured alone against
+`docs/finance/etsy-fee-analysis-2026-h1.md`: 210 orders, base 8016.94, order fees 1286.97,
+advertising 1262.89, account fees 58.16, all-in 2608.02 = **32.53%**, Δ 0.00 on every line. The
+independent payout cross-check also reproduces — 5166.80 across 26 deposits, the same figure the
+sprint recorded from the files. 2,728 rows for Jan–Jun, matching the recorded count; one distinct
+`file_sha256` per period.
+
+**2026-07 is reported as a distinct quantity and deliberately NOT folded into that comparison** —
+the analysis covers six months, and totalling seven against it would manufacture a discrepancy that
+means nothing. July alone: 21 orders, base 886.81, order fees 136.47, advertising 74.32, account
+fees 7.10, all-in 217.89 = **24.57%** — the lowest rate of any imported month, driven by advertising
+at 8.4% of base against a 13–22% range Jan–Jun. Seven-month aggregate, stated separately: base
+8903.75, all-in 2825.91 = 31.74%.
+
+**Coverage is total: 229 Lamamarka ETSY orders priced, 0 left NULL**, fees 0.10 … 18.06 summing to
+1437.00. That reconciles against the statements exactly — order-fee total 1423.44 plus the 13.56 net
+of the four unmatched external ids (0.10 + 0.10 − 8.50 − 5.26) = 1437.00. Every order falls inside
+the imported window (2026-01-02 … 2026-07-31), so there is no "outside the window" residue. Guards
+hold: `fee_percent` still NULL on both Etsy shops, Vine&Roses untouched (0 lines, 17 orders, 0
+priced), the uniqueness constraint clean over 2,988 rows, all rows inside the 12 known buckets.
+Overhead is exactly 14 rows — one advertising and one orphan per period — each equal to its period's
+line aggregate to the cent.
+
+**The finding worth more than the numbers: the dry run caught a real ordering violation on the first
+production import.** The brief for this verification asserted orders had been loaded before
+statements. True for Jan–Jun; **false for July**. The log shows the first July dry run at 08:50:54
+reporting `matched=11 unmatched=10`, ten July orders created at 08:51:31, a second dry run at
+08:51:53 reporting `matched=21 unmatched=0`, and only then the real import. So the pre-merge dry-run
+addition — justified at the time by "its value peaks exactly once and never recovers" — was
+vindicated at precisely that moment, on real money, catching a mistake the planning brief had
+asserted could not exist. Note also *why* it worked: it is the same code path rolled back, not a
+separate "compute without writing" variant, so its matched/unmatched counts are the ones the real
+import would produce. A reimplementation could have reported differently. No period was ever
+re-imported (`replaced 0` on all seven), no checksum abort, no rejected row, no error.
+
+**Correction to this entry's own prediction.** It stated the negative-`platform_fee` path "will fire
+on prod, where those orders exist". **It did not fire.** `3902046506` (−8.50) and `3908813660`
+(−5.26) are Dec-2025 sales refunded in January, and Etsy orders of that vintage were never imported
+into OrderHub — so the credit lines stayed unmatched and no order received a negative fee. Confirmed
+structurally: `min(platform_fee)` across all 229 priced orders is **0.10**; no negative fee exists
+anywhere on prod. **The signed-arithmetic self-correction path remains unexercised on real data.**
+The money (13.76 in credits) is immaterial and is deliberately not being chased (Sergii, 2026-08-06)
+— this is a correction to the record, not a work item.
+
+**Four unmatched external ids across all seven periods, and no others.** Besides the two above:
+`3944625430` (2026-01) and `4026053403` (2026-04), 0.10 each. Both carry a sale row **and a
+full-value refund row in the same statement month** (34.35 / 34.23), with fee rows netting 0.00 and
+VAT netting −0.10 — i.e. sold and fully refunded inside one month. Neither exists in OrderHub on any
+shop. They are **absent orders, not broken links**, which is why the stale-link query returns empty
+rather than naming them. Worth a question nobody has asked yet: does the Etsy **order** CSV export
+omit fully-refunded orders? If so, that is a systematic gap rather than two stragglers.
+
+**`ETSY-REFUNDS` is now sized, not estimated** — see its row below. 9 refund rows, 9 distinct
+orders, **−338.12** booked nowhere by design (rule 8). Of that, **177.56 lands on five orders that
+are live in the P&L**, and three of them show the double-overstatement shape exactly: 98.97 of
+revenue retained while the fee is credited back to a 0.10 residue.
+
+**Still unexercised on prod:** the negative-fee path, and any period re-import (`replaced 0`
+everywhere, so replace-by-period idempotency has never had to actually replace anything).
+
 ---
 
 ### ORDER-SHIPPING-1 — capture Shopify shipping / discount / tax on the order (closed 2026-08-05)
@@ -4784,7 +4852,8 @@ in this document where applicable, to avoid duplication.
 | BOM-QTY-PRECISION | `bom_items.qty_per_unit` is `Numeric(8,2)` — quantities round to 2dp | Surfaced during the BOM pilot (2026-08-02): a 3.425 m cut length stored as 3.43 (+8 kop). The `qty > 0` CheckConstraint means a sub-0.01 quantity is **rejected loudly**, not silently zeroed — so this is a precision/UX nit, not a correctness hole. Mitigated for now by the convention rule (pick a unit where per-product qty is comfortably ≥ 0.01 — see `docs/warehouse/bom-intake.md`). A `Numeric(_,3)` bump is a later micro-migration only if precision-sensitive materials appear. |
 | SVC-MATERIAL-NONSTOCK | Service materials (cutting/sewing) bleed negative stock on every ship | Surfaced during the BOM pilot (2026-08-02). Cutting/sewing are modelled as materials (there is no labour/service concept), so `order_consumption_service` decrements them on every shipment — consumption runs regardless of currency; only the cost snapshot is skipped on currency mismatch — driving stock negative and adding a "stock went negative" warning per order. Noise, not breakage (the low-stock dashboard card is packaging-only). Real fix: a "non-stocked / service" flag on `Material` so flagged rows don't decrement. Bundle with the labour-model decision. |
 | STATEMENT-UI-TESTS | `StatementImportTab.tsx` ships with **zero tests** | From STATEMENT-IMPORT (2026-08-04). The UI shipped (`components/imports/StatementImportTab.tsx`, wired as a second tab in `ImportsPage.tsx`, `importsApi.importEtsyStatement`, `useImportEtsyStatement`) but frontend tests went 159 → 159. `ImportsPage` had no tests before either, so this is inherited debt rather than a regression — but a component was added to an untested page and left untested. Uncovered: the report rendering, the three conditional lists, and the error-extraction helper. The money path underneath **is** covered (737 backend / 78 MCP). Deliberately deferred as the smallest of the sprint's four gaps; fold into the frontend-health cleanup alongside `TYPECHECK-1` and `SETTINGS-TEST-1`. |
-| ETSY-REFUNDS | Etsy refunds reduce fees but not revenue → a refunded order overstates profit twice | Surfaced by STATEMENT-IMPORT's credit-only decision (2026-08-04). `Refund` rows are parsed, stored, counted and reported but booked nowhere, so revenue is untouched — while the fee credits *do* reach the order through their own Fee/VAT rows. A fully refunded order therefore carries **full revenue plus a negative `platform_fee`**, which reads as income. Two known cases so far (3902046506, 3908813660 — Dec-2025 sales refunded in January), surfaced in the `credit_only_orders` report block rather than hidden. The fix is an Etsy equivalent of `SHOPIFY-REFUNDS` Model 2 (dated `order_refunds` records netted in the refund's month); the statement line table already stores everything such a sprint would need. Sequence after the first production statement import, when the real volume of refunded orders is visible. |
+| ETSY-HISTORY-GAP | Etsy order history before 2026-01 was never imported | Surfaced by the first production statement import (2026-08-06). Every Lamamarka ETSY order in OrderHub falls in 2026-01-02 … 2026-07-31; nothing earlier exists. Consequence observed: the January statement's credits against two Dec-2025 orders (`3902046506`, `3908813660`, −13.76 combined) had nothing to land on, and the negative-`platform_fee` path stayed unexercised as a result. **The money is immaterial and is deliberately not being chased** (Sergii, 2026-08-06) — this row exists so the gap is not rediscovered as a mystery. Symmetric to `SHOPIFY-HISTORY-GAP` (37 orders from 2025-08…12 absent on the Shopify side); if either is ever backfilled, decide both together, since importing historical orders moves historical revenue and is a finance-visible change rather than a quiet top-up. **Separate question raised by the same import and genuinely open:** `3944625430` and `4026053403` were sold *and fully refunded within one statement month* and are absent from OrderHub despite falling inside the imported window — so does the Etsy order CSV export omit fully-refunded orders? If yes that is systematic, not two stragglers, and it would also mean refunded orders are silently missing from revenue. Cheap to settle: look for either number in the source order CSVs. |
+| ETSY-REFUNDS | Etsy refunds reduce fees but not revenue → a refunded order overstates profit twice | Surfaced by STATEMENT-IMPORT's credit-only decision (2026-08-04). `Refund` rows are parsed, stored, counted and reported but booked nowhere, so revenue is untouched — while the fee credits *do* reach the order through their own Fee/VAT rows. A fully refunded order therefore carries **full revenue plus a negative `platform_fee`**, which reads as income. Two known cases so far (3902046506, 3908813660 — Dec-2025 sales refunded in January), surfaced in the `credit_only_orders` report block rather than hidden. The fix is an Etsy equivalent of `SHOPIFY-REFUNDS` Model 2 (dated `order_refunds` records netted in the refund's month); the statement line table already stores everything such a sprint would need. **SIZED 2026-08-06 by the first production import — the "when the real volume is visible" condition below is now met.** Across 2026-01…07: **9 refund rows, 9 distinct orders, −338.12**, booked nowhere by design (rule 8). Of that, **177.56 lands on five orders that are live in the P&L** and 160.56 hits the four orders absent from OrderHub, where it is inert. Three of the five are the double-overstatement shape exactly — `4067348208`, `4081523563`, `4118000970` retain 98.97 of revenue between them while their fees sit credited back to a 0.10 residue each. Per period: 2026-01 −126.33, 2026-04 −34.23, 2026-06 −121.17, 2026-07 −56.39. Note the interaction with `ETSY-HISTORY-GAP`: part of the inert 160.56 is inert only because those orders were never imported, so backfilling history would move money into this bug rather than away from it — sequence the two deliberately. |
 | AGENT-GRANT-REPLACE | Re-provisioning the MCP agent with `--shops` would silently revoke its Etsy access | Found while verifying prod MCP grants during STATEMENT-IMPORT (2026-08-04). The prod agent user currently holds all three shops (provisioned `--all-shops`, `docs/integrations/mcp-server.md:64`), `view_costs`, and role MANAGER — so the statement MCP tool works on prod and **no grant change is needed**. But `set_shop_access` **replaces** the grant set rather than adding to it, so a future `provision_agent_user.py --shops <one>` would drop the others without warning, and the statement tool would start returning 403 with no obvious cause. Any re-provision must use `--all-shops` or name every shop. Worth a warning line in the runbook. |
 | AGENT-SCOPE-AUTOGRANT | The MCP agent's reach grows automatically as shops are added | Found alongside the above (2026-08-04). Because the agent holds every active shop it counts as "effectively unrestricted", so a newly created shop **auto-grants to it** (`access_service.py:347`). This is the documented USER-ACCESS-1 rule working as designed for human managers — but for an automated actor it means scope expands without anyone deciding, and a shop created for an unrelated purpose becomes agent-writable on creation. Not a defect; a property worth an explicit decision. Options: pin the agent's grants so it is not "effectively unrestricted", or accept and document it. Revisit when a fourth shop is created. |
 | FEE-UI-SHOPIFY-ONLY | The `fee_percent` input renders **only for SHOPIFY shops**, nested inside the credentials tab | Found in the Cowork prod smoke (2026-08-04). `Shop.fee_percent` is a generic column, but the UI puts its input inside the **Platform API** tab's Shopify branch; on an ETSY shop that tab renders "No API configuration needed for ETSY." and **no fee field at all**, with no explanation. Three consequences: (a) a flat rate cannot be set for an Etsy or Manual shop through the UI — whether the backend still accepts one is **unverified**; (b) a money-config field lives inside a credentials tab, so "where do I set the fee?" has no discoverable answer for a non-Shopify shop; (c) **silver lining** — this makes STATEMENT-IMPORT's rule 13 ("never set `fee_percent` on an Etsy shop") structurally enforced rather than merely documented, so the flat-% and statement paths cannot collide on Etsy. Decide whether (a)+(b) are intended; if yes, say so in the UI. Related: a no-op round-trip save on a **Shopify** shop is not obviously safe to test, because the same tab carries "Leave empty to keep existing" token fields whose keep-existing path would silently kill the live sync if wrong — that path has never been exercised deliberately and deserves a test. |
