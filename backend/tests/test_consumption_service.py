@@ -15,6 +15,12 @@ Guards:
   5. Partial BOM coverage — bool flag + warning + cost reflects only BOM items.
   6. Negative stock — material name surfaced AND consumption movement still
      staged (permissive race policy).
+  7. WH-1 is_stock_tracked=false — the line prices in exactly as a tracked one
+     would, but stages no movement, moves no counter and raises no negative-stock
+     warning; an unset flag still consumes; the FX check stays outside the branch.
+  8. WH-1 second idempotency probe — an already-booked computed_production_cost
+     blocks a re-ship from re-pricing a frozen snapshot when no ledger row exists
+     to block it (all-untracked recipes).
 
 The mock session dispatches on the ENTITY BEING QUERIED, not on call order. It
 used to key off a call counter with the comment "we rely on call order matching
@@ -56,8 +62,14 @@ def _make_material(
     unit_cost: Decimal = Decimal("580"),
     stock: Decimal = Decimal("100"),
     waste: Decimal = Decimal("0"),
+    is_stock_tracked: bool | None = True,
 ) -> Material:
-    """Real Material instance so apply_movement can mutate stock_quantity."""
+    """Real Material instance so apply_movement can mutate stock_quantity.
+
+    `is_stock_tracked` is set explicitly (column defaults apply at INSERT, and this
+    object is never flushed) and accepts None so a test can assert the WH-1 rule
+    that an unset flag means TRACKED.
+    """
     material = Material(
         name=name,
         unit="dm2",
@@ -67,6 +79,8 @@ def _make_material(
         low_stock_threshold=Decimal("0"),
         waste_percent=waste,
         is_active=True,
+        category="MATERIAL",
+        is_stock_tracked=is_stock_tracked,
     )
     material.id = uuid.uuid4()
     return material
@@ -165,10 +179,14 @@ def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
     return db, captured_adds
 
 
-def _make_order(currency: str = "UAH"):
+def _make_order(currency: str = "UAH", computed_production_cost=None):
     order = MagicMock()
     order.id = uuid.uuid4()
     order.currency = currency
+    # WH-1: the idempotency guard also reads this. It MUST be set explicitly — a
+    # bare MagicMock attribute is truthy, which would silently turn every test in
+    # this module into an idempotent skip.
+    order.computed_production_cost = computed_production_cost
     return order
 
 
@@ -526,4 +544,209 @@ async def test_consume_surfaces_negative_stock():
     assert "Шкіра тестова" in result.negative_stock_materials
     assert any("went negative" in w for w in result.warnings)
     # Cost still computed — currency matched, BOM present.
+    assert result.computed_production_cost == Decimal("200.00")
+
+
+# ---------------------------------------------------------------------------
+# 7. WH-1 — is_stock_tracked=false: cost yes, stock no
+# ---------------------------------------------------------------------------
+
+def _movements(adds: list) -> list:
+    return [o for o in adds if isinstance(o, MaterialMovement)]
+
+
+@pytest.mark.asyncio
+async def test_untracked_material_prices_in_but_stages_no_movement():
+    """An untracked line books exactly the cost a tracked one would, and touches
+    neither the ledger nor the counter. This is SVC-MATERIAL-NONSTOCK: services
+    (cutting, sewing) are modelled as materials and used to bleed stock forever."""
+    material = _make_material(
+        name="Лазерна порізка",
+        unit_cost=Decimal("100"),
+        stock=Decimal("50"),
+        is_stock_tracked=False,
+    )
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("5.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=2)
+
+    order = _make_order(currency="UAH")
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    # Same 5.00 × 2 × 100 = 1000.00 as the tracked happy path above.
+    assert result.computed_production_cost == Decimal("1000.00")
+    assert material.stock_quantity == Decimal("50"), "stock must not move"
+    assert _movements(adds) == [], "no ledger row for an untracked line"
+    assert result.warnings == []
+
+
+@pytest.mark.asyncio
+async def test_untracked_material_at_zero_stock_raises_no_negative_warning():
+    """The whole point: an untracked material sits at 0 forever and must never
+    produce the 'went negative' nag it produces today."""
+    material = _make_material(
+        name="Пошиття",
+        unit_cost=Decimal("40"),
+        stock=Decimal("0"),
+        is_stock_tracked=False,
+    )
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("3.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+
+    order = _make_order(currency="UAH")
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.negative_stock_materials == []
+    assert result.warnings == []
+    assert material.stock_quantity == Decimal("0")
+    assert _movements(adds) == []
+    assert result.computed_production_cost == Decimal("120.00")
+
+
+@pytest.mark.asyncio
+async def test_mixed_tracked_and_untracked_lines_in_one_recipe():
+    """The realistic recipe: leather (tracked) + laser cutting (untracked).
+    One movement, one decrement, both costs."""
+    leather = _make_material(
+        name="Шкіра", unit_cost=Decimal("500"), stock=Decimal("10")
+    )
+    service = _make_material(
+        name="Лазерна порізка",
+        unit_cost=Decimal("25"),
+        stock=Decimal("0"),
+        is_stock_tracked=False,
+    )
+    product_id = uuid.uuid4()
+    boms = [
+        _make_bom_item(material=leather, qty_per_unit=Decimal("2.00")),
+        _make_bom_item(material=service, qty_per_unit=Decimal("1.00")),
+    ]
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+
+    order = _make_order(currency="UAH")
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: boms}
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    # 2 × 500 + 1 × 25 = 1025.00 — both lines priced.
+    assert result.computed_production_cost == Decimal("1025.00")
+    assert leather.stock_quantity == Decimal("8.00")
+    assert service.stock_quantity == Decimal("0")
+    movements = _movements(adds)
+    assert len(movements) == 1
+    assert movements[0].material_id == leather.id
+
+
+@pytest.mark.asyncio
+async def test_material_with_unset_flag_is_treated_as_tracked():
+    """Skipping stock is an explicit opt-in. A Material whose flag was never set
+    (transient object, column defaults land at INSERT) must still consume —
+    the alternative is silent, permanent stock loss."""
+    material = _make_material(
+        unit_cost=Decimal("100"), stock=Decimal("50"), is_stock_tracked=None
+    )
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("5.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+
+    order = _make_order(currency="UAH")
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert material.stock_quantity == Decimal("45.00")
+    assert len(_movements(adds)) == 1
+
+
+@pytest.mark.asyncio
+async def test_untracked_line_in_an_unconvertible_currency_still_nulls_the_cost():
+    """The FX check sits OUTSIDE the tracking branch. An untracked line priced in
+    a currency with no rate must still void the whole rollup — booking only the
+    convertible part would under-state COGS exactly as it would for a tracked one."""
+    service = _make_material(
+        name="Cutting service",
+        currency="EUR",
+        unit_cost=Decimal("10"),
+        stock=Decimal("0"),
+        is_stock_tracked=False,
+    )
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=service, qty_per_unit=Decimal("1.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+
+    order = _make_order(currency="USD")
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4(), fx=_fx())
+
+    assert result.computed_production_cost is None
+    assert any("no exchange rate" in w for w in result.warnings)
+    assert _movements(adds) == []
+
+
+# ---------------------------------------------------------------------------
+# 8. WH-1 — the second idempotency probe (a booked cost is a frozen snapshot)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_reship_of_an_untracked_only_order_does_not_reprice_it():
+    """An all-untracked recipe leaves NO ledger row, so the movement probe alone
+    would let SHIPPED → IN_PROGRESS → SHIPPED recompute a frozen snapshot at
+    today's WAC and today's rate. The already-booked cost is the second probe."""
+    material = _make_material(
+        unit_cost=Decimal("999"), stock=Decimal("0"), is_stock_tracked=False
+    )
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("1.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+
+    order = _make_order(currency="UAH", computed_production_cost=Decimal("500.00"))
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.idempotent_skip is True
+    assert result.computed_production_cost is None, (
+        "the caller must not overwrite the frozen snapshot on a skip"
+    )
+    assert _movements(adds) == []
+
+
+@pytest.mark.asyncio
+async def test_reship_after_an_fx_failure_still_recomputes():
+    """The accepted delta of that second probe: cost=None and no movements means
+    nothing was ever booked, so a later ship (once a rate exists) is a recovery,
+    not a re-price."""
+    material = _make_material(
+        unit_cost=Decimal("100"), stock=Decimal("0"), is_stock_tracked=False
+    )
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("2.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+
+    order = _make_order(currency="UAH", computed_production_cost=None)
+    db, _adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={product_id: [bom]}
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.idempotent_skip is False
     assert result.computed_production_cost == Decimal("200.00")

@@ -11,6 +11,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
 
@@ -299,3 +300,124 @@ async def test_bom_response_passes_the_target_currency_through_with_view_costs()
 
     assert response.cost_converted is converted
     assert compute.await_args.kwargs["target_currency"] == "USD"
+
+
+# ---------------------------------------------------------------------------
+# WH-1 — non-stock flag on the projection; packaging is not a recipe line
+# ---------------------------------------------------------------------------
+
+def _projectable(**material_attrs):
+    mat = MagicMock()
+    mat.name = material_attrs.pop("name", "Матеріал")
+    mat.unit = "dm2"
+    mat.currency = "UAH"
+    mat.current_unit_cost = Decimal("0")
+    mat.waste_percent = Decimal("0")
+    mat.is_active = True
+    mat.is_stock_tracked = True
+    for key, value in material_attrs.items():
+        setattr(mat, key, value)
+
+    bom_item = MagicMock()
+    bom_item.id = uuid.uuid4()
+    bom_item.product_id = uuid.uuid4()
+    bom_item.material_id = uuid.uuid4()
+    bom_item.qty_per_unit = Decimal("1.00")
+    bom_item.notes = None
+    bom_item.material = mat
+    return bom_item
+
+
+def test_project_bom_item_carries_the_non_stock_flag():
+    """The editor renders a visible hint from this; a dropped field would turn
+    the exception back into a silent one."""
+    projection = bom_service.project_bom_item(
+        _projectable(name="Лазерна порізка", is_stock_tracked=False)
+    )
+    assert projection.material_is_stock_tracked is False
+
+
+def test_project_bom_item_normalises_an_unset_flag_to_true():
+    """The column is NOT NULL, but a Material that has not been flushed reads
+    None — and None on a `bool` field would 500 the whole BOM read."""
+    projection = bom_service.project_bom_item(_projectable(is_stock_tracked=None))
+    assert projection.material_is_stock_tracked is True
+
+
+def _materials_result(materials: list):
+    r = MagicMock()
+    r.scalars.return_value.all.return_value = materials
+    return r
+
+
+def _replace_bom_db(existing_ids: list, materials: list):
+    """execute() answers the prior-recipe query first, then the material lookup."""
+    calls = {"n": 0}
+
+    async def fake_execute(_stmt):
+        calls["n"] += 1
+        r = MagicMock()
+        if calls["n"] == 1:
+            r.scalars.return_value.all.return_value = existing_ids
+        else:
+            r.scalars.return_value.all.return_value = materials
+        return r
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=fake_execute)
+    db.add = MagicMock()
+    db.flush = AsyncMock()
+    return db
+
+
+def _material_row(material_id, *, category="MATERIAL", name="Матеріал"):
+    mat = MagicMock()
+    mat.id = material_id
+    mat.name = name
+    mat.is_active = True
+    mat.category = category
+    return mat
+
+
+@pytest.mark.asyncio
+async def test_replace_bom_rejects_a_packaging_material():
+    """A box is one per PARCEL, not per product (DESIGN §2.4). Enforced in the
+    service, not just the picker, because this is also the MCP agent's write
+    path — and in WH-1 a packaging line would decrement the material counter at
+    SHIPPED while shipping.py still decrements the box counter at TTN."""
+    material_id = uuid.uuid4()
+    db = _replace_bom_db(
+        existing_ids=[],
+        materials=[_material_row(material_id, category="PACKAGING", name="100x120x50")],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await bom_service.replace_bom(
+            db,
+            product_id=uuid.uuid4(),
+            items=[BomItemCreate(material_id=material_id, qty_per_unit=Decimal("1"))],
+        )
+
+    assert exc.value.status_code == 422
+    assert "packaging" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_replace_bom_grandfathers_a_packaging_material_already_in_the_recipe():
+    """Same rule as discontinued materials: a recipe that already contains one
+    stays editable, so an operator is never locked out of their own product."""
+    material_id = uuid.uuid4()
+    db = _replace_bom_db(
+        existing_ids=[material_id],
+        materials=[_material_row(material_id, category="PACKAGING")],
+    )
+
+    # get_bom is called at the end; stub it out — this test is about validation.
+    with patch.object(
+        bom_service, "get_bom", AsyncMock(return_value=([], False))
+    ):
+        await bom_service.replace_bom(
+            db,
+            product_id=uuid.uuid4(),
+            items=[BomItemCreate(material_id=material_id, qty_per_unit=Decimal("1"))],
+        )

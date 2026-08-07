@@ -33,10 +33,14 @@ export default function MaterialsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
   const [search, setSearch] = useState('')
   const [includeInactive, setIncludeInactive] = useState(false)
+  // WH-1: every packaging box is backed by a PACKAGING material. They are entered
+  // and named on the Packaging page, so they are noise here until asked for.
+  const [showPackaging, setShowPackaging] = useState(false)
 
   const { data: materials, isLoading } = useMaterials({
     search: search.trim() || undefined,
     includeInactive,
+    category: showPackaging ? undefined : 'MATERIAL',
   })
   const createMaterial = useCreateMaterial()
   const updateMaterial = useUpdateMaterial()
@@ -81,6 +85,15 @@ export default function MaterialsPage() {
                 className="size-4 rounded border-zinc-700 bg-zinc-900 accent-teal-500"
               />
               Show archived
+            </label>
+            <label className="flex items-center gap-2 text-xs text-zinc-400 whitespace-nowrap cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showPackaging}
+                onChange={(e) => setShowPackaging(e.target.checked)}
+                className="size-4 rounded border-zinc-700 bg-zinc-900 accent-teal-500"
+              />
+              Show packaging
             </label>
           </div>
           <Button
@@ -182,7 +195,12 @@ export default function MaterialsPage() {
                   materials?.map((item) => {
                     const thresholdNum = Number(item.low_stock_threshold)
                     const stockNum = Number(item.stock_quantity)
-                    const isLowStock = thresholdNum > 0 && stockNum <= thresholdNum
+                    // WH-1: an untracked material's stock never moves, so a
+                    // low-stock badge on it would be noise, not a signal.
+                    const isLowStock =
+                      item.is_stock_tracked !== false &&
+                      thresholdNum > 0 &&
+                      stockNum <= thresholdNum
                     return (
                     <TableRow
                       key={item.id}
@@ -191,8 +209,25 @@ export default function MaterialsPage() {
                     >
                       <TableCell className="px-8 py-6">
                         <div className="flex flex-col">
-                          <p className="text-sm font-bold text-zinc-100 tracking-tight">
+                          <p className="text-sm font-bold text-zinc-100 tracking-tight flex items-center gap-2">
                             {item.name}
+                            {item.category === 'PACKAGING' && (
+                              <span
+                                data-testid="packaging-badge"
+                                className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-violet-500/10 text-violet-300 rounded"
+                              >
+                                Packaging
+                              </span>
+                            )}
+                            {item.is_stock_tracked === false && (
+                              <span
+                                data-testid="untracked-badge"
+                                title="Contributes cost, does not consume stock"
+                                className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-sky-500/10 text-sky-300 rounded"
+                              >
+                                No stock
+                              </span>
+                            )}
                           </p>
                           {item.notes && (
                             <span className="text-[10px] text-zinc-400 truncate max-w-md">

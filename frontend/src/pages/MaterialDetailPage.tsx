@@ -95,7 +95,11 @@ export default function MaterialDetailPage() {
 
   const thresholdNum = material ? Number(material.low_stock_threshold) : 0
   const stockNum = material ? Number(material.stock_quantity) : 0
-  const isLowStock = thresholdNum > 0 && stockNum <= thresholdNum
+  // WH-1: same rule as the list — no low-stock signal for a material whose stock
+  // never moves. Receipts and adjustments stay available: an untracked service
+  // material still needs a receipt to carry its unit cost.
+  const isLowStock =
+    material?.is_stock_tracked !== false && thresholdNum > 0 && stockNum <= thresholdNum
 
   const handleSaveEdit = async (payload: MaterialUpdate) => {
     if (!material) return

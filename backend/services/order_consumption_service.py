@@ -8,12 +8,26 @@ OrderStatusHistory row is staged and flush()ed, before the caller's commit.
 The single entry point — consume_materials_for_order — is responsible for:
 
   1. Idempotency guard: SELECT 1 FROM material_movements WHERE order_id = order.id
-     AND reason = 'consumption' LIMIT 1. If a row exists → no-op (re-SHIPPED).
+     AND reason = 'consumption' LIMIT 1, OR an already-booked
+     order.computed_production_cost. If either holds → no-op (re-SHIPPED).
+
+     The second probe is WH-1's. A recipe made entirely of is_stock_tracked=false
+     lines writes NO movement rows, so the ledger probe alone would stop firing for
+     such an order and a SHIPPED → IN_PROGRESS → SHIPPED cycle would silently
+     re-price a frozen snapshot at today's WAC and today's FX rate — exactly what
+     DESIGN §4.1 ("snapshots are immutable") forbids. order_service.py is the only
+     writer of computed_production_cost, so a non-NULL value means "already priced".
+     An order that has neither (first ship, or a ship whose cost was skipped because
+     no FX rate was configured) still runs — for the latter that is the recovery
+     path, and there is no snapshot to protect.
   2. Iterating OrderItems, walking variant → product → BomItem rows, computing
      actual_consumed = qty_per_unit * order_item.quantity * (1 + waste_percent/100).
   3. Calling material_stock_service.apply_movement for each BomItem (which both
      stages the MaterialMovement row AND mutates Material.stock_quantity in
-     the caller's session — no commit here).
+     the caller's session — no commit here) — UNLESS the material is
+     is_stock_tracked=false, in which case the line contributes its cost exactly as
+     any other but moves no stock and writes no ledger row (WH-1, closes
+     SVC-MATERIAL-NONSTOCK for service positions like cutting and sewing).
   4. Accumulating per-line cost contributions into PER-CURRENCY buckets
      (un-rounded), converting each bucket into the order currency, and rounding
      ONCE at the end.
@@ -97,7 +111,7 @@ async def consume_materials_for_order(
         )
         .limit(1)
     )
-    if existing.scalar() is not None:
+    if existing.scalar() is not None or order.computed_production_cost is not None:
         return ConsumptionResult(idempotent_skip=True)
 
     # 2. Defensive currency check. Order.currency defaults to "USD" so this is
@@ -158,27 +172,32 @@ async def consume_materials_for_order(
             actual = (
                 bom.qty_per_unit * Decimal(item.quantity) * waste_factor
             )
-            # stock_quantity is Decimal(12,2) so the ledger delta rounds to 2dp.
-            actual_rounded = actual.quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
             unit_cost_snapshot = material.current_unit_cost
 
-            await material_stock_service.apply_movement(
-                db,
-                material_id=material.id,
-                delta=-actual_rounded,
-                reason=MaterialMovementReason.CONSUMPTION,
-                user_id=user_id,
-                order_id=order.id,
-                unit_cost_at_movement=unit_cost_snapshot,
-            )
-            # apply_movement already did `material.stock_quantity += delta`.
-            if (
-                material.stock_quantity < 0
-                and material.name not in negative_stock
-            ):
-                negative_stock.append(material.name)
+            # WH-1: `is not False`, not plain truthiness. The column is NOT NULL, so
+            # anything loaded from the DB is a real bool; a Material built in memory
+            # reads None because column defaults apply at INSERT. Skipping stock must
+            # be an explicit opt-in, never the side effect of an unset attribute.
+            if material.is_stock_tracked is not False:
+                # stock_quantity is Decimal(12,2) so the ledger delta rounds to 2dp.
+                actual_rounded = actual.quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                await material_stock_service.apply_movement(
+                    db,
+                    material_id=material.id,
+                    delta=-actual_rounded,
+                    reason=MaterialMovementReason.CONSUMPTION,
+                    user_id=user_id,
+                    order_id=order.id,
+                    unit_cost_at_movement=unit_cost_snapshot,
+                )
+                # apply_movement already did `material.stock_quantity += delta`.
+                if (
+                    material.stock_quantity < 0
+                    and material.name not in negative_stock
+                ):
+                    negative_stock.append(material.name)
 
             # Cost contribution uses the un-rounded delta; round once at the end.
             totals_by_currency[material_currency] = (

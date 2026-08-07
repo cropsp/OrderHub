@@ -16,6 +16,7 @@ from sqlalchemy.dialects import postgresql
 
 from models.material import Material, MaterialMovement, MaterialMovementReason
 from routers.materials import (
+    update_material,
     create_material,
     list_material_movements,
     list_materials,
@@ -121,7 +122,7 @@ async def test_list_materials_search_matches_name_and_supplier_sku():
     db, stmts, _adds = _make_db()
 
     await list_materials(
-        search="027515", include_inactive=False, db=db, user=MagicMock()
+        search="027515", include_inactive=False, category=None, db=db, user=MagicMock()
     )
     sql = _compiled(stmts[-1])
 
@@ -145,13 +146,17 @@ async def test_list_materials_filters_inactive_by_default():
     filter in the WHERE."""
     db, stmts, _adds = _make_db()
 
-    await list_materials(search=None, include_inactive=False, db=db, user=MagicMock())
+    await list_materials(
+        search=None, include_inactive=False, category=None, db=db, user=MagicMock()
+    )
     default_sql = _compiled(stmts[-1])
     assert "materials.is_active = true" in default_sql, (
         f"Default list query must filter is_active=True. SQL: {default_sql}"
     )
 
-    await list_materials(search=None, include_inactive=True, db=db, user=MagicMock())
+    await list_materials(
+        search=None, include_inactive=True, category=None, db=db, user=MagicMock()
+    )
     opt_in_sql = _compiled(stmts[-1])
     assert "materials.is_active = true" not in opt_in_sql, (
         "include_inactive=True must drop the is_active filter. "
@@ -232,3 +237,216 @@ async def test_list_movements_joins_orders_and_projects_order_code():
     assert result[0].order_id == order_id
     assert result[1].order_code is None
     assert result[1].order_id is None
+
+
+# ---------------------------------------------------------------------------
+# WH-1 — category filter, new field defaults, and the paired-material guard
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_list_materials_filters_by_category_when_asked():
+    """GET /api/materials?category=MATERIAL → the SELECT carries the filter.
+
+    This is what keeps the backfilled packaging materials out of the BOM picker
+    and the materials page; a client-side filter would leave the API open."""
+    db, stmts, _adds = _make_db()
+
+    await list_materials(
+        search=None, include_inactive=False, category="MATERIAL", db=db,
+        user=MagicMock(),
+    )
+    sql = _compiled(stmts[-1])
+    assert "materials.category = 'material'" in sql, (
+        f"category filter must reach SQL. SQL: {sql}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_materials_without_category_does_not_filter():
+    """Unset means every category — the MCP tools and any other pre-WH-1 client
+    must keep seeing exactly what they saw before."""
+    db, stmts, _adds = _make_db()
+
+    await list_materials(
+        search=None, include_inactive=True, category=None, db=db, user=MagicMock()
+    )
+    sql = _compiled(stmts[-1])
+    # The column is in the SELECT list either way; what must be absent is the
+    # predicate (and with include_inactive=True there is no WHERE clause at all).
+    assert "materials.category =" not in sql, (
+        f"no category param must mean no category predicate. SQL: {sql}"
+    )
+    assert " where " not in sql, f"expected no WHERE clause at all. SQL: {sql}"
+
+
+@pytest.mark.asyncio
+async def test_create_material_defaults_to_tracked_material_category():
+    """A payload that says nothing about WH-1's two fields must still produce
+    today's material: MATERIAL, stock-tracked."""
+    db, _stmts, adds = _make_db()
+    body = MaterialCreate(name="Нитка вощена", unit="m", currency="UAH")
+
+    await create_material(body=body, db=db, user=MagicMock())
+
+    assert adds[0].category == "MATERIAL"
+    assert adds[0].is_stock_tracked is True
+
+
+@pytest.mark.asyncio
+async def test_create_material_carries_wh1_fields_to_persistence():
+    db, _stmts, adds = _make_db()
+    body = MaterialCreate(
+        name="Лазерна порізка",
+        unit="pcs",
+        currency="UAH",
+        is_stock_tracked=False,
+    )
+
+    await create_material(body=body, db=db, user=MagicMock())
+
+    assert adds[0].is_stock_tracked is False
+    assert adds[0].category == "MATERIAL"
+
+
+def _update_db(material: Material, *, paired: bool):
+    """AsyncSession mock for update_material. `paired` decides whether the
+    PackagingBox existence probe finds a row; every execute() is recorded so a
+    test can assert the probe did NOT run."""
+    captured_stmts: list = []
+
+    async def fake_execute(stmt):
+        captured_stmts.append(stmt)
+        r = MagicMock()
+        r.scalar = MagicMock(return_value=uuid.uuid4() if paired else None)
+        return r
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=fake_execute)
+    db.get = AsyncMock(return_value=material)
+    db.flush = AsyncMock()
+    db.refresh = AsyncMock()
+    db.commit = AsyncMock()
+    return db, captured_stmts
+
+
+def _material(**overrides) -> Material:
+    fields = {
+        "name": "100x120x50",
+        "unit": "шт",
+        "currency": "UAH",
+        "current_unit_cost": Decimal("0"),
+        "stock_quantity": Decimal("0"),
+        "low_stock_threshold": Decimal("0"),
+        "waste_percent": Decimal("0"),
+        "is_active": True,
+        "category": "PACKAGING",
+        "is_stock_tracked": True,
+    }
+    fields.update(overrides)
+    material = Material(**fields)
+    material.id = uuid.uuid4()
+    return material
+
+
+@pytest.mark.asyncio
+async def test_update_material_rejects_rename_of_a_paired_material():
+    """WH-1 rule 6: the packaging page is the single place a box (and therefore
+    its material) is named. Renaming from here would desync the pair with nothing
+    to detect the drift — including for the MCP agent, which lands on this same
+    endpoint."""
+    from fastapi import HTTPException
+
+    from schemas.material import MaterialUpdate
+
+    material = _material()
+    db, _stmts = _update_db(material, paired=True)
+
+    with pytest.raises(HTTPException) as exc:
+        await update_material(
+            material_id=material.id,
+            body=MaterialUpdate(name="Нова назва"),
+            db=db,
+            user=MagicMock(),
+        )
+
+    assert exc.value.status_code == 409
+    assert "packaging" in exc.value.detail.lower()
+    assert material.name == "100x120x50", "the rename must not have been applied"
+
+
+@pytest.mark.asyncio
+async def test_update_material_rejects_category_change_of_a_paired_material():
+    from fastapi import HTTPException
+
+    from schemas.material import MaterialUpdate
+
+    material = _material()
+    db, _stmts = _update_db(material, paired=True)
+
+    with pytest.raises(HTTPException) as exc:
+        await update_material(
+            material_id=material.id,
+            body=MaterialUpdate(category="MATERIAL"),
+            db=db,
+            user=MagicMock(),
+        )
+
+    assert exc.value.status_code == 409
+    assert material.category == "PACKAGING"
+
+
+@pytest.mark.asyncio
+async def test_update_material_allows_an_unchanged_echo_on_a_paired_material():
+    """A UI round-trip that PATCHes the current values back is a no-op, not a
+    409 — the guard triggers on a real change."""
+    from schemas.material import MaterialUpdate
+
+    material = _material()
+    db, stmts = _update_db(material, paired=True)
+
+    await update_material(
+        material_id=material.id,
+        body=MaterialUpdate(name="100x120x50", category="PACKAGING", notes="ok"),
+        db=db,
+        user=MagicMock(),
+    )
+
+    assert material.notes == "ok"
+    assert stmts == [], "no pairing probe when nothing guarded actually changed"
+
+
+@pytest.mark.asyncio
+async def test_update_material_allows_rename_when_not_paired():
+    from schemas.material import MaterialUpdate
+
+    material = _material(category="MATERIAL")
+    db, _stmts = _update_db(material, paired=False)
+
+    await update_material(
+        material_id=material.id,
+        body=MaterialUpdate(name="Шкіра нова"),
+        db=db,
+        user=MagicMock(),
+    )
+
+    assert material.name == "Шкіра нова"
+
+
+@pytest.mark.asyncio
+async def test_update_material_skips_the_pairing_probe_for_ordinary_fields():
+    """The guard costs one query, and only when `name` or `category` is present.
+    A plain is_stock_tracked flip must not pay for it."""
+    from schemas.material import MaterialUpdate
+
+    material = _material(category="MATERIAL")
+    db, stmts = _update_db(material, paired=True)
+
+    await update_material(
+        material_id=material.id,
+        body=MaterialUpdate(is_stock_tracked=False),
+        db=db,
+        user=MagicMock(),
+    )
+
+    assert stmts == []
+    assert material.is_stock_tracked is False

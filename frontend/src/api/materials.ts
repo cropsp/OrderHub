@@ -1,6 +1,7 @@
 import client from './client'
 import type {
   Material,
+  MaterialCategory,
   MaterialCreate,
   MaterialMovement,
   MaterialMovementReason,
@@ -14,6 +15,9 @@ import type {
 export interface MaterialListParams {
   search?: string
   includeInactive?: boolean
+  // WH-1: omitted means every category. Surfaces that must not offer packaging
+  // (the BOM picker, the materials page by default) pass 'MATERIAL' explicitly.
+  category?: MaterialCategory
 }
 
 export interface MaterialPaginationParams {
@@ -31,6 +35,7 @@ export const materialsApi = {
       params: {
         search: params.search || undefined,
         include_inactive: params.includeInactive || undefined,
+        category: params.category || undefined,
       },
     })
     return response.data

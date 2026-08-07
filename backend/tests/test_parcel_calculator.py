@@ -65,6 +65,7 @@ async def test_envelope_selection():
     # Mock packaging - using real values for Pydantic validation
     env = MagicMock()
     env.id = uuid4()
+    env.material_id = uuid4()  # WH-1: every box is backed by a Material
     env.name = "Small Envelope"
     env.packaging_type = PackagingType.ENVELOPE
     env.max_weight_g = 500
@@ -118,6 +119,7 @@ async def test_box_fallback():
     # Box
     box = MagicMock()
     box.id = uuid4()
+    box.material_id = uuid4()  # WH-1: every box is backed by a Material
     box.name = "Standard Box"
     box.packaging_type = PackagingType.BOX
     box.max_weight_g = 5000

@@ -40,6 +40,8 @@ const useMaterialsMock = vi.fn(() => ({
       supplier_name: 'Conceria Walpier',
       notes: null,
       is_active: true,
+      category: 'MATERIAL',
+      is_stock_tracked: true,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -86,6 +88,27 @@ describe('MaterialsPage', () => {
 
     expect(useMaterialsMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ includeInactive: true }),
+    )
+  })
+
+  // WH-1 — every packaging box now has a Material behind it. Those belong to the
+  // Packaging page, so they stay out of this list unless explicitly asked for.
+  it('"Show packaging" toggle flips the category filter passed to the hook', () => {
+    render(
+      <MemoryRouter>
+        <MaterialsPage />
+      </MemoryRouter>,
+    )
+
+    expect(useMaterialsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: 'MATERIAL' }),
+    )
+
+    fireEvent.click(screen.getByLabelText(/show packaging/i))
+
+    // undefined = no category filter = both kinds.
+    expect(useMaterialsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: undefined }),
     )
   })
 

@@ -68,6 +68,10 @@ def _make_material(
         supplier_name=None,
         notes=None,
         is_active=True,
+        # WH-1: column defaults land at INSERT, and this Material is never flushed,
+        # so MaterialRead.model_validate would see None on both.
+        category="MATERIAL",
+        is_stock_tracked=True,
     )
     material.id = uuid.uuid4()
     now = datetime.now(timezone.utc)

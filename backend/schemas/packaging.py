@@ -42,6 +42,12 @@ class PackagingBoxRead(PackagingBoxBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    # WH-1: the paired Material carrying cost/receipts/supplier article. Exposed as
+    # the bare id on purpose — nesting the material read model here would drag its
+    # Decimal cost fields onto this un-cost-gated router (and, via
+    # OrderResponse.packaging, onto every order route), which the money-field guard
+    # in tests/test_money_field_completeness.py exists to catch.
+    material_id: uuid.UUID
     stock_quantity: int
     low_stock_threshold: int
     created_at: datetime
