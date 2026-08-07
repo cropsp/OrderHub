@@ -62,6 +62,13 @@ CLASSIFIED: dict[str, str] = {
     "DELETE /api/shops/{shop_id}/partner-payouts/payments/{payment_id}": "guarded",
     "GET /api/shops/{shop_id}/partner-payouts/balances": "guarded",
     "GET /api/shops/{shop_id}/partner-payouts/partner-names": "guarded",
+    "GET /api/shops/{shop_id}/partner-payouts/settlements/staleness": "guarded",
+    # PARTNER-CONFIG-1: partner money configuration. OWNER-only for the same
+    # reason as the platform-fee backfill above — these rows decide how much
+    # money leaves the business, and they move every future partner-payout base.
+    "GET /api/shops/{shop_id}/partner-config": "owner-only",
+    "PUT /api/shops/{shop_id}/partner-config/{partner_id}": "owner-only",
+    "DELETE /api/shops/{shop_id}/partner-config/{partner_id}": "owner-only",
     # HMAC-authenticated Shopify callback — no user principal, verified by the
     # shop's webhook secret, not by user shop access.
     "POST /api/webhooks/shopify/{shop_id}": "unscoped:webhook",
@@ -82,6 +89,17 @@ INDIRECT_SHOP_ROUTES = {
     # touching the shop (routers/imports.py `_get_etsy_shop`).
     "POST /api/imports/etsy",
     "POST /api/imports/etsy-statement",
+    # PARTNER-CONFIG-1: partner IDENTITY is global, so these carry no {shop_id}
+    # and _shop_id_routes() cannot see them. They are OWNER-only at the router
+    # (require_role(UserRole.OWNER)) and expose name / is_active / notes plus the
+    # cross-shop balance aggregate — no per-shop data a scoped user could reach.
+    # That is what makes the invisibility safe; anything needing per-shop scoping
+    # belongs under /api/shops/{shop_id}/partner-config instead. Behavioural
+    # coverage: test_shop_access.py::test_partner_identity_routes_are_owner_only.
+    "GET /api/partners",
+    "POST /api/partners",
+    "PATCH /api/partners/{partner_id}",
+    "GET /api/partners/balances",
 }
 
 

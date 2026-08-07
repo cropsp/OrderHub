@@ -106,6 +106,10 @@ async def test_net_profit_product_only_subtracts_overhead_per_currency():
     items_row.items_revenue = 10000.0
     items_row.cogs = 3000.0
     items_row.non_shipping_fees = 500.0
+    # PARTNER-CONFIG-1 added discount_total to the shared aggregate. Non-zero on
+    # purpose: the LEGACY base must keep ignoring it, or an old settlement would
+    # silently change meaning. Only TURNOVER/PROFIT subtract it.
+    items_row.discount_total = 700.0
 
     items_result = MagicMock()
     items_result.all.return_value = [items_row]
@@ -121,34 +125,69 @@ async def test_net_profit_product_only_subtracts_overhead_per_currency():
         db, uuid.uuid4(), date(2026, 5, 1), date(2026, 5, 31)
     )
     assert len(result) == 1
-    # 10000 - 3000 - 500 - 1500 = 5000
+    # 10000 - 3000 - 500 - 1500 = 5000 — the 700 discount is NOT subtracted.
     assert result[0] == CurrencyAmount(currency="UAH", amount=5000.0)
 
 
 # ─── 3. create_settlement snapshot freezing ────────────────────────────
 
-@pytest.mark.asyncio
-async def test_create_settlement_persists_snapshot(monkeypatch):
-    async def fake_base(db, shop_id, ps, pe, formula):
-        return [CurrencyAmount(currency="UAH", amount=9800.0)]
+def _partner(name="Олег"):
+    p = MagicMock()
+    p.id = uuid.uuid4()
+    p.name = name
+    return p
 
-    monkeypatch.setattr(partner_payout_service, "compute_base_amount", fake_base)
-    db, _ = _make_db()
-    payload = PartnerSettlementCreate(
-        partner_name="Олег",
-        formula_type="net_profit_product_only",
+
+def _lookup_results(partner, overlapping=()):
+    """The two queries create_settlement runs before touching any aggregate:
+    the partner lookup, then the overlap guard."""
+    partner_result = MagicMock()
+    partner_result.scalar_one_or_none.return_value = partner
+    overlap_result = MagicMock()
+    overlap_result.scalars.return_value.all.return_value = list(overlapping)
+    return [partner_result, overlap_result]
+
+
+def _create_payload(partner, **overrides):
+    kwargs = dict(
+        partner_id=partner.id,
+        formula_type="profit",
         percent=Decimal("25"),
         period_start=date(2026, 5, 1),
         period_end=date(2026, 5, 31),
     )
+    kwargs.update(overrides)
+    return PartnerSettlementCreate(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_create_settlement_persists_snapshot(monkeypatch):
+    partner = _partner()
+
+    async def fake_base(db, shop_id, ps, pe, formula, **_kw):
+        return partner_payout_service.BaseComputation(
+            amounts=[CurrencyAmount(currency="UAH", amount=9800.0)],
+            base_amount=Decimal("9800.00"),
+            base_currency="UAH",
+        )
+
+    monkeypatch.setattr(partner_payout_service, "compute_base_amount", fake_base)
+    monkeypatch.setattr(
+        partner_payout_service,
+        "_resolve_context",
+        AsyncMock(return_value=partner_payout_service.BaseContext("UAH")),
+    )
+    db, _ = _make_db(_lookup_results(partner))
     user_id = uuid.uuid4()
     shop_id = uuid.uuid4()
     settlement = await partner_payout_service.create_settlement(
-        db, shop_id, user_id, payload
+        db, shop_id, user_id, _create_payload(partner)
     )
     assert settlement.base_amount == Decimal("9800.00")
     assert settlement.base_currency == "UAH"
     assert settlement.computed_amount == Decimal("2450.00")
+    # partner_name is a SNAPSHOT taken from the partner entity, not client input.
+    assert settlement.partner_id == partner.id
     assert settlement.partner_name == "Олег"
     assert settlement.shop_id == shop_id
     assert settlement.created_by_user_id == user_id
@@ -160,37 +199,68 @@ async def test_create_settlement_persists_snapshot(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_settlement_with_negative_base_persists(monkeypatch):
-    async def fake_base(db, shop_id, ps, pe, formula):
-        return [CurrencyAmount(currency="UAH", amount=-500.0)]
+    """Rule 6: a loss period produces a negative computed_amount (the partner
+    owes back). Never clamped — the balance aggregation sums it correctly."""
+    partner = _partner()
+
+    async def fake_base(db, shop_id, ps, pe, formula, **_kw):
+        return partner_payout_service.BaseComputation(
+            base_amount=Decimal("-500.00"), base_currency="UAH"
+        )
 
     monkeypatch.setattr(partner_payout_service, "compute_base_amount", fake_base)
-    db, _ = _make_db()
-    payload = PartnerSettlementCreate(
-        partner_name="Олег",
-        formula_type="net_profit_product_only",
-        percent=Decimal("10"),
-        period_start=date(2026, 5, 1),
-        period_end=date(2026, 5, 31),
+    monkeypatch.setattr(
+        partner_payout_service,
+        "_resolve_context",
+        AsyncMock(return_value=partner_payout_service.BaseContext("UAH")),
     )
+    db, _ = _make_db(_lookup_results(partner))
     settlement = await partner_payout_service.create_settlement(
-        db, uuid.uuid4(), uuid.uuid4(), payload
+        db, uuid.uuid4(), uuid.uuid4(), _create_payload(partner, percent=Decimal("10"))
     )
     assert settlement.base_amount == Decimal("-500.00")
     assert settlement.computed_amount == Decimal("-50.00")
 
 
-# ─── 5. empty-period 422 ───────────────────────────────────────────────
+# ─── 5. a genuinely zero base is a settlement, not "no data" ───────────
 
 @pytest.mark.asyncio
-async def test_create_settlement_raises_422_when_formula_empty(monkeypatch):
-    async def fake_base(db, shop_id, ps, pe, formula):
-        return []
+async def test_create_settlement_zero_base_persists_instead_of_422(monkeypatch):
+    """PART-1's per-currency formulas dropped a currency whose base netted to
+    exactly 0 (`if v != 0`), which then surfaced as a misleading "Formula
+    produced no data" 422. The folded bases return exactly one row in the
+    settlement currency, always — so a real zero period saves as 0.00."""
+    partner = _partner()
+
+    async def fake_base(db, shop_id, ps, pe, formula, **_kw):
+        return partner_payout_service.BaseComputation(
+            base_amount=Decimal("0"), base_currency="USD"
+        )
 
     monkeypatch.setattr(partner_payout_service, "compute_base_amount", fake_base)
-    db, _ = _make_db()
+    monkeypatch.setattr(
+        partner_payout_service,
+        "_resolve_context",
+        AsyncMock(return_value=partner_payout_service.BaseContext("USD")),
+    )
+    db, _ = _make_db(_lookup_results(partner))
+    settlement = await partner_payout_service.create_settlement(
+        db, uuid.uuid4(), uuid.uuid4(), _create_payload(partner)
+    )
+    assert settlement.base_amount == Decimal("0.00")
+    assert settlement.computed_amount == Decimal("0.00")
+
+
+# ─── 6. unknown partner is refused ─────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_settlement_raises_422_for_unknown_partner():
+    missing = MagicMock()
+    missing.scalar_one_or_none.return_value = None
+    db, _ = _make_db([missing])
     payload = PartnerSettlementCreate(
-        partner_name="X",
-        formula_type="revenue_items_minus_fees",
+        partner_id=uuid.uuid4(),
+        formula_type="turnover",
         percent=Decimal("25"),
         period_start=date(2026, 5, 1),
         period_end=date(2026, 5, 31),
@@ -200,33 +270,7 @@ async def test_create_settlement_raises_422_when_formula_empty(monkeypatch):
             db, uuid.uuid4(), uuid.uuid4(), payload
         )
     assert exc.value.status_code == 422
-
-
-# ─── 6. multi-currency without disambiguator ───────────────────────────
-
-@pytest.mark.asyncio
-async def test_create_settlement_raises_422_on_multi_currency_no_filter(monkeypatch):
-    async def fake_base(db, shop_id, ps, pe, formula):
-        return [
-            CurrencyAmount(currency="UAH", amount=10000.0),
-            CurrencyAmount(currency="USD", amount=400.0),
-        ]
-
-    monkeypatch.setattr(partner_payout_service, "compute_base_amount", fake_base)
-    db, _ = _make_db()
-    payload = PartnerSettlementCreate(
-        partner_name="X",
-        formula_type="net_profit_product_only",
-        percent=Decimal("10"),
-        period_start=date(2026, 5, 1),
-        period_end=date(2026, 5, 31),
-    )
-    with pytest.raises(HTTPException) as exc:
-        await partner_payout_service.create_settlement(
-            db, uuid.uuid4(), uuid.uuid4(), payload
-        )
-    assert exc.value.status_code == 422
-    assert "multiple currencies" in exc.value.detail.lower()
+    assert "partner not found" in exc.value.detail.lower()
 
 
 # ─── 7. balances: NO row multiplication on N×M ─────────────────────────
@@ -236,7 +280,9 @@ async def test_get_partner_balances_no_row_multiplication():
     """3 settlements + 2 payments for same partner+currency → balance is
     correct (sums of aggregates, not inflated by JOIN)."""
     # Aggregated rows (one per partner+currency, NOT raw rows)
+    partner_id = uuid.uuid4()
     s_row = MagicMock()
+    s_row.partner_id = partner_id
     s_row.partner_name = "Олег"
     s_row.currency = "UAH"
     s_row.total_settled = Decimal("4500.00")  # 3 settlements: 1500+1500+1500
@@ -244,6 +290,7 @@ async def test_get_partner_balances_no_row_multiplication():
     settled_result.all.return_value = [s_row]
 
     p_row = MagicMock()
+    p_row.partner_id = partner_id
     p_row.partner_name = "Олег"
     p_row.currency = "UAH"
     p_row.total_paid = Decimal("3000.00")  # 2 payments: 1500+1500
@@ -337,7 +384,9 @@ async def test_compute_settlement_payment_progress_excludes_mismatched_currency(
     # test_get_partner_balances_no_row_multiplication — the aggregation is
     # GROUP BY currency, so the UAH payment surfaces as a UAH balance row
     # separate from the USD settlement balance row).
+    andriy_id = uuid.uuid4()
     s_row = MagicMock()
+    s_row.partner_id = andriy_id
     s_row.partner_name = "Andriy"
     s_row.currency = "USD"
     s_row.total_settled = Decimal("29.99")
@@ -345,10 +394,12 @@ async def test_compute_settlement_payment_progress_excludes_mismatched_currency(
     settled_result.all.return_value = [s_row]
 
     usd_paid = MagicMock()
+    usd_paid.partner_id = andriy_id
     usd_paid.partner_name = "Andriy"
     usd_paid.currency = "USD"
     usd_paid.total_paid = Decimal("15.00")
     uah_paid = MagicMock()
+    uah_paid.partner_id = andriy_id
     uah_paid.partner_name = "Andriy"
     uah_paid.currency = "UAH"
     uah_paid.total_paid = Decimal("200.00")

@@ -37,6 +37,12 @@ class PartnerPayment(Base, UUIDPrimaryKeyMixin):
         ForeignKey("shops.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    partner_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("partners.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    #: Creation-time snapshot; identity queries use `partner_id`. See Partner.
     partner_name: Mapped[str] = mapped_column(String(200), nullable=False)
     settlement_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -65,6 +71,7 @@ class PartnerPayment(Base, UUIDPrimaryKeyMixin):
         Index("ix_partner_payments_shop_paid_at", "shop_id", "paid_at"),
         Index("ix_partner_payments_partner_shop", "partner_name", "shop_id"),
         Index("ix_partner_payments_settlement", "settlement_id"),
+        Index("ix_partner_payments_partner_id", "partner_id"),
     )
 
     def __repr__(self) -> str:

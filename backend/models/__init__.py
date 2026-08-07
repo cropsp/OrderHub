@@ -45,8 +45,15 @@ from models.material import (
 )
 from models.bom import BomItem
 from models.etsy_statement_line import EtsyStatementLine
-from models.partner_settlement import PartnerSettlement, PartnerSettlementFormula
+from models.partner import Partner
+from models.partner_config_audit import PartnerConfigAudit
+from models.partner_settlement import (
+    SELECTABLE_FORMULAS,
+    PartnerSettlement,
+    PartnerSettlementFormula,
+)
 from models.partner_payment import PartnerPayment
+from models.shop_partner_config import ShopPartnerConfig
 from models.idlaser_draft_job import IdlaserDraftJob, IdlaserDraftJobState
 from models.user_shop_access import UserShopAccess
 from models.user_capability import UserCapability
@@ -99,9 +106,13 @@ __all__ = [
     "MaterialMovementReason",
     "BomItem",
     "EtsyStatementLine",
+    "Partner",
+    "PartnerConfigAudit",
     "PartnerSettlement",
     "PartnerSettlementFormula",
+    "SELECTABLE_FORMULAS",
     "PartnerPayment",
+    "ShopPartnerConfig",
     "IdlaserDraftJob",
     "IdlaserDraftJobState",
     "UserShopAccess",

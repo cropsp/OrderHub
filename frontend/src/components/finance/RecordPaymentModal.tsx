@@ -11,12 +11,8 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import PartnerNameInput from './PartnerNameInput'
-import {
-  useCreatePayment,
-  usePartnerNames,
-  useSettlements,
-} from '@/hooks/usePartnerPayouts'
+import { useCreatePayment, useSettlements } from '@/hooks/usePartnerPayouts'
+import { useShopPartnerConfigs } from '@/hooks/usePartners'
 import type { PartnerSettlement } from '@/api/partnerPayouts'
 
 interface RecordPaymentModalProps {
@@ -32,7 +28,7 @@ export default function RecordPaymentModal({
   shopId,
   prefillSettlement,
 }: RecordPaymentModalProps) {
-  const [partner, setPartner] = useState('')
+  const [partnerId, setPartnerId] = useState('')
   const [settlementId, setSettlementId] = useState<string | ''>('')
   const [amount, setAmount] = useState('')
   const [currency, setCurrency] = useState('UAH')
@@ -54,7 +50,7 @@ export default function RecordPaymentModal({
   ) {
     setResetKey({ isOpen, settlementId: prefillSettlement?.id })
     if (isOpen) {
-      setPartner(prefillSettlement?.partner_name ?? '')
+      setPartnerId(prefillSettlement?.partner_id ?? '')
       setSettlementId(prefillSettlement?.id ?? '')
       setAmount('')
       setCurrency(prefillSettlement?.base_currency ?? 'UAH')
@@ -64,8 +60,10 @@ export default function RecordPaymentModal({
     }
   }
 
-  const names = usePartnerNames(shopId)
-  const settlements = useSettlements(shopId, { partner: partner || undefined })
+  const configs = useShopPartnerConfigs(shopId)
+  // Filtered by partner_id, not by the name snapshot — a renamed partner's older
+  // settlements must still be linkable.
+  const settlements = useSettlements(shopId, { partner_id: partnerId || undefined })
   const createMutation = useCreatePayment(shopId)
 
   const linkedSettlement = settlements.data?.items.find(
@@ -76,8 +74,8 @@ export default function RecordPaymentModal({
 
   const handleSave = async () => {
     setError(null)
-    if (!partner.trim()) {
-      setError('Partner name is required')
+    if (!partnerId) {
+      setError('Select a partner')
       return
     }
     const amt = Number(amount)
@@ -87,7 +85,7 @@ export default function RecordPaymentModal({
     }
     try {
       await createMutation.mutateAsync({
-        partner_name: partner.trim(),
+        partner_id: partnerId,
         settlement_id: settlementId || null,
         amount: amt.toString(),
         currency,
@@ -124,17 +122,25 @@ export default function RecordPaymentModal({
         <div className="p-6 space-y-5">
           <div className="space-y-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-              Partner name
+              Partner
             </p>
-            <PartnerNameInput
+            <select
               autoFocus
-              value={partner}
-              onChange={(v) => {
-                setPartner(v)
+              aria-label="Partner"
+              value={partnerId}
+              onChange={(e) => {
+                setPartnerId(e.target.value)
                 setSettlementId('')
               }}
-              suggestions={names.data?.items ?? []}
-            />
+              className="w-full rounded-md border border-zinc-800 bg-zinc-900/50 px-3 py-2 text-sm text-zinc-100"
+            >
+              <option value="">Select a partner…</option>
+              {configs.data?.items.map((c) => (
+                <option key={c.partner_id} value={c.partner_id}>
+                  {c.partner_name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-2">

@@ -23,6 +23,7 @@ from routers import partner_payouts as router_module
 from routers.dependencies import require_role
 from schemas.finance import CurrencyAmount
 from schemas.partner_payout import PartnerPayoutPreviewRequest
+from services.access_service import CapabilitySet
 
 
 def _make_user(role: UserRole):
@@ -57,6 +58,7 @@ async def test_list_settlements_populates_paid_amount(monkeypatch):
     fake_settlement = MagicMock()
     fake_settlement.id = settlement_id
     fake_settlement.shop_id = shop_id
+    fake_settlement.partner_id = uuid.uuid4()
     fake_settlement.partner_name = "Олег"
     fake_settlement.formula_type = PartnerSettlementFormula.NET_PROFIT_PRODUCT_ONLY
     fake_settlement.percent = Decimal("25.00")
@@ -65,11 +67,12 @@ async def test_list_settlements_populates_paid_amount(monkeypatch):
     fake_settlement.base_amount = Decimal("9800.00")
     fake_settlement.base_currency = "UAH"
     fake_settlement.computed_amount = Decimal("2450.00")
+    fake_settlement.fx_rate_used = None
     fake_settlement.notes = None
     fake_settlement.created_at = datetime.now(timezone.utc)
     fake_settlement.created_by_user_id = uuid.uuid4()
 
-    async def fake_list(db, sid, partner, limit, offset):
+    async def fake_list(db, sid, partner_id, limit, offset):
         assert sid == shop_id
         return [fake_settlement], 1
 
@@ -86,7 +89,7 @@ async def test_list_settlements_populates_paid_amount(monkeypatch):
     )
 
     response = await router_module.list_settlements(
-        shop_id=shop_id, partner=None, limit=50, offset=0, db=MagicMock()
+        shop_id=shop_id, partner_id=None, limit=50, offset=0, db=MagicMock()
     )
     assert response.total == 1
     assert len(response.items) == 1
@@ -96,7 +99,7 @@ async def test_list_settlements_populates_paid_amount(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_preview_settlement_single_currency(monkeypatch):
-    async def fake_preview(db, shop_id, payload):
+    async def fake_preview(db, shop_id, payload, shop=None):
         from schemas.partner_payout import PartnerPayoutPreviewResponse
         return PartnerPayoutPreviewResponse(
             base_amount=Decimal("9800.00"),
@@ -107,14 +110,19 @@ async def test_preview_settlement_single_currency(monkeypatch):
     monkeypatch.setattr(
         router_module.partner_payout_service, "preview_settlement", fake_preview
     )
+    monkeypatch.setattr(
+        router_module, "get_capabilities", AsyncMock(return_value=CapabilitySet.owner())
+    )
     payload = PartnerPayoutPreviewRequest(
-        formula_type="net_profit_product_only",
+        formula_type="turnover",
         percent=Decimal("25"),
         period_start=date(2026, 5, 1),
         period_end=date(2026, 5, 31),
     )
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock())
     response = await router_module.preview_settlement(
-        shop_id=uuid.uuid4(), payload=payload, db=MagicMock()
+        shop_id=uuid.uuid4(), payload=payload, current_user=MagicMock(), db=db
     )
     assert response.computed_amount == Decimal("2450.00")
     assert response.base_currency == "UAH"

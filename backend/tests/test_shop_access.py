@@ -325,3 +325,44 @@ async def test_revoke_with_unassign_flag_unassigns_then_removes_grant():
     upd.assert_awaited_once()           # the assigned order was unassigned
     setacc.assert_awaited_once()        # grants then replaced
     assert result.shop_ids == []
+
+
+# ─── PARTNER-CONFIG-1: the global /api/partners surface ────────────────
+#
+# These routes carry no {shop_id}, so test_route_scope_completeness cannot see
+# them and cannot classify them either (its stale-entry test would fail). The
+# invisibility is only safe because the router is OWNER-only and the surface
+# carries identity, not per-shop data. That is asserted behaviourally here —
+# this test IS the guard for those four routes.
+
+@pytest.mark.asyncio
+async def test_partner_identity_routes_are_owner_only():
+    from routers import partners as partners_router
+    from routers.dependencies import require_role
+    from models.user import UserRole as Role
+
+    # Every route on the router inherits the single OWNER gate.
+    gate_deps = partners_router.router.dependencies
+    assert len(gate_deps) == 1, "the OWNER gate must cover the whole router"
+
+    checker = require_role(Role.OWNER)
+    for role in (Role.MANAGER, Role.DESIGNER):
+        with pytest.raises(HTTPException) as exc:
+            await checker(current_user=_user(role))
+        assert exc.value.status_code == 403
+    assert await checker(current_user=_user(Role.OWNER)) is not None
+
+
+@pytest.mark.asyncio
+async def test_partner_identity_surface_exposes_no_per_shop_data():
+    """If a partner-identity response ever gains a shop-scoped field, this fails.
+
+    That is the point: the moment /api/partners carries per-shop data it needs
+    the scope guard it structurally cannot have, and the field belongs under
+    /api/shops/{shop_id}/partner-config instead.
+    """
+    from schemas.partner import PartnerResponse
+
+    assert set(PartnerResponse.model_fields) == {
+        "id", "name", "is_active", "notes", "created_at", "updated_at",
+    }

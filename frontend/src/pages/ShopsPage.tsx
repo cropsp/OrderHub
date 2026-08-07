@@ -12,8 +12,10 @@ import {
   LineChart,
   Images,
   Percent,
+  Handshake,
 } from 'lucide-react';
 import { useCreateShop, useShops, useUpdateShop, useDeleteShop, useSyncShop, useBackfillProductImages, useBackfillPlatformFees } from '@/hooks/useShops';
+import { PartnerConfigTab } from '@/components/shops/PartnerConfigTab';
 import { shippingApi } from '@/api/shipping';
 import ShellPage from './ShellPage';
 import { Button } from '@/components/ui/button';
@@ -275,7 +277,7 @@ export default function ShopsPage() {
 
           <form onSubmit={handleSaveShop} className="space-y-6">
             <Tabs defaultValue="general" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 bg-zinc-900/50 p-1 border border-zinc-800">
+              <TabsList className="grid w-full grid-cols-4 bg-zinc-900/50 p-1 border border-zinc-800">
                 <TabsTrigger value="general" className="flex items-center gap-2 data-[state=active]:bg-zinc-800">
                   <Store className="size-3.5" /> General
                 </TabsTrigger>
@@ -284,6 +286,9 @@ export default function ShopsPage() {
                 </TabsTrigger>
                 <TabsTrigger value="shipping" className="flex items-center gap-2 data-[state=active]:bg-zinc-800">
                   <Truck className="size-3.5" /> Logistics (NP)
+                </TabsTrigger>
+                <TabsTrigger value="partners" className="flex items-center gap-2 data-[state=active]:bg-zinc-800">
+                  <Handshake className="size-3.5" /> Partners
                 </TabsTrigger>
               </TabsList>
 
@@ -499,6 +504,13 @@ export default function ShopsPage() {
                        </Select>
                     </div>
                   </div>
+                </TabsContent>
+
+                <TabsContent value="partners" className="space-y-4">
+                  {/* Partner config saves through its OWN endpoints, not the
+                      shop PATCH payload — the rows live in shop_partner_config
+                      and each change is audited separately. */}
+                  <PartnerConfigTab shopId={editingShop.id || null} />
                 </TabsContent>
               </div>
             </Tabs>

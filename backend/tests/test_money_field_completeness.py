@@ -187,6 +187,34 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # /api/westernbid/tracking carries a currency amount.
     "days_overdue": "neutral",
     "days_since_movement": "neutral",
+    # PARTNER-CONFIG-1
+    #
+    # `fx_rate_used`: NEUTRAL, and the obvious verdict is the wrong one. The
+    # nearby precedent `cogs_fx_rate` above is classified `cost` because it is
+    # censored together with the COGS figure it explains. Classifying this one
+    # `cost` would fail test_cost_fields_only_on_cost_gated_routes: it rides the
+    # partner-payouts settlement routes, whose verdict is `view_finance` with no
+    # `view_costs`, so the only ways out would be gating the whole partner-payout
+    # surface behind VIEW_COSTS (which locks MANAGERs out of settlements they are
+    # meant to see) or censoring the rate. Neither is right.
+    #
+    # `neutral` is honest on the `uah_per_usd_effective` reading: a standalone
+    # configured rate with no itemised cost travelling beside it. The PROFIT base
+    # does contain COGS, but only folded into `base_amount` — already `money` and
+    # already behind view_finance — and a single rate does not let anyone invert
+    # a five-term fold back into its components.
+    "fx_rate_used": "neutral",
+    # Same kind, same route and same gate as `base_amount` (money): it IS a base
+    # amount, just recomputed for the staleness badge instead of stored.
+    "recomputed_base_amount": "money",
+    # One component of a settlement base, shown in the preview so the operator
+    # can see why the number is what it is. `money` rather than `revenue`/`cost`
+    # because a single term may be either (items_revenue vs cogs) — the field is
+    # a generic amount whose kind depends on its sibling `name`. It appears only
+    # on the preview response, already gated view_finance. Note the PROFIT
+    # preview does expose COGS here as one term; that is the same exposure
+    # `base_amount` already carries and is the point of the panel.
+    "converted": "money",
 }
 
 NON_NEUTRAL = {"revenue", "cost", "margin", "money"}
@@ -219,6 +247,14 @@ MONEY_SURFACE_ENFORCEMENT: dict[str, str] = {
     "GET /api/shops/{shop_id}/partner-payouts/balances": "view_finance",
     "GET /api/shops/{shop_id}/partner-payouts/payments": "view_finance",
     "GET /api/shops/{shop_id}/partner-payouts/settlements": "view_finance",
+    # PARTNER-CONFIG-1: the staleness recompute returns recomputed_base_amount,
+    # the same kind of figure as base_amount on the settlements list.
+    "GET /api/shops/{shop_id}/partner-payouts/settlements/staleness": "view_finance",
+    # OWNER-only cross-shop aggregate. OWNER holds every capability, so the
+    # verdict is view_finance by resolver short-circuit; the real gate is the
+    # router-level require_role(OWNER). Deliberately not offered to a scoped
+    # MANAGER — see partner_payout_service.get_partner_balances.
+    "GET /api/partners/balances": "view_finance",
     "GET /api/shops/{shop_id}/products": "view_costs-null",
     "PATCH /api/materials/{material_id}": "view_costs-403",
     "PATCH /api/orders/items/{item_id}": "revenue-only",
@@ -238,7 +274,10 @@ MONEY_SURFACE_ENFORCEMENT: dict[str, str] = {
     "POST /api/products/{id}/image": "view_costs-null",
     "POST /api/products/{id}/image/from-shopify": "view_costs-null",
     "POST /api/shops/{shop_id}/partner-payouts/payments": "view_finance",
-    "POST /api/shops/{shop_id}/partner-payouts/preview": "view_finance",
+    # PARTNER-CONFIG-1: the preview's term table itemises the PROFIT base, which
+    # includes cogs / fees / allocated overhead. Those terms are stripped for a
+    # caller without VIEW_COSTS by _strip_cost_terms, mirroring the finance page.
+    "POST /api/shops/{shop_id}/partner-payouts/preview": "view_finance,view_costs-strip",
     "POST /api/shops/{shop_id}/partner-payouts/settlements": "view_finance",
     "POST /api/shops/{shop_id}/products": "view_costs-null",
     "PUT /api/products/{id}/bom": "view_costs-null",

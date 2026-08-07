@@ -6,12 +6,15 @@ import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import {
+  useCheckStaleness,
   useDeletePayment,
   useDeleteSettlement,
   usePartnerBalances,
   usePayments,
   useSettlements,
 } from '@/hooks/usePartnerPayouts'
+import { useToastStore } from '@/components/ui/Toast'
+import type { SettlementStaleness } from '@/types/partner'
 import type { PartnerPayment, PartnerSettlement } from '@/api/partnerPayouts'
 
 import PartnerBalancesSummary from './PartnerBalancesSummary'
@@ -40,6 +43,28 @@ export default function PartnerPayoutsSection({
   const balances = usePartnerBalances(shopId)
   const deleteSettlement = useDeleteSettlement(shopId)
   const deletePayment = useDeletePayment(shopId)
+  const checkStaleness = useCheckStaleness(shopId)
+  const addToast = useToastStore(s => s.addToast)
+
+  // Transient by design: a settlement is immutable, so a staleness verdict is
+  // never persisted. It is recomputed on demand and lives only in this state.
+  const [staleness, setStaleness] = useState<Record<string, SettlementStaleness>>(
+    {},
+  )
+
+  const handleCheckStaleness = async () => {
+    const result = await checkStaleness.mutateAsync(undefined)
+    setStaleness(
+      Object.fromEntries(result.items.map(i => [i.settlement_id, i])),
+    )
+    const staleCount = result.items.filter(i => i.stale).length
+    addToast(
+      staleCount === 0
+        ? `Checked ${result.checked_count} open settlement(s) — all still current.`
+        : `${staleCount} of ${result.checked_count} open settlement(s) have moved. Delete and recalculate to correct.`,
+      staleCount === 0 ? 'success' : 'info',
+    )
+  }
 
   const [paymentOpen, setPaymentOpen] = useState(false)
   const [paymentPrefill, setPaymentPrefill] = useState<PartnerSettlement | null>(
@@ -158,6 +183,9 @@ export default function PartnerPayoutsSection({
               Settlements
             </p>
             <PartnerSettlementsTable
+              staleness={staleness}
+              onCheckStaleness={handleCheckStaleness}
+              isCheckingStaleness={checkStaleness.isPending}
               items={settlements.data?.items ?? []}
               onRecordPayment={openRecordPayment}
               onDelete={handleDeleteSettlement}

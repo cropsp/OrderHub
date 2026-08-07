@@ -135,13 +135,44 @@ class FxRates:
     """
 
     uah_per_usd: Decimal | None = None
-    source: str | None = None  # "manual" | "nbu"
+    source: str | None = None  # "manual" | "nbu" | "pinned"
     rate_date: date | None = None  # NBU exchangedate; None for a manual override
     fetched_at: datetime | None = None  # last successful NBU fetch
 
     @classmethod
     def unavailable(cls) -> "FxRates":
         return cls()
+
+    @classmethod
+    def fixed(cls, uah_per_usd: Decimal | None) -> "FxRates":
+        """A PINNED rate, for replaying a conversion at the rate it was frozen at.
+
+        PARTNER-CONFIG-1 rule 8: the staleness recompute must reuse the
+        settlement's own stored `fx_rate_used`, never the current rate — with the
+        current rate, every NBU move would falsely flag every unpaid settlement
+        as stale and the badge would mean nothing.
+
+        `None` returns `unavailable()`, which is the correct reading of a NULL
+        `fx_rate_used`: no conversion was applied, so there is no rate to replay.
+        If a term that now needs converting has appeared since, the fold will
+        raise — which is honest, because the delta genuinely cannot be computed
+        at the frozen rate.
+
+        Band-validated like every other entry point (guard 3/3), so a hand-edited
+        rate column degrades to "unavailable" instead of dividing by something
+        absurd inside a money calculation.
+        """
+        if uah_per_usd is None:
+            return cls.unavailable()
+        try:
+            return cls(uah_per_usd=_validate_rate(uah_per_usd), source="pinned")
+        except FxFetchError:
+            logger.error(
+                "[FX] Stored fx_rate_used %r is outside the sane band — "
+                "treating as no rate",
+                uah_per_usd,
+            )
+            return cls.unavailable()
 
     @property
     def is_usable(self) -> bool:
@@ -150,8 +181,9 @@ class FxRates:
     def is_stale(self, *, now: datetime | None = None) -> bool:
         """Advisory freshness flag for the settings UI. A manual override never
         goes stale (the owner set it deliberately); an auto rate with no fetch
-        timestamp counts as stale."""
-        if self.source == "manual":
+        timestamp counts as stale. A PINNED rate never goes stale either — it is
+        a historical replay, and "old" is the whole point of it."""
+        if self.source in ("manual", "pinned"):
             return False
         if self.fetched_at is None:
             return self.is_usable

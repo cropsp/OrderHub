@@ -9,9 +9,11 @@ import uuid
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from models.shop import Shop
 from models.user import Capability, User, UserRole
 from routers.dependencies import (
     get_current_user,
@@ -30,8 +32,11 @@ from schemas.partner_payout import (
     PartnerSettlementCreate,
     PartnerSettlementListResponse,
     PartnerSettlementResponse,
+    SettlementStaleness,
+    SettlementStalenessResponse,
 )
 from services import partner_payout_service
+from services.access_service import get_capabilities
 
 router = APIRouter(
     prefix="/api/shops/{shop_id}/partner-payouts",
@@ -52,6 +57,7 @@ def _settlement_to_response(
     return PartnerSettlementResponse(
         id=settlement.id,
         shop_id=settlement.shop_id,
+        partner_id=settlement.partner_id,
         partner_name=settlement.partner_name,
         formula_type=settlement.formula_type.value,
         percent=settlement.percent,
@@ -60,6 +66,7 @@ def _settlement_to_response(
         base_amount=settlement.base_amount,
         base_currency=settlement.base_currency,
         computed_amount=settlement.computed_amount,
+        fx_rate_used=settlement.fx_rate_used,
         paid_amount=paid_amount,
         notes=settlement.notes,
         created_at=settlement.created_at,
@@ -67,13 +74,47 @@ def _settlement_to_response(
     )
 
 
+#: Base terms that are itemised COSTS. The PROFIT base subtracts these, so the
+#: term table would otherwise hand a VIEW_FINANCE-without-VIEW_COSTS caller the
+#: period's COGS, fees and overhead — exactly the figures the finance page
+#: strips for the same caller (routers/finance.py:_strip_itemised_costs).
+_COST_TERMS = frozenset({"cogs", "non_shipping_fees", "allocated_overhead"})
+
+
+def _strip_cost_terms(
+    resp: PartnerPayoutPreviewResponse,
+) -> PartnerPayoutPreviewResponse:
+    """Drop the itemised cost components from the preview's term table.
+
+    `base_amount` and `computed_amount` stay: they are `money`, gated by
+    view_finance, and total cost being inferable from base vs revenue terms is
+    the same accepted consequence documented for net_profit on the finance page
+    (USER-ACCESS-2 OQ-3a). What is hidden is the itemised breakdown.
+    """
+    return resp.model_copy(
+        update={"terms": [t for t in resp.terms if t.name not in _COST_TERMS]}
+    )
+
+
 @router.post("/preview", response_model=PartnerPayoutPreviewResponse)
 async def preview_settlement(
     shop_id: uuid.UUID,
     payload: PartnerPayoutPreviewRequest,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> PartnerPayoutPreviewResponse:
-    return await partner_payout_service.preview_settlement(db, shop_id, payload)
+    # The shop is loaded here (not in the service) purely so the base-quality
+    # panel can branch on platform without the service reaching for it.
+    shop = (
+        await db.execute(select(Shop).where(Shop.id == shop_id))
+    ).scalar_one_or_none()
+    resp = await partner_payout_service.preview_settlement(
+        db, shop_id, payload, shop=shop
+    )
+    caps = await get_capabilities(db, current_user)
+    if not caps.has(Capability.VIEW_COSTS):
+        resp = _strip_cost_terms(resp)
+    return resp
 
 
 @router.post(
@@ -96,13 +137,13 @@ async def create_settlement(
 @router.get("/settlements", response_model=PartnerSettlementListResponse)
 async def list_settlements(
     shop_id: uuid.UUID,
-    partner: str | None = Query(None),
+    partner_id: uuid.UUID | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> PartnerSettlementListResponse:
     items, total = await partner_payout_service.list_settlements(
-        db, shop_id, partner, limit, offset
+        db, shop_id, partner_id, limit, offset
     )
     progress = await partner_payout_service.compute_settlement_payment_progress(
         db, [s.id for s in items]
@@ -113,6 +154,32 @@ async def list_settlements(
             for s in items
         ],
         total=total,
+    )
+
+
+@router.get("/settlements/staleness", response_model=SettlementStalenessResponse)
+async def check_staleness(
+    shop_id: uuid.UUID,
+    limit: int = Query(25, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> SettlementStalenessResponse:
+    """Recompute OPEN settlements and report any whose base has since moved.
+
+    Deliberately NOT folded into GET /settlements: that is the hot list-render
+    path and each check costs 2-3 aggregates. On-demand keeps the table fast and
+    makes the recompute an explicit act. `limit` is applied server-side so the
+    client cannot ask for an unbounded recompute.
+
+    Read-only in the strictest sense — a settlement is immutable and this invents
+    no update path. The remedy for a stale settlement is delete-and-recreate.
+    """
+    items, checked, truncated = await partner_payout_service.check_settlement_staleness(
+        db, shop_id, limit
+    )
+    return SettlementStalenessResponse(
+        items=[SettlementStaleness(**i) for i in items],
+        checked_count=checked,
+        truncated=truncated,
     )
 
 
@@ -148,14 +215,14 @@ async def create_payment(
 @router.get("/payments", response_model=PartnerPaymentListResponse)
 async def list_payments(
     shop_id: uuid.UUID,
-    partner: str | None = Query(None),
+    partner_id: uuid.UUID | None = Query(None),
     settlement_id: uuid.UUID | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> PartnerPaymentListResponse:
     items, total = await partner_payout_service.list_payments(
-        db, shop_id, partner, settlement_id, limit, offset
+        db, shop_id, partner_id, settlement_id, limit, offset
     )
     return PartnerPaymentListResponse(
         items=[PartnerPaymentResponse.model_validate(p) for p in items],

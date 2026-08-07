@@ -14,8 +14,17 @@ from database import get_db
 from logger import get_logger
 from models.shop import Shop, ShopPlatform
 from models.order import Order
+from models.partner import Partner
+from models.partner_config_audit import PartnerConfigAudit
+from models.partner_settlement import PartnerSettlementFormula
 from models.product import Product
+from models.shop_partner_config import ShopPartnerConfig
 from models.user import Capability, User, UserRole
+from schemas.partner import (
+    ShopPartnerConfigListResponse,
+    ShopPartnerConfigResponse,
+    ShopPartnerConfigUpsert,
+)
 from schemas.shop import (
     ETSY_FLAT_RATE_REJECTED,
     ShopBackfillRequest,
@@ -33,7 +42,10 @@ from services.access_service import (
     get_shop_scope,
     propagate_new_shop_to_unrestricted_managers,
 )
-from services.partner_payout_service import find_settlements_overlapping_period
+from services.partner_payout_service import (
+    find_settlements_overlapping_period,
+    get_last_period_end,
+)
 from services.shopify_sync import (
     sync_shop_orders,
     backfill_order_numbers,
@@ -636,3 +648,179 @@ async def backfill_shop_product_images(
         "no_image": no_image,
         "errors": errors,
     }
+
+
+# ─── Partner configuration (PARTNER-CONFIG-1) ──────────────
+#
+# OWNER-only, like the platform-fee backfill and for the same reason: these rows
+# decide how much money leaves the business. They live under /api/shops/{shop_id}
+# rather than /api/partners so that test_route_scope_completeness can see them.
+
+
+def _describe_config_change(before, payload) -> str:
+    """Human-readable before→after for the audit row. Only changed fields."""
+    if before is None:
+        return (
+            f"percent={payload.percent}, basis={payload.basis}, "
+            f"currency={payload.settlement_currency}, active={payload.is_active}"
+        )
+    changes = []
+    if before.percent != payload.percent:
+        changes.append(f"percent {before.percent}→{payload.percent}")
+    if before.basis.value != payload.basis:
+        changes.append(f"basis {before.basis.value}→{payload.basis}")
+    if before.settlement_currency != payload.settlement_currency:
+        changes.append(
+            f"currency {before.settlement_currency}→{payload.settlement_currency}"
+        )
+    if before.is_active != payload.is_active:
+        changes.append(f"active {before.is_active}→{payload.is_active}")
+    return ", ".join(changes) or "no change"
+
+
+async def _config_to_response(db: AsyncSession, config, partner_name: str):
+    last_period_end = await get_last_period_end(
+        db, config.shop_id, config.partner_id
+    )
+    return ShopPartnerConfigResponse(
+        id=config.id,
+        shop_id=config.shop_id,
+        partner_id=config.partner_id,
+        partner_name=partner_name,
+        percent=config.percent,
+        basis=config.basis.value,
+        settlement_currency=config.settlement_currency,
+        is_active=config.is_active,
+        last_period_end=last_period_end,
+    )
+
+
+@router.get("/{shop_id}/partner-config", response_model=ShopPartnerConfigListResponse)
+async def list_shop_partner_configs(
+    shop_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+) -> ShopPartnerConfigListResponse:
+    """Every partner configured on this shop, with their defaults."""
+    rows = (
+        await db.execute(
+            select(ShopPartnerConfig, Partner.name)
+            .join(Partner, Partner.id == ShopPartnerConfig.partner_id)
+            .where(ShopPartnerConfig.shop_id == shop_id)
+            .order_by(Partner.name)
+        )
+    ).all()
+    return ShopPartnerConfigListResponse(
+        items=[await _config_to_response(db, cfg, name) for cfg, name in rows]
+    )
+
+
+@router.put(
+    "/{shop_id}/partner-config/{partner_id}",
+    response_model=ShopPartnerConfigResponse,
+)
+async def upsert_shop_partner_config(
+    shop_id: uuid.UUID,
+    partner_id: uuid.UUID,
+    payload: ShopPartnerConfigUpsert,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+) -> ShopPartnerConfigResponse:
+    """Attach a partner to this shop, or change what they are owed.
+
+    Changing a rate here never moves a settlement that already exists — each
+    settlement snapshots the percent and basis it was computed with. It changes
+    the DEFAULTS the next settlement starts from.
+    """
+    shop = (
+        await db.execute(select(Shop).where(Shop.id == shop_id))
+    ).scalar_one_or_none()
+    if not shop:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Shop not found"
+        )
+    partner = (
+        await db.execute(select(Partner).where(Partner.id == partner_id))
+    ).scalar_one_or_none()
+    if partner is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Partner not found"
+        )
+
+    config = (
+        await db.execute(
+            select(ShopPartnerConfig).where(
+                ShopPartnerConfig.shop_id == shop_id,
+                ShopPartnerConfig.partner_id == partner_id,
+            )
+        )
+    ).scalar_one_or_none()
+    detail = _describe_config_change(config, payload)
+    action = "update" if config is not None else "create"
+
+    if config is None:
+        config = ShopPartnerConfig(shop_id=shop_id, partner_id=partner_id)
+        db.add(config)
+    config.percent = payload.percent
+    config.basis = PartnerSettlementFormula(payload.basis)
+    config.settlement_currency = payload.settlement_currency.upper()
+    config.is_active = payload.is_active
+
+    db.add(
+        PartnerConfigAudit(
+            actor_id=current_user.id,
+            partner_id=partner_id,
+            shop_id=shop_id,
+            action=action,
+            detail=detail,
+        )
+    )
+    await db.commit()
+    await db.refresh(config)
+    return await _config_to_response(db, config, partner.name)
+
+
+@router.delete(
+    "/{shop_id}/partner-config/{partner_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_shop_partner_config(
+    shop_id: uuid.UUID,
+    partner_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER)),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Detach a partner from this shop.
+
+    Settlements and payments survive untouched — they are immutable history and
+    the money is still owed. This only removes the defaults for FUTURE
+    settlements. The partner's balance on this shop is unaffected, which is why
+    an audit row is written even though nothing financial moved.
+    """
+    config = (
+        await db.execute(
+            select(ShopPartnerConfig).where(
+                ShopPartnerConfig.shop_id == shop_id,
+                ShopPartnerConfig.partner_id == partner_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if config is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Partner is not configured on this shop",
+        )
+    await db.delete(config)
+    db.add(
+        PartnerConfigAudit(
+            actor_id=current_user.id,
+            partner_id=partner_id,
+            shop_id=shop_id,
+            action="delete",
+            detail=(
+                f"removed (was percent={config.percent}, basis={config.basis.value}, "
+                f"currency={config.settlement_currency})"
+            ),
+        )
+    )
+    await db.commit()

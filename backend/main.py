@@ -15,7 +15,7 @@ from config import get_settings
 from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, shipping, webhooks,
     products, packaging, finance, materials, overhead_materials, receipts,
-    partner_payouts, idlaser, app_settings, westernbid, agent_actions,
+    partner_payouts, partners, idlaser, app_settings, westernbid, agent_actions,
 )
 
 from logger import setup_logging, get_logger
@@ -105,6 +105,7 @@ app.include_router(attachments.router)
 app.include_router(dashboard.router)
 app.include_router(finance.router)
 app.include_router(partner_payouts.router)
+app.include_router(partners.router)
 app.include_router(products.router)
 app.include_router(packaging.router)
 app.include_router(materials.router)

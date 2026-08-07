@@ -17,14 +17,16 @@ Per the FIN-1 plan:
 
 import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from models.etsy_statement_line import EtsyStatementLine
 from models.material import OverheadMaterialReceipt
 from models.order import Order, OrderItem, OrderRefund, OrderStatus
-from models.shop import Shop
+from models.shop import Shop, ShopPlatform
 from schemas.finance import (
     CurrencyAmount,
     DiagnosticInfo,
@@ -266,6 +268,15 @@ async def _run_product_only_aggregate(
             func.coalesce(
                 func.sum(func.coalesce(Order.platform_fee, 0)), 0
             ).label("non_shipping_fees"),
+            # PARTNER-CONFIG-1: item discount funded by the shop. Additive — the
+            # two legacy PART-1 formulas read only the three keys above and are
+            # unaffected. NULL (Etsy/manual orders carry no discount figure)
+            # reads as 0, so nothing moves for them. `shipping_discount` is
+            # deliberately NOT included: shipping economics stay out of every
+            # partner base.
+            func.coalesce(
+                func.sum(func.coalesce(Order.discount_total, 0)), 0
+            ).label("discount_total"),
         )
         .select_from(Order)
         .join(items_subq, items_subq.c.order_id == Order.id, isouter=True)
@@ -281,6 +292,7 @@ async def _run_product_only_aggregate(
             "items_revenue": float(row.items_revenue or 0),
             "cogs": float(row.cogs or 0),
             "non_shipping_fees": float(row.non_shipping_fees or 0),
+            "discount_total": float(getattr(row, "discount_total", 0) or 0),
         }
         for row in result.all()
     }
@@ -393,6 +405,189 @@ async def compute_revenue_items_minus_fees(
         for c, r in kpi.items()
         if (r["items_revenue"] - r["non_shipping_fees"]) != 0
     ]
+
+
+# ─── PARTNER-CONFIG-1 base terms ───────────────────────────
+#
+# The two new partner bases are returned as a TERM TABLE — one
+# (name, source-currency, signed Decimal) per component — rather than a folded
+# per-currency total. Two reasons:
+#
+#   1. The fold needs FX, and this module deliberately never imports fx_service.
+#      Every aggregate here partitions by currency and stops; conversion policy
+#      lives one layer up, in partner_payout_service, which already owns every
+#      422 in the settlement flow. Keeping it that way is what lets the finance
+#      page stay honestly FX-blind while a settlement is not.
+#   2. The signed terms are what the settlement preview shows the operator, so
+#      "why is my base this number" is answerable without re-running anything.
+#
+# Amounts are exact Decimals, never rounded here — the caller quantizes ONCE at
+# the end of its fold (same convention as order_consumption_service).
+
+#: One component of a partner base: (term name, source currency, signed amount).
+BaseTermRow = tuple[str, str, Decimal]
+
+
+def _term_rows_from_product_aggregate(
+    rows: dict[str, dict], keys: tuple[tuple[str, int], ...]
+) -> list[BaseTermRow]:
+    """Expand a per-currency aggregate into signed term rows.
+
+    `keys` pairs an aggregate key with its sign (+1 adds to the base, -1
+    subtracts). Zero components are kept, not filtered: a term that exists and
+    happens to be 0.00 is different from a term that does not exist, and the
+    caller reports the full term table to the operator.
+    """
+    out: list[BaseTermRow] = []
+    for currency, row in rows.items():
+        for key, sign in keys:
+            out.append((key, currency, Decimal(str(row.get(key, 0) or 0)) * sign))
+    return out
+
+
+async def compute_turnover_terms(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+) -> list[BaseTermRow]:
+    """TURNOVER base terms: items_revenue - discount - refunds.
+
+    "Turnover" here is the gross item price the customer actually paid: before
+    platform fees, before COGS, EXCLUDING shipping entirely (rule 2), and net of
+    the discount the shop funded — paying a partner a share of a price nobody
+    was charged is not turnover. Refunds are subtracted in the period the REFUND
+    landed (Model 2), never by reopening a settled period.
+
+    Built for exactly one partner today, but a first-class basis.
+    """
+    kpi = await _run_product_only_aggregate(db, shop_id, period_start, period_end)
+    refunds = await _run_refunds_aggregate(db, shop_id, period_start, period_end)
+    terms = _term_rows_from_product_aggregate(
+        kpi, (("items_revenue", 1), ("discount_total", -1))
+    )
+    terms += [
+        ("refunds", currency, Decimal(str(row["refunds"] or 0)) * -1)
+        for currency, row in refunds.items()
+    ]
+    return terms
+
+
+async def compute_profit_terms(
+    db: AsyncSession,
+    shop_id: uuid.UUID,
+    period_start: date,
+    period_end: date,
+) -> list[BaseTermRow]:
+    """PROFIT base terms: TURNOVER - COGS - non-shipping fees - allocated overhead.
+
+    This is `NET_PROFIT_PRODUCT_ONLY` plus a refund term, minus the funded
+    discount, with overhead FX-converted by the caller. It is NOT the Finance
+    page's net profit, which also nets shipping economics — see
+    docs/design/profit-definition.md §6, which this basis PRESERVES rather than
+    reverses. NETPROFIT-RECONCILE is untouched by this sprint.
+
+    Unallocated (NULL-shop) overhead stays out, exactly as in Finance today:
+    `_run_overhead_aggregate` filters `shop_id = :shop_id`.
+    """
+    kpi = await _run_product_only_aggregate(db, shop_id, period_start, period_end)
+    overhead = await _run_overhead_aggregate(db, shop_id, period_start, period_end)
+    refunds = await _run_refunds_aggregate(db, shop_id, period_start, period_end)
+    terms = _term_rows_from_product_aggregate(
+        kpi,
+        (
+            ("items_revenue", 1),
+            ("discount_total", -1),
+            ("cogs", -1),
+            ("non_shipping_fees", -1),
+        ),
+    )
+    terms += [
+        ("allocated_overhead", currency, Decimal(str(row["allocated_overhead"] or 0)) * -1)
+        for currency, row in overhead.items()
+    ]
+    terms += [
+        ("refunds", currency, Decimal(str(row["refunds"] or 0)) * -1)
+        for currency, row in refunds.items()
+    ]
+    return terms
+
+
+async def compute_base_quality(
+    db: AsyncSession,
+    shop: Shop,
+    period_start: date,
+    period_end: date,
+) -> dict:
+    """Data-readiness counts for a settlement period (PARTNER-CONFIG-1 rule 7).
+
+    Warnings, never blocks. A partner base is only as honest as the data behind
+    it, and the three things that silently overstate it are invisible in the
+    number itself:
+
+      (a) orders with no cost at all — same definition as the finance
+          `diagnostic.orders_missing_cost`: COALESCE(computed, manual) = 0.
+          Overstates a PROFIT base by the whole missing COGS.
+      (b) closed calendar months with Etsy orders but no imported statement —
+          fees are 0 until the statement lands, so the base is overstated.
+      (c) Shopify orders with `platform_fee IS NULL` — the shop's rate was not
+          set when they were imported. Fixed by the OWNER-only
+          POST /api/shops/{id}/backfill-platform-fees, not by this sprint.
+
+    Etsy refunds are not booked anywhere yet (ETSY-REFUNDS is out of scope), so
+    an Etsy shop's refund deduction is structurally 0 — reported as a flag, not
+    fixed here.
+
+    (a) and (c) ride one query over the same order population the base itself
+    scans; (b) is one extra query, Etsy shops only.
+    """
+    date_expr = func.coalesce(Order.shipped_at, Order.ordered_at)
+    effective_cost_expr = func.coalesce(
+        Order.computed_production_cost, Order.production_cost, 0
+    )
+    population = (
+        Order.shop_id == shop.id,
+        Order.status.in_(REVENUE_STATUSES),
+        cast(date_expr, Date) >= period_start,
+        cast(date_expr, Date) <= period_end,
+    )
+    counts = (
+        await db.execute(
+            select(
+                func.count().label("total_orders"),
+                func.count().filter(effective_cost_expr == 0).label("missing_cost"),
+                func.count()
+                .filter(Order.platform_fee.is_(None))
+                .label("missing_platform_fee"),
+            ).where(*population)
+        )
+    ).one()
+
+    is_etsy = shop.platform == ShopPlatform.ETSY
+    months_without_statement: list[str] = []
+    if is_etsy:
+        order_months = select(
+            func.date_trunc("month", date_expr).cast(Date).label("m")
+        ).where(*population).distinct()
+        imported = select(EtsyStatementLine.period_month.label("m")).where(
+            EtsyStatementLine.shop_id == shop.id
+        ).distinct()
+        rows = (await db.execute(order_months.except_(imported))).scalars().all()
+        # Only CLOSED months warn — the current month has no statement yet by
+        # definition, and flagging it would cry wolf on every preview.
+        today = date.today()
+        first_of_this_month = today.replace(day=1)
+        months_without_statement = sorted(
+            m.isoformat() for m in rows if m and m < first_of_this_month
+        )
+
+    return {
+        "total_orders": int(counts.total_orders or 0),
+        "orders_missing_cost": int(counts.missing_cost or 0),
+        "orders_missing_platform_fee": int(counts.missing_platform_fee or 0),
+        "etsy_months_without_statement": months_without_statement,
+        "etsy_refunds_unbooked": is_etsy,
+    }
 
 
 async def compute_shipping_net(
