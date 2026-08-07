@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { AlertTriangle, Plus, RefreshCw, Save, Trash2, Undo2 } from 'lucide-react'
+import { AlertTriangle, Info, Plus, RefreshCw, Save, Trash2, Undo2 } from 'lucide-react'
 
 import { useBom, useBomCost, useReplaceBom } from '@/hooks/useBom'
 import { useMaterials } from '@/hooks/useMaterials'
@@ -31,6 +31,7 @@ type RowDraft = {
     current_unit_cost: string
     waste_percent: string
     is_active: boolean
+    is_stock_tracked: boolean
   }
 }
 
@@ -59,6 +60,8 @@ function toDraft(items: BomItem[]): RowDraft[] {
       current_unit_cost: it.material_current_unit_cost,
       waste_percent: it.material_waste_percent,
       is_active: it.material_is_active,
+      // WH-1: absent (a pre-WH-1 response, or a fixture) means tracked.
+      is_stock_tracked: it.material_is_stock_tracked !== false,
     },
   }))
 }
@@ -93,7 +96,9 @@ export interface BomEditorProps {
 export default function BomEditor({ productId }: BomEditorProps) {
   const bomQuery = useBom(productId)
   const costQuery = useBomCost(productId)
-  const materialsQuery = useMaterials({ includeInactive: false })
+  // WH-1: packaging is one box per PARCEL, not per product, so it is never a
+  // recipe line — the server refuses it too (bom_service.replace_bom).
+  const materialsQuery = useMaterials({ includeInactive: false, category: 'MATERIAL' })
   const replaceBom = useReplaceBom(productId)
 
   const [draft, setDraft] = useState<RowDraft[]>([])
@@ -166,6 +171,7 @@ export default function BomEditor({ productId }: BomEditorProps) {
           current_unit_cost: live.current_unit_cost,
           waste_percent: live.waste_percent,
           is_active: live.is_active,
+          is_stock_tracked: live.is_stock_tracked !== false,
         }
       }
       return row.fallback ?? null
@@ -196,6 +202,14 @@ export default function BomEditor({ productId }: BomEditorProps) {
   const hasInactiveInDraft = draft.some((row) => {
     const m = describeRow(row)
     return m !== null && !m.is_active
+  })
+
+  // WH-1: an untracked line still prices into the order, it just never moves
+  // stock. Spelled out here rather than left to a tooltip — a silently skipped
+  // line is exactly the failure mode this flag has to avoid.
+  const hasUntrackedInDraft = draft.some((row) => {
+    const m = describeRow(row)
+    return m !== null && !m.is_stock_tracked
   })
 
   if (bomQuery.isLoading) {
@@ -263,6 +277,18 @@ export default function BomEditor({ productId }: BomEditorProps) {
           </div>
         ) : null}
 
+        {hasUntrackedInDraft ? (
+          <div
+            data-testid="untracked-notice"
+            className="px-8 py-4 bg-sky-500/10 border-b border-sky-500/20 text-sky-300 text-sm flex items-start gap-3"
+          >
+            <Info className="size-4 mt-0.5 shrink-0" />
+            <p>
+              Lines marked <span className="font-semibold">No stock</span> contribute their cost to every order, but do not consume stock when it ships — services such as cutting or sewing.
+            </p>
+          </div>
+        ) : null}
+
         {draft.length === 0 ? (
           <div className="px-8 py-16 text-center">
             <p className="text-sm text-zinc-400 italic mb-4">
@@ -301,6 +327,7 @@ export default function BomEditor({ productId }: BomEditorProps) {
                       ? qtyNum * wasteFactor(m.waste_percent) * costNum
                       : null
                   const inactive = m !== null && !m.is_active
+                  const untracked = m !== null && !m.is_stock_tracked
                   return (
                     <TableRow
                       key={row._key}
@@ -333,6 +360,16 @@ export default function BomEditor({ productId }: BomEditorProps) {
                             >
                               <AlertTriangle className="size-3" />
                               Discontinued
+                            </span>
+                          ) : null}
+                          {/* WH-1: the exception is shown, never applied silently. */}
+                          {untracked ? (
+                            <span
+                              data-testid="untracked-hint"
+                              title="Contributes cost, does not consume stock"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-sky-500/10 text-sky-400 border-l-2 border-sky-500 rounded"
+                            >
+                              No stock
                             </span>
                           ) : null}
                         </div>

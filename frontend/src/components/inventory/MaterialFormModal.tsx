@@ -49,6 +49,11 @@ export default function MaterialFormModal({
   const [wastePercent, setWastePercent] = useState(
     initialData?.waste_percent ? String(initialData.waste_percent) : '',
   )
+  // WH-1. `category` is deliberately not editable here — for a material that backs
+  // a packaging box the API refuses to change it (and the name) from this surface.
+  const [isStockTracked, setIsStockTracked] = useState(
+    initialData?.is_stock_tracked !== false,
+  )
   const [error, setError] = useState<string | null>(null)
 
   // Reset state on open/target change — derive during render, matches PackagingForm pattern.
@@ -67,6 +72,7 @@ export default function MaterialFormModal({
     setWastePercent(
       initialData?.waste_percent ? String(initialData.waste_percent) : '',
     )
+    setIsStockTracked(initialData?.is_stock_tracked !== false)
     setError(null)
   }
 
@@ -89,6 +95,7 @@ export default function MaterialFormModal({
         supplier_name: supplierName.trim() || null,
         supplier_sku: supplierSku.trim() || null,
         notes: notes.trim() || null,
+        is_stock_tracked: isStockTracked,
       }
       if (lowStockThreshold.trim() !== '') {
         const n = parseFloat(lowStockThreshold)
@@ -115,6 +122,7 @@ export default function MaterialFormModal({
         supplier_name: supplierName.trim() || null,
         supplier_sku: supplierSku.trim() || null,
         notes: notes.trim() || null,
+        is_stock_tracked: isStockTracked,
       }
     }
 
@@ -221,6 +229,27 @@ export default function MaterialFormModal({
                 on the next delivery.
               </p>
             </div>
+
+            {/* WH-1: settable at creation too, so a service position can be entered
+                correctly the first time instead of being fixed after it has already
+                driven its stock negative. */}
+            <label className="flex items-start gap-3 p-4 rounded-2xl border border-zinc-800/50 bg-zinc-900/30 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!isStockTracked}
+                onChange={(e) => setIsStockTracked(!e.target.checked)}
+                className="mt-0.5 size-4 rounded border-zinc-700 bg-zinc-900 accent-teal-500"
+              />
+              <span>
+                <span className="block text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                  Does not consume stock
+                </span>
+                <span className="block text-[10px] text-zinc-500 mt-1">
+                  For services such as laser cutting or sewing: the cost still lands on
+                  every order that uses it, but shipping never decrements a quantity.
+                </span>
+              </span>
+            </label>
 
             {isEdit && (
               <div className="space-y-3 p-4 rounded-2xl border border-zinc-800/50 bg-zinc-900/30">

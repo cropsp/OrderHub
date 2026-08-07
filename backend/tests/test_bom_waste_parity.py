@@ -33,11 +33,21 @@ from services.order_consumption_service import consume_materials_for_order
 class Line:
     """One recipe line, expressed once and fed to both services."""
 
-    def __init__(self, qty: str, unit_cost: str, waste: str, currency: str = "UAH"):
+    def __init__(
+        self,
+        qty: str,
+        unit_cost: str,
+        waste: str,
+        currency: str = "UAH",
+        is_stock_tracked: bool = True,
+    ):
         self.qty = Decimal(qty)
         self.unit_cost = Decimal(unit_cost)
         self.waste = Decimal(waste)
         self.currency = currency
+        # WH-1: whether the line moves stock is irrelevant to what it costs, and
+        # the preview does not even know about it — parity must hold regardless.
+        self.is_stock_tracked = is_stock_tracked
 
 
 def _preview_db(lines: list[Line]):
@@ -73,6 +83,8 @@ def _consumption_db(lines: list[Line], product_id: uuid.UUID, quantity: int):
             low_stock_threshold=Decimal("0"),
             waste_percent=ln.waste,
             is_active=True,
+            category="MATERIAL",
+            is_stock_tracked=ln.is_stock_tracked,
         )
         for i, ln in enumerate(lines)
     ]
@@ -149,6 +161,8 @@ async def _both(
     order = MagicMock()
     order.id = uuid.uuid4()
     order.currency = order_currency
+    # WH-1: explicit, or the guard reads a truthy MagicMock and skips everything.
+    order.computed_production_cost = None
     booked = await consume_materials_for_order(
         _consumption_db(lines, product_id, quantity), order, uuid.uuid4(), fx=fx
     )
@@ -310,3 +324,20 @@ async def test_unconvertible_currency_blocks_both_sides_identically():
 
     assert preview.converted is None
     assert booked is None
+
+
+@pytest.mark.asyncio
+async def test_untracked_line_prices_identically_in_preview_and_booking():
+    """WH-1 — is_stock_tracked only decides whether stock moves, never what the
+    line costs. compute_bom_cost does not read the flag at all, so if consumption
+    ever skipped an untracked line's COST, this is where the two would diverge.
+    """
+    lines = [
+        Line(qty="3.43", unit_cost="580.0000", waste="15.00"),
+        Line(qty="1.00", unit_cost="25.0000", waste="0.00", is_stock_tracked=False),
+    ]
+    preview, booked = await _both(lines)
+
+    assert preview.basis[0].amount == booked
+    # 3.43 × 1.15 × 580 = 2287.81 (+) 25.00 — the service line is in the number.
+    assert booked == Decimal("2312.81")

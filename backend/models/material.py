@@ -75,6 +75,24 @@ class Material(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     supplier_sku: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # WH-1: MATERIAL | PACKAGING. A packaging box is a Material (cost, receipts,
+    # supplier_sku, archiving) plus a geometry row in packaging_boxes linked 1:1.
+    # Deliberately a plain String, NOT a PG enum — precedent models.user.Capability,
+    # and it sidesteps the PG16 "cannot use a new enum value in the transaction that
+    # added it" trap documented in the d7f3a1c85e92 (PARTNER-CONFIG-1) docstring.
+    # Allowed values are validated in Pydantic (schemas.material.MaterialCategory).
+    category: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="MATERIAL", server_default="MATERIAL"
+    )
+    # WH-1 (closes SVC-MATERIAL-NONSTOCK): false → this material contributes its cost
+    # to an order's computed_production_cost exactly as before, but consumption writes
+    # no movement row and does not decrement stock. For service positions (cutting,
+    # sewing) modelled as materials, which otherwise bleed negative stock on every ship.
+    # default= applies at INSERT, not at object construction — order_consumption_service
+    # therefore treats an unset (None) attribute as TRACKED, never as a silent skip.
+    is_stock_tracked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
 
     receipts = relationship(
         "MaterialReceipt",

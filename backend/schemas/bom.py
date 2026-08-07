@@ -70,6 +70,10 @@ class BomItemRead(BaseModel):
     # and deliberately NOT stripped by routers/products.py:_strip_bom_costs.
     material_waste_percent: Decimal = Decimal("0")
     material_is_active: bool = True
+    # WH-1: denormalized so the editor can flag lines that contribute cost but do
+    # not consume stock. The exception is shown, never applied silently (the
+    # ERPNext #38040 lesson, DESIGN §1.2).
+    material_is_stock_tracked: bool = True
     line_cost: Decimal = Decimal("0")
 
     @model_validator(mode="after")

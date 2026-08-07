@@ -207,6 +207,21 @@ async def replace_bom(
                         "restore it or pick an active replacement"
                     ),
                 )
+            # WH-1: a box is one per PARCEL, not one per product — an order of three
+            # items ships in one box — so packaging has no place in a per-product
+            # recipe (DESIGN §2.4); the parcel calculator + order.packaging_id are
+            # where it belongs. Enforced here rather than only in the picker because
+            # this is the single write path for the UI and for all three MCP BOM
+            # tools. Grandfathered like inactive materials, so a recipe that already
+            # contains one stays editable.
+            if mat.category == "PACKAGING" and item.material_id not in existing_ids:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"'{mat.name}' is packaging; packaging is attached per parcel "
+                        "(order packaging / parcel calculator), not per product recipe"
+                    ),
+                )
 
     # 3. Replace-all.
     await db.execute(delete(BomItem).where(BomItem.product_id == product_id))
@@ -239,4 +254,10 @@ def project_bom_item(item: BomItem) -> BomItemRead:
         material_current_unit_cost=mat.current_unit_cost,
         material_waste_percent=mat.waste_percent,
         material_is_active=mat.is_active,
+        # WH-1. `is not False` rather than the raw value: the column is NOT NULL in
+        # the DB, but a Material that has not been flushed yet reads None (column
+        # defaults apply at INSERT), and None on a `bool` field would raise a
+        # ValidationError and 500 the BOM read. Same normalisation as the
+        # consumption path — unset means tracked.
+        material_is_stock_tracked=mat.is_stock_tracked is not False,
     )

@@ -3,7 +3,10 @@ OrderHub CRM — Packaging Models
 """
 
 import enum
-from sqlalchemy import Enum, Integer, String
+import uuid
+
+from sqlalchemy import Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -22,6 +25,15 @@ class PackagingBox(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "packaging_boxes"
 
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # WH-1: every box is backed 1:1 by a Material carrying its cost, receipts and
+    # supplier article; this table keeps only the geometry the parcel calculator
+    # needs. RESTRICT so archiving a material can never orphan the geometry row —
+    # deleting a box archives its material instead (catalog_service).
+    material_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("materials.id", ondelete="RESTRICT", name="fk_packaging_boxes_material_id"),
+        nullable=False,
+    )
     packaging_type: Mapped[PackagingType] = mapped_column(
         Enum(PackagingType, name="packaging_type", create_constraint=True),
         default=PackagingType.BOX,
@@ -57,6 +69,12 @@ class PackagingBox(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         order_by="PackagingStockMovement.created_at.desc()",
         cascade="all, delete-orphan",
         passive_deletes=True,
+    )
+
+    # Named explicitly: an auto-named constraint from `unique=True` on the column
+    # would not match the migration and would show up as autogenerate drift.
+    __table_args__ = (
+        UniqueConstraint("material_id", name="uq_packaging_boxes_material_id"),
     )
 
     def __repr__(self) -> str:

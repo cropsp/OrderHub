@@ -24,9 +24,11 @@ from models.material import (
     MaterialReceipt,
 )
 from models.order import Order
+from models.packaging import PackagingBox
 from models.user import Capability, UserRole
 from routers.dependencies import require_capability, require_role
 from schemas.material import (
+    MaterialCategory,
     MaterialCreate,
     MaterialMovementRead,
     MaterialRead,
@@ -53,12 +55,18 @@ router = APIRouter(
 async def list_materials(
     search: str | None = Query(None, max_length=200),
     include_inactive: bool = Query(False),
+    category: MaterialCategory | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
     stmt = select(Material).order_by(Material.name)
     if not include_inactive:
         stmt = stmt.where(Material.is_active == True)  # noqa: E712
+    # WH-1: unset means every category, so the MCP tools and any other existing
+    # client see exactly what they saw before. The surfaces that must not offer
+    # packaging (BOM picker, materials page) pass category='MATERIAL' explicitly.
+    if category is not None:
+        stmt = stmt.where(Material.category == category)
     if search:
         # MAT-6: the supplier article is the key that ties one material across
         # invoices, so it is searchable exactly like the name. The MCP dedup
@@ -87,6 +95,8 @@ async def create_material(
         supplier_name=body.supplier_name,
         supplier_sku=body.supplier_sku,
         notes=body.notes,
+        category=body.category,
+        is_stock_tracked=body.is_stock_tracked,
     )
     db.add(material)
     await db.flush()
@@ -119,6 +129,33 @@ async def update_material(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
 
     payload = body.model_dump(exclude_unset=True)
+
+    # WH-1: a material paired with a packaging box is named and classified by the
+    # packaging surface (catalog_service syncs the name on box rename). Renaming or
+    # re-categorising it from here would desync the pair with nothing to detect the
+    # drift, so it is refused — including for the MCP agent, which reaches this same
+    # endpoint. Only an actual change is refused; echoing the current value back is
+    # a no-op, and the pairing lookup runs only when one of the two keys is present.
+    guarded = {
+        key: payload[key]
+        for key in ("name", "category")
+        if key in payload and payload[key] != getattr(material, key)
+    }
+    if guarded:
+        paired = await db.execute(
+            select(PackagingBox.id)
+            .where(PackagingBox.material_id == material_id)
+            .limit(1)
+        )
+        if paired.scalar() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"This material backs a packaging box; change its "
+                    f"{' and '.join(sorted(guarded))} on the packaging page instead"
+                ),
+            )
+
     for key, value in payload.items():
         setattr(material, key, value)
 

@@ -16,6 +16,8 @@ const material1: Material = {
   supplier_name: null,
   notes: null,
   is_active: true,
+  category: 'MATERIAL',
+  is_stock_tracked: true,
   created_at: '2026-05-14T10:00:00Z',
   updated_at: '2026-05-14T10:00:00Z',
 }
@@ -32,6 +34,8 @@ const material2: Material = {
   supplier_name: null,
   notes: null,
   is_active: true,
+  category: 'MATERIAL',
+  is_stock_tracked: true,
   created_at: '2026-05-14T10:00:00Z',
   updated_at: '2026-05-14T10:00:00Z',
 }
@@ -79,6 +83,8 @@ const material3: Material = {
   supplier_name: null,
   notes: null,
   is_active: true,
+  category: 'MATERIAL',
+  is_stock_tracked: true,
   created_at: '2026-05-14T10:00:00Z',
   updated_at: '2026-05-14T10:00:00Z',
 }
@@ -116,6 +122,41 @@ const bomItemInactiveWaste: BomItem = {
   line_cost: '240.00',
 }
 
+// WH-1: a service position — priced into every order, never decremented.
+const materialUntracked: Material = {
+  id: 'mat-4',
+  name: 'Лазерна порізка',
+  unit: 'pcs',
+  currency: 'UAH',
+  current_unit_cost: '25.00',
+  stock_quantity: '0',
+  low_stock_threshold: '0',
+  waste_percent: '0',
+  supplier_name: null,
+  notes: null,
+  is_active: true,
+  category: 'MATERIAL',
+  is_stock_tracked: false,
+  created_at: '2026-05-14T10:00:00Z',
+  updated_at: '2026-05-14T10:00:00Z',
+}
+
+const bomItemUntracked: BomItem = {
+  id: 'bom-5',
+  product_id: 'prod-1',
+  material_id: materialUntracked.id,
+  qty_per_unit: '1.00',
+  notes: null,
+  material_name: materialUntracked.name,
+  material_unit: materialUntracked.unit,
+  material_currency: materialUntracked.currency,
+  material_current_unit_cost: materialUntracked.current_unit_cost,
+  material_waste_percent: materialUntracked.waste_percent,
+  material_is_active: true,
+  material_is_stock_tracked: false,
+  line_cost: '25.00',
+}
+
 const mutateAsync = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/hooks/useBom', () => ({
@@ -124,8 +165,13 @@ vi.mock('@/hooks/useBom', () => ({
   useReplaceBom: () => ({ mutateAsync, isPending: false }),
 }))
 
+// A spy, not a bare arrow: WH-1 asserts on the filter the editor asks for.
+const useMaterialsMock = vi
+  .fn()
+  .mockReturnValue({ data: [material1, material2, material3, materialUntracked] })
+
 vi.mock('@/hooks/useMaterials', () => ({
-  useMaterials: () => ({ data: [material1, material2, material3] }),
+  useMaterials: (...args: unknown[]) => useMaterialsMock(...args),
 }))
 
 import { useBom } from '@/hooks/useBom'
@@ -214,5 +260,49 @@ describe('BomEditor', () => {
     // 2.00 × 1.20 × 100.00 = 240.00, not the waste-free 200.00.
     expect(screen.getAllByText('240.00 UAH').length).toBeGreaterThan(0)
     expect(screen.queryByText('200.00 UAH')).not.toBeInTheDocument()
+  })
+
+  // WH-1 — an untracked line must be visibly flagged, never silently different.
+  it('flags a line whose material does not consume stock', () => {
+    useBomMock.mockReturnValue({
+      data: bomResponse([bomItemUntracked]),
+      isLoading: false,
+    })
+    render(<BomEditor productId="prod-1" />)
+
+    expect(screen.getByTestId('untracked-hint')).toBeInTheDocument()
+    expect(screen.getByTestId('untracked-notice')).toBeInTheDocument()
+    // Cost is unaffected: 1.00 × 25.00 still prices into the recipe.
+    expect(screen.getAllByText('25.00 UAH').length).toBeGreaterThan(0)
+  })
+
+  it('does not flag a line whose material is stock-tracked', () => {
+    useBomMock.mockReturnValue({ data: bomResponse([bomItem1]), isLoading: false })
+    render(<BomEditor productId="prod-1" />)
+
+    expect(screen.queryByTestId('untracked-hint')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('untracked-notice')).not.toBeInTheDocument()
+  })
+
+  it('treats a row with no is_stock_tracked field as tracked', () => {
+    // A pre-WH-1 response shape: the flag is simply absent.
+    useBomMock.mockReturnValue({
+      data: bomResponse([bomItemInactive]),
+      isLoading: false,
+    })
+    render(<BomEditor productId="prod-1" />)
+
+    expect(screen.queryByTestId('untracked-hint')).not.toBeInTheDocument()
+  })
+
+  it('asks the picker for MATERIAL-category materials only', () => {
+    useBomMock.mockReturnValue({ data: bomResponse([]), isLoading: false })
+    render(<BomEditor productId="prod-1" />)
+
+    // Packaging is one box per parcel, not per product — it must never be
+    // offered as a recipe line.
+    expect(useMaterialsMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ category: 'MATERIAL', includeInactive: false }),
+    )
   })
 })

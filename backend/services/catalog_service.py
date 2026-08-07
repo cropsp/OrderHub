@@ -6,12 +6,21 @@ from sqlalchemy import select, delete, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from models.material import Material
 from models.product import Product, ProductVariant
 from models.packaging import PackagingBox
 from models.stock_movement import StockMovementReason
 from schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate, ProductVariantUpdate
 from schemas.packaging import PackagingBoxCreate, PackagingBoxUpdate
 from services import stock_service
+
+
+# WH-1: the Material minted alongside a new packaging box. Boxes are counted in
+# pieces and bought in hryvnia; cost and stock start at zero and move only through
+# receipts, exactly like any other material. The same values are frozen into the
+# WH-1 migration, which backfills historical boxes without importing this module.
+PACKAGING_MATERIAL_UNIT = "шт"
+PACKAGING_MATERIAL_CURRENCY = "UAH"
 
 
 class CatalogService:
@@ -120,7 +129,26 @@ class CatalogService:
     ) -> PackagingBox:
         data = schema.model_dump()
         initial_quantity = data.pop("initial_quantity", 0)
-        box = PackagingBox(**data)
+
+        # WH-1: a box IS a material (cost, receipts, supplier article, archiving)
+        # plus this geometry row. Both are staged in the caller's single transaction
+        # so a box can never exist without its material. No user_id is needed — the
+        # materials tables carry no author — which keeps the CSV-confirm path
+        # (routers/packaging.py, user_id=None) working exactly as before.
+        material = Material(
+            name=data["name"],
+            unit=PACKAGING_MATERIAL_UNIT,
+            currency=PACKAGING_MATERIAL_CURRENCY,
+            category="PACKAGING",
+            is_stock_tracked=True,
+            is_active=True,
+        )
+        self.db.add(material)
+        # The UUID primary key default is Python-side, applied at flush — the id has
+        # to be materialized before the geometry row can point at it.
+        await self.db.flush()
+
+        box = PackagingBox(**data, material_id=material.id)
         self.db.add(box)
         await self.db.flush()
 
@@ -154,12 +182,32 @@ class CatalogService:
         update_data = schema.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(box, key, value)
-        
+
+        # WH-1: the packaging surface is the single place a box is named, so the
+        # paired material follows it. The reverse rename is refused by the materials
+        # router, which keeps the two from drifting apart.
+        if "name" in update_data:
+            material = await self.db.get(Material, box.material_id)
+            if material is not None:
+                material.name = update_data["name"]
+
         await self.db.commit()
         await self.db.refresh(box)
         return box
 
     async def delete_packaging_box(self, box_id: uuid.UUID):
+        # WH-1: the geometry row goes, the material is ARCHIVED. Hard-deleting it
+        # would cascade its receipts and movements away (models/material.py), and
+        # the FK is RESTRICT, so an orphaned material is the only safe residue.
+        # Full soft-delete UX for boxes themselves is WH-2.
+        box = await self.get_packaging_box(box_id)
+        if not box:
+            return
+
+        material = await self.db.get(Material, box.material_id)
+        if material is not None:
+            material.is_active = False
+
         await self.db.execute(delete(PackagingBox).filter(PackagingBox.id == box_id))
         await self.db.commit()
 

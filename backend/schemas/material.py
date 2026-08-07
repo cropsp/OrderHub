@@ -18,6 +18,11 @@ from models.material import MaterialMovementReason
 
 # ---- Material (direct) ----
 
+# WH-1: the allowed values of materials.category. The column is a plain String in
+# the DB (see models/material.py) — this Literal is the only validation, so every
+# surface that accepts a category must annotate with it.
+MaterialCategory = Literal["MATERIAL", "PACKAGING"]
+
 
 class MaterialBase(BaseModel):
     name: str = Field(..., max_length=200)
@@ -26,6 +31,10 @@ class MaterialBase(BaseModel):
     # MAT-6: supplier's article (артикул). Inherited by MaterialCreate + MaterialRead.
     supplier_sku: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = None
+    # WH-1: both default to today's behaviour, so every existing client keeps
+    # creating ordinary stock-tracked materials without sending them.
+    category: MaterialCategory = "MATERIAL"
+    is_stock_tracked: bool = True
 
 
 class MaterialCreate(MaterialBase):
@@ -43,6 +52,10 @@ class MaterialUpdate(BaseModel):
     notes: Optional[str] = None
     low_stock_threshold: Optional[Decimal] = Field(None, ge=0)
     waste_percent: Optional[Decimal] = Field(None, ge=0, le=100)
+    # WH-1. Changing `category` (or `name`) on a material paired with a packaging
+    # box is refused by the router — the packaging surface owns those.
+    category: Optional[MaterialCategory] = None
+    is_stock_tracked: Optional[bool] = None
 
 
 class MaterialRead(MaterialBase):

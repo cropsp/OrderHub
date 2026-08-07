@@ -9,6 +9,9 @@ export type StockMovementReason =
 
 export interface PackagingBox {
   id: string;
+  // WH-1: the paired Material that carries this box's cost, receipts and
+  // supplier article. The geometry lives here; the money lives there.
+  material_id: string;
   name: string;
   packaging_type: PackagingType;
   inner_length_mm: number;
@@ -131,6 +134,10 @@ export interface ProductUpdate {
   variants?: ProductVariantPatch[];
 }
 
+// WH-1: PACKAGING materials back a packaging box (name and category are owned by
+// the packaging page, which is why neither is editable from the material form).
+export type MaterialCategory = 'MATERIAL' | 'PACKAGING';
+
 // MAT-1: direct materials catalog. Stock/cost fields are read-only display
 // in this sprint and become editable in MAT-2 once receipts exist.
 export interface Material {
@@ -149,6 +156,10 @@ export interface Material {
   supplier_sku: string | null;
   notes: string | null;
   is_active: boolean;
+  category: MaterialCategory;
+  // WH-1: false → contributes cost to an order, never moves stock (services such
+  // as laser cutting or sewing, modelled as materials).
+  is_stock_tracked: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -160,6 +171,9 @@ export interface MaterialCreate {
   supplier_name?: string | null;
   supplier_sku?: string | null;
   notes?: string | null;
+  // Omitted → the API defaults to a stock-tracked MATERIAL.
+  category?: MaterialCategory;
+  is_stock_tracked?: boolean;
 }
 
 // currency intentionally absent — locked at creation.
@@ -173,6 +187,9 @@ export interface MaterialUpdate {
   notes?: string | null;
   low_stock_threshold?: number | string;
   waste_percent?: number | string;
+  // WH-1. `category` is deliberately absent from the form: on a material paired
+  // with a packaging box the API answers 409 for both it and `name`.
+  is_stock_tracked?: boolean;
 }
 
 // MAT-2: receipts + ledger + adjustments.
@@ -303,6 +320,10 @@ export interface BomItem {
   // active-materials picker, so `fallback` is the only source).
   material_waste_percent: string;
   material_is_active: boolean;
+  // WH-1: denormalized so the editor can flag a line that prices into the order
+  // but never moves stock. Optional so a response predating WH-1 (or a fixture)
+  // reads as tracked rather than as untracked.
+  material_is_stock_tracked?: boolean;
   // Waste-inclusive, matching the cost a shipment books. Σ(line_cost) may
   // differ from the recipe total by a kopeck — the total rounds once.
   line_cost: string;
