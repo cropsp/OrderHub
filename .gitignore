@@ -47,6 +47,9 @@ scratch/
 docs/integrations/nova-poshta-audit-2026-05.md
 task.md
 
+# Local-only dev startup wrapper (AI_ONBOARDING §9) — every machine's copy differs.
+start-dev.sh
+
 # Financial reports — real revenue, fees and payout figures. Local only, never pushed.
 docs/finance/
 

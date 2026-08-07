@@ -155,7 +155,7 @@ Three distinct places — do not confuse them:
 |---|---|---|
 | **Dev** | Sergii's WSL, `/home/serhii/projects/OrderHub`. Vite on `:3000`, uvicorn on `:8000`, local Postgres. There is **no separate dev server** — "dev" is this laptop. | CC edits, Sergii runs, Cowork reads |
 | **Remote** | `github.com/cropsp/OrderHub` (**private**). Branches are local until Sergii pushes — a committed sprint is *not* automatically on GitHub. | Sergii pushes |
-| **Prod** | Home server `prorder@192.168.31.71` (`ssh orderhub`), Docker Compose, public at `https://orderhub.orderapp.uk` via Cloudflare Tunnel. | Sergii deploys |
+| **Prod** | Home server `prorder@192.168.31.71` (`ssh orderhub`), Docker Compose, public at `https://orderhub.orderapp.uk` via Cloudflare Tunnel. | Sergii approves; **CC executes** (`ssh orderhub` from the dev WSL — merge, push, server pull, rebuild, migrations, prod SQL checks). Sergii does not drive deploys by hand. If the auto-mode classifier pauses an ssh step mid-deploy, that is the §9 approval quirk — re-confirm and continue. (Clarified 2026-08-07 after a planning agent read "Sergii deploys" as "Sergii types the commands".) |
 
 **Canonical prod reference is `CLAUDE.md` § "Server Deployment" plus
 `SERVER_DEPLOY_PLAN.md` §1–§10, and `BACKUP_PLAN.md` for backups and
