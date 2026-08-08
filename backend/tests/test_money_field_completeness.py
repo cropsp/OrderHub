@@ -113,6 +113,16 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # `total_cost`, which is already classified here and would have inherited a
     # verdict silently.
     "booked_cost_total": "cost",
+    # WH-5: the retro-consumption backfill report. `backfill_production_cost` is
+    # the per-order snapshot the run booked, in that order's currency;
+    # `backfill_production_cost_total` sums it per currency. Both are literally
+    # `computed_production_cost` (already `cost` above) seen from the runner, so
+    # `cost` is the only honest verdict. Named with the `backfill_` prefix rather
+    # than reusing `total_cost` / `amount` — this map is keyed globally by bare
+    # field name, so a reused name would have inherited a verdict with nobody
+    # deciding.
+    "backfill_production_cost": "cost",
+    "backfill_production_cost_total": "cost",
     "platform_fee_total": "cost",
     "cost_price": "cost",
     "current_unit_cost": "cost",
@@ -280,6 +290,12 @@ MONEY_SURFACE_ENFORCEMENT: dict[str, str] = {
     "POST /api/shops/{shop_id}/partner-payouts/preview": "view_finance,view_costs-strip",
     "POST /api/shops/{shop_id}/partner-payouts/settlements": "view_finance",
     "POST /api/shops/{shop_id}/products": "view_costs-null",
+    # WH-5: the retro-consumption runner. Same reading as /api/partners/balances
+    # above — the router is OWNER-only, and OWNER holds every capability by
+    # resolver short-circuit, so anyone lacking VIEW_COSTS is 403'd by the role
+    # gate before the response model is ever built. The verdict is the effect,
+    # even though no require_capability appears on the route.
+    "POST /api/warehouse/backfill-consumption": "view_costs-403",
     "PUT /api/products/{id}/bom": "view_costs-null",
 }
 

@@ -111,9 +111,13 @@ async def create_product(
             )
 
     cvc = await _can_view_costs(db, user)
-    return _project_product(
-        await service.create_product(shop_id, schema), can_view_costs=cvc
-    )
+    try:
+        product = await service.create_product(shop_id, schema)
+    except ValueError as e:
+        # WH-5: an unusable default_packaging_box_id. Mirrors the PATCH route
+        # below so both surfaces answer the same way.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return _project_product(product, can_view_costs=cvc)
 
 
 @router.get("/products/{id}", response_model=ProductRead)

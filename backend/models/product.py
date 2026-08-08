@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Optional, List
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.ext.hybrid import hybrid_property
 
@@ -36,6 +37,29 @@ class Product(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     archived_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # WH-5: "which box does this product ship in" — the anchor the retro-consumption
+    # runner resolves against when an order carries no packaging_id of its own.
+    # Product-level, not variant-level: variants of one product ship in the same box.
+    #
+    # ondelete=SET NULL mirrors order.packaging_id / computed_packaging_box_id; since
+    # WH-2 a box delete ARCHIVES rather than deletes, so it is a backstop that in
+    # practice never fires.
+    #
+    # Deliberately NO relationship() to PackagingBox. PackagingBox.stock_quantity,
+    # low_stock_threshold and material_is_active are properties over self.material
+    # (lazy="select"), so an eager product→box relationship becomes a MissingGreenlet
+    # trap the moment someone nests a box read model under ProductRead. The bare id is
+    # what PackagingBoxRead.material_id already exposes, and for the same reason.
+    default_packaging_box_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "packaging_boxes.id",
+            ondelete="SET NULL",
+            name="fk_products_default_packaging_box_id",
+        ),
+        nullable=True,
+    )
 
     # Relationships
     shop = relationship("Shop", back_populates="products")

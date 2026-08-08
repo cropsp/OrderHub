@@ -56,6 +56,12 @@ class ProductBase(BaseModel):
     external_ref: Optional[str] = Field(None, max_length=255)
     is_active: bool = True
 
+    # WH-5: the box this product ships in. On ProductBase (not alongside image_url
+    # below) because it IS settable through JSON — unlike image_url, which is
+    # file-backed. A bare id, never a nested box read model: PackagingBoxRead
+    # carries Decimal counters that would land on this un-cost-gated router.
+    default_packaging_box_id: Optional[uuid.UUID] = None
+
 
 class ProductCreate(ProductBase):
     variants: List[ProductVariantCreate] = Field(..., min_length=1)
@@ -72,6 +78,12 @@ class ProductUpdate(BaseModel):
     external_ref: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = None
     variants: Optional[List["ProductVariantPatch"]] = None
+
+    # WH-5. Its own line because this schema is a standalone BaseModel, not a
+    # ProductBase subclass. An explicit `null` clears the default — update_product
+    # dumps with exclude_unset=True, which keeps a passed None and drops an
+    # unmentioned field.
+    default_packaging_box_id: Optional[uuid.UUID] = None
 
 
 class ProductRead(ProductBase):

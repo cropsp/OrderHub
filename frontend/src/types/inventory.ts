@@ -87,6 +87,13 @@ export interface Product {
   is_active: boolean;
   variants: ProductVariant[];
   /**
+   * WH-5: the box this product normally ships in, or null. A bare id, never a
+   * nested box — resolve the name through usePackaging(). The box actually
+   * consumed at SHIPPED is the order's own choice; this is the fallback the
+   * retro-consumption backfill reads for orders that have none.
+   */
+  default_packaging_box_id: string | null;
+  /**
    * Path to the authenticated image route when the product has an image, else
    * null. Not usable as a bare <img src> — the JWT is an in-memory header, so
    * the browser would send it unauthenticated. Fetch it as a blob instead.
@@ -116,6 +123,7 @@ export interface ProductVariantPatch extends Partial<ProductVariantCreate> {
 export interface ProductCreate {
   title: string;
   description?: string | null;
+  default_packaging_box_id?: string | null;
   variants: ProductVariantCreate[];
 }
 
@@ -123,6 +131,9 @@ export interface ProductUpdate {
   title?: string;
   description?: string | null;
   is_active?: boolean;
+  // WH-5. An explicit null clears the default; omitting the key leaves it alone
+  // (the backend dumps with exclude_unset=True).
+  default_packaging_box_id?: string | null;
   variants?: ProductVariantPatch[];
 }
 

@@ -100,6 +100,14 @@ INDIRECT_SHOP_ROUTES = {
     "POST /api/partners",
     "PATCH /api/partners/{partner_id}",
     "GET /api/partners/balances",
+    # WH-5: the one-off retro-consumption runner spans every shop by design, so it
+    # carries no {shop_id} and _shop_id_routes() cannot see it. Safe for the same
+    # reason as the partner routes above: the router is OWNER-only
+    # (require_role(UserRole.OWNER) on the APIRouter), and OWNER is unrestricted,
+    # so there is no scope left to enforce. A shop-scoped variant would belong
+    # under /api/shops/{shop_id}/ instead — the `shop_id` request field narrows
+    # the run, it does not grant anything.
+    "POST /api/warehouse/backfill-consumption",
 }
 
 

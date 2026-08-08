@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Archive, Plus, Save, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowLeft, Archive, Package, Plus, Save, Trash2, Undo2, X } from 'lucide-react'
 
+import { usePackaging } from '@/hooks/usePackaging'
 import { useProduct, useUpdateProduct } from '@/hooks/useProducts'
 import { useShops } from '@/hooks/useShops'
 import { Badge } from '@/components/ui/badge'
@@ -38,6 +39,8 @@ export type VariantDraft = {
 type ProductDraft = {
   title: string
   description: string
+  // WH-5. '' means "no default" — the native select's clearable empty option.
+  defaultPackagingBoxId: string
   variants: VariantDraft[]
 }
 
@@ -50,6 +53,7 @@ function buildDraft(product: Product): ProductDraft {
   return {
     title: product.title ?? '',
     description: product.description ?? '',
+    defaultPackagingBoxId: product.default_packaging_box_id ?? '',
     variants: product.variants.map(v => ({
       _key: v.id,
       id: v.id,
@@ -239,6 +243,11 @@ export default function ProductDetailPage() {
 
   const { data: product, isLoading, isError } = useProduct(id)
   const { data: shops } = useShops()
+  // WH-5: ACTIVE boxes only — the default `includeArchived=false` is what the
+  // server filters on (Material.is_active), and the API refuses an archived box
+  // here anyway. An already-archived box stored on the product is shown as a
+  // disabled option below rather than silently vanishing from the picker.
+  const { data: packagingList = [] } = usePackaging()
   const updateProduct = useUpdateProduct()
 
   const [draft, setDraft] = useState<ProductDraft | null>(null)
@@ -274,6 +283,14 @@ export default function ProductDetailPage() {
   const updateField = <K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) => {
     setDraft(d => (d ? { ...d, [key]: value } : d))
   }
+
+  // The stored default is set but absent from the active list — it was archived
+  // after being chosen. usePackaging() is still loading on the first render, so
+  // an empty list must not count as "archived".
+  const archivedDefaultBox =
+    !!draft?.defaultPackagingBoxId &&
+    packagingList.length > 0 &&
+    !packagingList.some(b => b.id === draft.defaultPackagingBoxId)
 
   const updateVariant = (key: string, field: keyof VariantDraft, value: string) => {
     setDraft(d => {
@@ -372,6 +389,7 @@ export default function ProductDetailPage() {
     const data: ProductUpdate = {
       title: draft.title,
       description: draft.description === '' ? null : draft.description,
+      default_packaging_box_id: draft.defaultPackagingBoxId || null,
       variants,
     }
 
@@ -518,6 +536,47 @@ export default function ProductDetailPage() {
                 product={product}
                 isShopify={shop?.platform === 'shopify'}
               />
+
+              {/* WH-5 — the box this product normally ships in. Deliberately NOT a
+                  BOM line: a box is one per parcel, not one per product, so an
+                  order of three items still goes out in a single box. */}
+              <Card className="border-zinc-800/60 bg-zinc-900/20 backdrop-blur-md shadow-2xl rounded-2xl">
+                <CardContent className="p-6 space-y-2">
+                  <label
+                    htmlFor="default-packaging"
+                    className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 flex items-center gap-2"
+                  >
+                    <Package className="size-3" /> Default Packaging
+                  </label>
+                  <select
+                    id="default-packaging"
+                    value={draft.defaultPackagingBoxId}
+                    onChange={e => updateField('defaultPackagingBoxId', e.target.value)}
+                    className="w-full max-w-md h-9 text-sm bg-zinc-900/60 border border-white/[0.06] rounded px-2 text-zinc-200 focus:outline-none focus:ring-1 focus:ring-teal-500/40"
+                  >
+                    <option value="">— none —</option>
+                    {/* A box archived after it was chosen here is kept visible as a
+                        disabled, pre-selected option — otherwise the field would
+                        read "none" while the product still points at it. */}
+                    {archivedDefaultBox ? (
+                      <option value={draft.defaultPackagingBoxId} disabled>
+                        (archived box)
+                      </option>
+                    ) : null}
+                    {packagingList.map(box => (
+                      <option key={box.id} value={box.id}>
+                        {box.name} ({box.inner_length_mm}×{box.inner_width_mm}×
+                        {box.inner_height_mm} mm)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-zinc-500">
+                    Used when an order has no packaging of its own — the order&apos;s own
+                    choice always wins. One box per parcel, so an order of several
+                    items still ships in one.
+                  </p>
+                </CardContent>
+              </Card>
 
               <div className="flex justify-end">
                 <Button
