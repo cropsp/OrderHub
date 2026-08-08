@@ -81,7 +81,7 @@ deliberately absent — every one has irreversible real-world side effects.
 | Tool | Reads |
 |---|---|
 | `list_shops` | shops the agent may access |
-| `list_materials` / `get_material` | direct materials + weighted-average unit cost + stock + supplier article (`search` matches name **or** article) |
+| `list_materials` / `get_material` | direct materials + weighted-average unit cost + stock + supplier article (`search` matches name **or** article — never `supplier_name`; `category="MATERIAL"` drops the boxes' paired rows) |
 | `list_material_receipts` | purchase history (what moves the weighted average) |
 | `list_material_movements` | the append-only stock ledger |
 | `list_receipts_by_invoice` | every line of one supplier invoice — direct materials **and** overhead, no total |
