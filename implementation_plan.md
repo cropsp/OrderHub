@@ -5080,7 +5080,16 @@ Jan–Jul Shopify P&L (409 orders), $137.00 pending on 38 NEW orders. Docs commi
 
 ### WH-1 — packaging becomes a Material: schema, backfill, non-stock flag (closed 2026-08-07)
 
-**Status: built on `feat/wh-1-packaging-material` (`d105658`); NOT merged, NOT deployed.**
+**Status: MERGED + DEPLOYED 2026-08-07** — code `d105658`, merge `1f4d0b4` (--no-ff), docs
+`3ef2f86`, all on `main` == `origin/main`; prod pulled, rebuilt, migration `e9b2f4c7a318`
+applied (via entrypoint on container start; explicit `upgrade head` confirmed no-op).
+Post-merge gates: backend 947 pass, vitest 225 pass. **Prod caveat:** `packaging_boxes`
+has ZERO rows on prod (packaging was never reachable there — consistent with the MCP gap),
+so the backfill passed vacuously; schema verified directly instead (FK + UNIQUE + NOT NULL
++ column defaults all present; 15 materials, all MATERIAL, all tracked — correct pre-flip
+baseline; `?category=NOPE` → 422 loud). The real box catalog lands on prod via WH-3.
+Prod durable log is `/home/prorder/orderhub-logs/server.log` (not `backend/logs/` — dev
+path); 0 new ERRORs post-restart.
 First sprint of the warehouse-unification epic. Design record:
 `docs/warehouse/DESIGN-inventory-architecture.md` (settled decisions §10) +
 `docs/warehouse/BRIEF-inventory-architecture.md` (verified code audit). Epic sequence:
@@ -5141,6 +5150,74 @@ archive HAS one — bundle with WH-2, which reworks the delete path anyway).
 
 ---
 
+### WH-2 — packaging consumed at SHIPPED, costed, counters unified (closed 2026-08-08)
+
+**Status: built on `feat/wh-2-consumption-shipped` (`08d2b30`); NOT merged, NOT deployed.**
+Second sprint of the warehouse-unification epic (design:
+`docs/warehouse/DESIGN-inventory-architecture.md`; WH-1 closure above).
+
+**What shipped (CC, plan-mode gated, 4 plan decisions confirmed by Sergii+Cowork):**
+- Box consumed **once per parcel at SHIPPED** in `order_consumption_service`, same
+  idempotency guard, cost in the same currency buckets (FX all-or-nothing + single
+  rounding byte-identical for BOM lines). Resolution (`packaging_id` →
+  `computed_packaging_box_id` fallback with ⓘ) happens before any movement is staged;
+  the block cannot raise — shipping.py rolls back only after NP minted the label.
+- **TTN fully decoupled from stock** — both `apply_movement` calls removed; TTN delete
+  gives nothing back; re-ship blocked by the ledger probe.
+- Migration `f2a7c1d84b63`: counters/thresholds moved onto paired materials
+  (stock **merged**, not overwritten — verified on the nasty edge: post-WH-1 receipt of
+  35 + box counter 10 → 35 kept, hand-set threshold 3 survived, no double-count on
+  re-upgrade); `packaging_boxes` stock columns dropped; `packaging_stock_movements`
+  frozen (writes gone: `services/stock_service.py` deleted).
+- **Plan decisions:** ① BOM-less orders keep `computed_production_cost = NULL` + ⓘ
+  ("box consumed but not costed") — a box-only number would win the row-wise COALESCE in
+  5 aggregates incl. the PROFIT partner base; follow-up option (separate
+  `computed_packaging_cost` column) parked below. ② Restock = material receipt behind
+  `view_costs`; PackagingPage disables (tooltip) rather than 403s. ③ **UA gate lifted**
+  on the packaging picker + parcel estimate — box costing now real for Etsy/Shopify
+  orders (where the partner revenue is). ④ Box delete **archives** (styled dialog, not
+  native confirm — closes `WH-1-followup-2`); geometry + frozen ledger survive.
+- `шт` added to the material-form unit list (closes `WH-1-followup-1`).
+- Accepted deviation from task rule 5: `apply_receipt` needed no clamp — its
+  `stock_quantity <= 0` re-baseline is already arithmetically the clamp
+  ((0·cost + qty·eff)/(0+qty) = eff); regression test + docstring instead of code.
+- CC also updated CLAUDE.md on the branch (WH-1 interim clause was about to become
+  false on merge + a WH-2 gotcha block); the commit carries two docs lines from the
+  Cowork working tree (WH-1 gotcha, prod log path) — accepted, they land via the merge.
+
+**Verification (CC):** backend 947 → **978**, frontend 225 → **233**, both completeness
+guards green; typecheck byte-identical to `main` (27 pre-existing, 0 introduced); lint
+one problem fewer. Migration round-trip on a throwaway container (never the dev DB).
+
+**Cowork browser smoke (2026-08-08, dev, Opus subagent): 12/12 PASS; 2×400 both
+legitimate validation (TTN without recipient), console clean across ~90 calls.**
+End-to-end: receipt requires unit cost, WAC recomputes (15 UAH), packaging counters read
+from materials; SHIPPED → exactly −1 + CONSUMPTION ledger row linked to the order + the
+ⓘ no-BOM toast, Net Profit stays `—` (no cost masked); revert→re-ship does NOT double;
+TTN create (`20451506375938`) and delete both leave stock untouched; non-UA (Lamamarka
+US) order renders the picker and calls parcel-estimate 200; zero-stock box selectable
+with the negative-stock warning; archive dialog styled, geometry+history intact,
+"show archived" reveals; dashboard card consistent (1 box at/below threshold); `шт`
+in the unit list. Known NP-delete stall reproduced and is benign (the DELETE completes
+in ~35 s; not a hang).
+
+**Smoke observations triaged:** (a) archived box → the shipped order's packaging
+selector displays "— None —" — filed `WH-2-followup-1` (verify `packaging_id`
+persistence; display vs data). (b) `low_stock_threshold` NULL renders "not set" on the
+material page but counts as LOW on packaging/dashboard — filed `WH-2-followup-2`.
+(c) order timeline timestamps all render one frozen datetime — pre-existing, filed
+`WH-2-followup-3`. (d) MANUAL OVERRIDE badge doesn't survive reload — appended to the
+`PKG-UX-1` row (same panel, same badge work). (e) TTN delete reverting SHIPPED →
+IN PRODUCTION and parcel dims keeping manual override over the selected box are both
+pre-existing designed behaviour — noted, no rows. **Dev residue:** order `#SMOKE-WH2`
+(IN PRODUCTION, one consumption booked), customer `smoke.wh2@example.com`, archived
+`SMOKE-WH2 Box` material (stock 9 @ 15 UAH) — harmless test data.
+
+**Follow-ups filed below:** `WH-2-followup-1..3`; `WH-1-followup-1` + `WH-1-followup-2`
+closed by this sprint (marked in their rows).
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -5149,9 +5226,12 @@ in this document where applicable, to avoid duplication.
 
 | ID | Task | Why deferred (2026-05-08) |
 |---|---|---|
-| WH-1-followup-1 | Material form unit vocabulary lacks `шт` (offers `dm2/m2/pcs/m/kg`) while WH-1 packaging-paired materials carry `шт` | Found in the WH-1 Cowork smoke (2026-08-07). A manually created piece-material cannot match the unit of the paired packaging rows (`pcs` vs `шт` split). Decide the canonical piece unit (probably add `шт` to the form list, or migrate paired rows to `pcs`) — tiny; bundle with WH-2's frontend work. |
-| WH-1-followup-2 | Packaging box delete has NO confirmation dialog (deletes on one click) while the less-destructive material archive shows a confirm modal | Found in the WH-1 Cowork smoke (2026-08-07). Post-WH-1 the delete also archives the paired material, so the asymmetry is more visible. Bundle with WH-2, which reworks the box delete path anyway. |
-| SVC-MATERIAL-NONSTOCK-OP | Flip `is_stock_tracked=false` on the real cutting/sewing service materials | The WH-1 code fix is built; this is the post-deploy operator data action (UI checkbox per material). Do after WH-1 merges + deploys; until then the negative-stock noise continues. |
+| WH-1-followup-1 | **CLOSED 2026-08-08 by WH-2** (`шт` added to the unit list; verified in smoke). ~~Material form unit vocabulary lacks `шт`~~ | Found in the WH-1 Cowork smoke (2026-08-07). |
+| WH-1-followup-2 | **CLOSED 2026-08-08 by WH-2** (box delete → styled Archive dialog; geometry + ledger survive). ~~Packaging box delete has NO confirmation dialog~~ | Found in the WH-1 Cowork smoke (2026-08-07). |
+| WH-2-followup-1 | Archiving a box blanks the packaging selector display on orders that shipped in it | Found in the WH-2 Cowork smoke (2026-08-08). After archiving `SMOKE-WH2 Box`, order `#SMOKE-WH2` (shipped in it, consumption booked) shows packaging "— None —" — the picker filters archived boxes, so the `<select>` has no option to match. Verify via API whether `order.packaging_id` is still set (almost certainly display-only, since the archive dialog promises orders untouched); fix = render the archived box as a disabled "(archived)" option. Also note: a hypothetical re-ship of such an order would fall back to the computed box. Small frontend fix; bundle with the next order-detail sprint. |
+| WH-2-followup-2 | `low_stock_threshold` NULL: material page says "not set", packaging list + dashboard treat it as LOW | Found in the WH-2 Cowork smoke (2026-08-08). Pre-existing box `100x120x50` (stock 0, threshold NULL post-migration) wears a LOW badge on /packaging and counts in the dashboard card, while its material page renders "— not set —". Numbers are consistent; the surfaces disagree on what NULL means. Decide the semantics (NULL = no alerting, or NULL = default 5) and align the three surfaces. Tiny. |
+| WH-2-followup-3 | Order timeline renders one frozen timestamp for every entry | Found in the WH-2 Cowork smoke (2026-08-08): every timeline row on two different orders reads `25.04.2026 20:11` while the order header and the materials ledger show correct times. Pre-existing rendering (or dev-data) bug, NOT WH-2 — but it makes the audit trail unreadable. Investigate `DetailTimeline.tsx` formatting vs the `order_status_history` rows. |
+| SVC-MATERIAL-NONSTOCK-OP | Flip `is_stock_tracked=false` on the real cutting/sewing service materials | The WH-1 code fix is built; this is the post-deploy operator data action (UI checkbox per material). WH-1 is deployed since 2026-08-07 — **can be done now**; until then the negative-stock noise continues. |
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
 | ADDR-VAL-USER-ACCESS | Admin-granted per-user access to address validation | Idea (Sergii, 2026-07-15): let an OWNER/admin grant specific users permission to run address validation, rather than it being available to all order-endpoint roles. Deferred — ADDR-VAL-1/2 ship the feature gated by the existing order roles first; add fine-grained per-user access after the core works. Would build on the existing role/designer-access model. |
 | USER-ACCESS-403-CONSISTENCY | Forbidden `shop_id` answers 200-empty on orders/CSV but 403 elsewhere | Found during the USER-ACCESS-1 Cowork smoke (2026-07-18). Passing a non-granted `shop_id` to `GET /api/orders` or the CSV export returns **200 with an empty result** (scope is applied as an intersection on the filter), while `/finance`, `/dashboard` and shop detail return **403**. **No data leaks** — this is purely an inconsistency in how the same forbidden action is reported, so it was not treated as a blocker. Fix: when `shop_id` is explicitly supplied and not accessible, return 403 from the orders list and CSV export too, matching the other surfaces. Small; bundle with USER-ACCESS-2. |
@@ -5170,7 +5250,7 @@ in this document where applicable, to avoid duplication.
 | PC-F-1 | Product photos (see Section A) | Requires new file-upload infrastructure |
 | Unlinked backfill (carried over from BUG-2/BUG-3 smoke tests) | UI gesture or migration to link historical Unlinked items in existing orders | Pre-existing constraint; no operational need yet |
 | NP-UX-1 | Hide Logistics (NP) tab in Edit Store Settings modal when `has_np_token = false` | Cosmetic — the tab currently renders for every shop, including those that never integrated NP (Lamamarka Shopify, LeatherCraft UA, Leather by Mykola). Deferral cause: depends on the open architectural question below — does tab visibility tie to *credentials presence* (cheap, but hides the only entry point for first-time NP setup) or to *regional intent* (proper, but the data anchor doesn't exist). |
-| PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. |
+| PKG-UX-1 | Add a third "PACKAGING" badge state on the Logistics panel (between AUTO-CALCULATED and MANUAL OVERRIDE) for when a packaging box is selected without overrides | Discovered during PKG-1 smoke (2026-05-11). Today, selecting a packaging box from the dropdown sets the panel's internal `isManual=true` flag (to prevent the auto-fit engine from over-writing the box dims on the next render), which causes the existing badge to read "MANUAL OVERRIDE" even when the operator hasn't actually overridden any field. The chosen-box semantics are correct but visually misleading. Adding a third badge state ("PACKAGING") that fires when `selectedBox && !isOverridden` would resolve it. This is a new visual idiom, hence punted out of PKG-1 scope (the spec was explicit about no new idioms). Low-priority cosmetic; consider bundling with the PKG-2 stock-counting frontend work since both touch the same panel. **Update (WH-2 smoke, 2026-08-08):** the badge also doesn't survive a reload — after picking a box the panel shows MANUAL OVERRIDE in-session, but after navigating away and back it reads AUTO-CALCULATED while the select still shows the chosen box. Same panel, same badge — fold into this fix. |
 | PKG-1-bug | One-off "kicked off page" report when re-selecting a packaging item from the dropdown after manually editing fields | Discovered during PKG-1 smoke (2026-05-11). The human reviewer described being navigated off the order detail page after a manual L/W/H edit followed by a dropdown re-selection. Five repro attempts (slow + rapid sequences, console + network capture) did not reproduce; console clean, all network requests 200. Watch-list item — if the symptom recurs, capture DevTools console output and the exact click sequence. Until reproducible, no code change is warranted. |
 | DASH-SHOP-WARNINGS | ShopChart **and FinanceRevenueChart** log `width(-1)/height(-1)` recharts warnings on initial mount | Originally discovered during DASH-REVENUE-EMPTY smoke (2026-05-14) on ShopChart; scope extended during FIN-1 smoke (2026-05-14) when the same pattern was observed on the new FinanceRevenueChart. Both charts have **correct** empty-state JSX (placeholder outside `<ResponsiveContainer>`) so this is **not** the same bug as DASH-REVENUE-EMPTY. Warnings stamp `minHeight(300)` matching the explicit `minHeight={300}` prop. Likely cause: layout race between the `min-h-[300px] flex` container and `ResponsiveContainer`'s first `ResizeObserver` callback — recharts measures pre-layout, gets -1×-1, logs, then re-measures correctly when the observer fires. Charts render correctly. Cosmetic console noise only. Possible fixes: declare `width={N} height={N}` pixel values instead of `100%`, or wrap in a `useLayoutEffect`-gated container, or add the `aspect` prop. Affects two chart components today; if a third one with the same shape lands, the pattern is worth extracting into a shared `<MeasuredChartContainer>`. Low-priority. |
 | FIN-1-followup | Extend `/orders` to honor URL query params (`start_date`, `end_date`, `missing_cost`) for finance drilldown fidelity | Discovered by CC during FIN-1 plan-mode (2026-05-14). `routers/orders.py:37-48` accepts only `page/limit/status/shop_id/search`; `OrdersLayout.tsx:29-49` doesn't read URL query params at all (filters are local React state). FIN-1 worked around this by pointing its drilldown link to `/shops/{shop_id}/orders` (which filters by shop via `fixedShopId` prop) — so users land on shop-filtered orders but **lose the period and missing-cost context** from the finance page they came from. Fix: extend the orders router signature to accept the three new params; refactor `OrdersLayout` to read URL params on mount and hydrate the filter state. Touches both backend and frontend. Medium-priority — affects the operator's drilldown UX, not the page's primary use case. Bundle with any future orders-page enhancement work. |
