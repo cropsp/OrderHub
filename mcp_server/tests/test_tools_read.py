@@ -173,6 +173,31 @@ async def test_search_filter_is_forwarded():
 
 
 @pytest.mark.asyncio
+async def test_list_materials_forwards_the_category_filter():
+    """WH-4b — every box is also a material (WH-1), so without this the agent has
+    no way to get the BOM materials on their own."""
+    mcp, client, seen = _build(lambda r: httpx.Response(200, json=[]))
+    await mcp.call_tool("list_materials", {"category": "MATERIAL"})
+    await client.aclose()
+
+    calls = [r for r in seen if r.url.path == "/api/materials"]
+    assert len(calls) == 1
+    assert calls[0].url.params.get("category") == "MATERIAL"
+
+
+@pytest.mark.asyncio
+async def test_list_materials_omits_the_category_param_when_unset():
+    """Unfiltered stays the default: the param must not reach the API at all, or
+    every existing caller silently changes what it sees."""
+    mcp, client, seen = _build(lambda r: httpx.Response(200, json=[]))
+    await mcp.call_tool("list_materials", {})
+    await client.aclose()
+
+    calls = [r for r in seen if r.url.path == "/api/materials"]
+    assert "category" not in calls[0].url.params
+
+
+@pytest.mark.asyncio
 async def test_invoice_no_is_forwarded_as_a_query_param():
     """MAT-6 — the invoice number selects the lines; dropping it would silently
     return whatever the endpoint defaults to."""

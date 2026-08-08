@@ -53,7 +53,9 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
 
     @mcp.tool()
     async def list_materials(
-        search: str | None = None, include_inactive: bool = False
+        search: str | None = None,
+        include_inactive: bool = False,
+        category: str | None = None,
     ) -> str:
         """List direct materials — the leather, thread, hardware consumed by BOMs.
 
@@ -65,14 +67,32 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         article from the invoice is the most reliable check — it is the
         supplier's own key, and survives the material being named differently.
 
+        **Every packaging box is also a material** (WH-1), so unfiltered this
+        returns the boxes' paired rows interleaved with the BOM materials. Pass
+        `category="MATERIAL"` whenever you are working on recipes or checking
+        for a duplicate before `create_material`; reach for `list_packaging`
+        when you want boxes, since it joins the geometry on as well.
+
+        **What `search` looks at:** the material name and `supplier_sku` — and
+        nothing else. It does **not** match `supplier_name`, so searching for a
+        supplier returns an empty list rather than that supplier's catalogue.
+        Note also that box articles are short numerics (`140`, `165`, `058`), so
+        an article lookup without `category="MATERIAL"` can turn up packaging.
+
         Args:
             search: case-insensitive substring match on the material name **or**
-                its supplier article.
+                its supplier article. Never on the supplier's name.
             include_inactive: include soft-deleted (discontinued) materials.
+            category: `"MATERIAL"` for the direct materials a BOM consumes, or
+                `"PACKAGING"` for the rows paired to packaging boxes. Omitted
+                (the default) returns both.
         """
         return dump(
             await client.get(
-                "/api/materials", search=search, include_inactive=include_inactive
+                "/api/materials",
+                search=search,
+                include_inactive=include_inactive,
+                category=category,
             )
         )
 
