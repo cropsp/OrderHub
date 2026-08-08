@@ -105,3 +105,21 @@ describe('MaterialFormModal — stock tracking', () => {
     expect(screen.queryByLabelText(/category/i)).not.toBeInTheDocument()
   })
 })
+
+// WH-1-followup-1: the piece unit.
+describe('unit options', () => {
+  it('offers шт, the canonical piece unit for this business', () => {
+    setup()
+
+    const unitSelect = screen.getByDisplayValue('dm2')
+    const options = Array.from(unitSelect.querySelectorAll('option')).map(
+      o => o.textContent,
+    )
+
+    expect(options).toContain('шт')
+    // 'pcs' stays for the rows already on it — the follow-up deliberately does
+    // not migrate them, and removing the option would strand those materials on
+    // a value their own form could not display.
+    expect(options).toContain('pcs')
+  })
+})

@@ -3,12 +3,13 @@ import type {
   PackagingBox,
   PackagingBoxCreate,
   PackagingBoxUpdate,
-  RestockRequest,
 } from '@/types/inventory'
 
 export const packagingApi = {
-  listPackaging: async () => {
-    const response = await client.get<PackagingBox[]>('/packaging-boxes')
+  listPackaging: async (includeArchived = false) => {
+    const response = await client.get<PackagingBox[]>('/packaging-boxes', {
+      params: includeArchived ? { include_archived: true } : undefined,
+    })
     return response.data
   },
 
@@ -22,11 +23,12 @@ export const packagingApi = {
     return response.data
   },
 
-  restockPackaging: async (id: string, data: RestockRequest) => {
-    const response = await client.post<PackagingBox>(`/packaging-boxes/${id}/restock`, data)
-    return response.data
-  },
+  // WH-2: no restockPackaging. Adding units means recording a purchase against
+  // the paired material — materialsApi.createReceipt(box.material_id, …) — so
+  // packaging replenishment carries a cost by construction.
 
+  // Archives the box (the geometry row and its history survive); kept on DELETE
+  // so the call site does not have to move.
   deletePackaging: async (id: string) => {
     await client.delete(`/packaging-boxes/${id}`)
   },

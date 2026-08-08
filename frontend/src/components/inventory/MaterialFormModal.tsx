@@ -19,7 +19,11 @@ import {
 } from '@/components/ui/select'
 import type { Material, MaterialCreate, MaterialUpdate } from '@/types/inventory'
 
-const UNIT_OPTIONS = ['dm2', 'm2', 'pcs', 'm', 'kg']
+// 'шт' is the canonical piece unit for this business and what the backend mints
+// packaging materials with (catalog_service.PACKAGING_MATERIAL_UNIT). 'pcs' stays
+// for the rows already using it — WH-1-followup-1 deliberately does not migrate
+// them; both mean the same thing and rewriting historical rows would be churn.
+const UNIT_OPTIONS = ['dm2', 'm2', 'шт', 'pcs', 'm', 'kg']
 const CURRENCY_OPTIONS = ['UAH', 'USD', 'EUR']
 
 interface MaterialFormModalProps {

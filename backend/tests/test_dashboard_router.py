@@ -295,3 +295,63 @@ async def test_dashboard_refunds_all_time_has_no_date_filter():
     assert "order_refunds.refunded_at" not in refund, (
         f"Refund summary gained a date filter without a period. SQL: {refund}"
     )
+
+
+# ---------------------------------------------------------------------------
+# WH-2 — the low-stock packaging card reads materials, not boxes
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_low_stock_card_counts_packaging_materials():
+    """PKG-2 counted packaging_boxes against their own threshold columns. WH-2
+    dropped both columns, so the card reads the paired materials instead — the
+    same question, a different table. The count goes through db.scalar (not
+    db.execute), so it is captured separately from the trend queries above.
+
+    Also pinned: the two conditions the box-based query could not express. An
+    archived box must not nag, and an untracked material's counter never moves,
+    so comparing it to a threshold would leave the card stuck on forever.
+    """
+    user = MagicMock()
+    user.id = uuid.uuid4()
+    user.role = UserRole.OWNER
+    user.email = "owner@example.com"
+
+    scalars = []
+
+    async def fake_execute(stmt):
+        r = MagicMock()
+        r.all.return_value = []
+        r.scalar_one_or_none.return_value = None
+        return r
+
+    async def fake_scalar(stmt):
+        scalars.append(stmt)
+        return 3
+
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=fake_execute)
+    db.scalar = AsyncMock(side_effect=fake_scalar)
+
+    response = await get_dashboard_stats(shop_id=None, current_user=user, db=db)
+
+    sqls = [
+        str(s.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})).lower()
+        for s in scalars
+    ]
+    low_stock_sql = next(
+        (s for s in sqls if "low_stock_threshold" in s), None
+    )
+    assert low_stock_sql is not None, f"no low-stock count issued; got {sqls}"
+
+    assert "from materials" in low_stock_sql
+    assert "packaging_boxes" not in low_stock_sql, (
+        "the box columns are gone — reading them would be a migration-time crash"
+    )
+    assert "materials.category = 'packaging'" in low_stock_sql
+    assert "materials.stock_quantity <= materials.low_stock_threshold" in low_stock_sql
+    assert "materials.is_active is true" in low_stock_sql
+    assert "materials.is_stock_tracked is true" in low_stock_sql
+
+    # The response field name is unchanged, so no frontend type moves.
+    assert response.low_stock_packaging_count == 3

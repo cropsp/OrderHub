@@ -51,6 +51,13 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
     if (!packagingId) return null;
     return packagingList.find(b => b.id === packagingId) ?? (order.packaging ?? null);
   }, [packagingId, packagingList, order.packaging]);
+  // WH-2: shipping consumes one unit of the chosen box, so a box already at or
+  // below zero is worth flagging before the operator commits. Read from the list
+  // only, never from `selectedBox` — that falls back to order.packaging, which is
+  // a summary projection with no counters on it at all.
+  const isSelectedBoxOutOfStock = !!packagingId && packagingList.some(
+    box => box.id === packagingId && Number(box.stock_quantity) <= 0,
+  );
   const ttnExists = !!order.ttn_number;
   const isPackagingOverridden = !!selectedBox && (
     Number(length) !== selectedBox.inner_length_mm ||
@@ -85,7 +92,11 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
     setHeight(selectedBox.inner_height_mm);
   };
 
-  const { data: estimate, isFetching: isEstimating } = useGetParcelEstimate(order.id, !order.ttn_number && order.shipping_country === 'UA');
+  // WH-2: no longer UA-only. This endpoint is the ONLY writer of
+  // computed_packaging_box_id, which is the fallback the SHIPPED consumption hook
+  // uses when the operator never picked a box — gating it by country meant
+  // international orders could not resolve a box by either route.
+  const { data: estimate, isFetching: isEstimating } = useGetParcelEstimate(order.id, !order.ttn_number);
 
   const { data: shops } = useShops();
   const orderShop = shops?.find(s => s.id === order.shop_id);
@@ -482,8 +493,14 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
         </div>
       </div>
 
-      {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
-        <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
+      {/* WH-2: packaging is NOT Nova Poshta's business, so this block is no longer
+          gated on shipping_country === 'UA'. The box is consumed at SHIPPED and its
+          cost enters per-order COGS for every shop — leaving the picker UA-only
+          meant the international orders, where most partner revenue sits, could
+          never have a box and never carried its cost. The NP-specific controls
+          below stay UA-only. */}
+      {!isEditing && !order.ttn_number && canManageShipping && (
+        <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-2">
           <div className="space-y-1">
             <label className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider px-1 flex items-center gap-1">
               <Package size={10} /> Packaging
@@ -492,7 +509,7 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               <div className="text-[10px] text-zinc-400 italic px-2 py-1.5 rounded bg-zinc-900/50 border border-zinc-800">
                 No packaging configured —{' '}
                 <Link
-                  to="/inventory/packaging"
+                  to="/packaging"
                   className="text-teal-400 hover:underline"
                 >
                   add boxes in Inventory → Packaging
@@ -514,6 +531,20 @@ export function DetailLogistics({ order, canManageShipping, isPending, onGenerat
               </select>
             )}
           </div>
+          {isSelectedBoxOutOfStock && (
+            <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-500/5 border border-amber-500/10">
+              <AlertTriangle size={12} className="text-amber-500 shrink-0 mt-0.5" />
+              <p className="text-[10px] text-amber-200/80 leading-snug">
+                This box is out of stock. Shipping the order will still consume one
+                and take the count negative — restock it in Inventory → Packaging.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!isEditing && !order.ttn_number && order.shipping_country === 'UA' && canManageShipping && (
+        <div className="p-3 border-t border-zinc-800/50 bg-zinc-950/20 space-y-3">
           {showNpConfigBanner && (
             <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/10">
               <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />

@@ -24,6 +24,9 @@ export function useCreateTTN() {
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['order', variables.orderId] })
+      // WH-2: the TTN itself no longer moves stock, but creating one flips the
+      // order to SHIPPED, and THAT consumes the box and the BOM materials.
+      queryClient.invalidateQueries({ queryKey: ['materials'] })
       queryClient.invalidateQueries({ queryKey: ['packaging'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       addToast('TTN created successfully', 'success')
@@ -55,7 +58,8 @@ export function useDeleteTTN() {
     onSuccess: (data, orderId) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['order', orderId] })
-      queryClient.invalidateQueries({ queryKey: ['packaging'] })
+      // Deleting a TTN gives no stock back (WH-2) — these stay only because the
+      // order's own figures move with the status revert.
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       // NP-UX-2: backend returns status='soft_success' when NP reported the
       // TTN was already gone (manual cabinet delete). Surface as info, not

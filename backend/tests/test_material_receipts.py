@@ -2,7 +2,7 @@
 
 Captures the in-memory mutations and `db.add(...)` calls during the receipt /
 adjust / overhead-receipt flows. Mirrors the mock-DB pattern in
-test_stock_service.py (PKG-2) and test_materials_router.py (MAT-1).
+test_materials_router.py (MAT-1) and test_bom_router.py (BOM-1).
 
 Four required regressions (per task.md §scope):
   1. Receipt path stages a MaterialMovement with reason='receipt' AND links

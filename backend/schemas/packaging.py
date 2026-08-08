@@ -1,11 +1,11 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from models.packaging import PackagingType
-from models.stock_movement import StockMovementReason
 
 
 class PackagingBoxBase(BaseModel):
@@ -21,8 +21,17 @@ class PackagingBoxBase(BaseModel):
 
 
 class PackagingBoxCreate(PackagingBoxBase):
-    initial_quantity: int = Field(0, ge=0)
-    low_stock_threshold: int = Field(5, ge=0)
+    # WH-2: `initial_quantity` is gone. It handed a box units with no price behind
+    # them; stock now arrives only through a material receipt, which carries cost.
+    # The threshold is stored on the paired material but still entered here, since
+    # the packaging page is the one surface where boxes are managed.
+    #
+    # extra="forbid" so a client still sending initial_quantity gets a loud 422
+    # instead of Pydantic's default silent drop — a stale form that appears to work
+    # while the box quietly stays at zero is the worse failure of the two.
+    model_config = ConfigDict(extra="forbid")
+
+    low_stock_threshold: Decimal = Field(Decimal(5), ge=0)
 
 
 class PackagingBoxUpdate(BaseModel):
@@ -35,7 +44,9 @@ class PackagingBoxUpdate(BaseModel):
     max_weight_g: Optional[int] = Field(None, gt=0)
     tare_weight_g: Optional[int] = Field(None, ge=0)
     sort_order: Optional[int] = None
-    low_stock_threshold: Optional[int] = Field(None, ge=0)
+    # Decimal, not int: the target column is materials.low_stock_threshold,
+    # Numeric(12,2). An int here would silently truncate a fractional threshold.
+    low_stock_threshold: Optional[Decimal] = Field(None, ge=0)
 
 
 class PackagingBoxRead(PackagingBoxBase):
@@ -48,8 +59,20 @@ class PackagingBoxRead(PackagingBoxBase):
     # OrderResponse.packaging, onto every order route), which the money-field guard
     # in tests/test_money_field_completeness.py exists to catch.
     material_id: uuid.UUID
-    stock_quantity: int
-    low_stock_threshold: int
+    # WH-2: read through PackagingBox's properties off the paired material, which is
+    # where these counters now live. Decimal because materials.stock_quantity is
+    # Numeric(12,2) — the JSON goes from `15` to `"15.00"`, and the frontend type
+    # mirrors Material's string-typed counters accordingly.
+    #
+    # Both names are classified "neutral" in tests/test_money_field_completeness.py,
+    # which is what keeps this un-cost-gated router (and ParcelEstimate, which nests
+    # this model) out of the money-surface table. Never add a cost-named field here.
+    stock_quantity: Decimal
+    low_stock_threshold: Decimal
+    # Surfaced so the packaging page can flag an archived box; the picker and the
+    # parcel calculator filter on it server-side. Precedent for the flattened
+    # material_* shape: BomItemRead.material_is_stock_tracked.
+    material_is_active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -66,19 +89,7 @@ class PackagingBoxSummary(BaseModel):
     tare_weight_g: int
 
 
-class RestockRequest(BaseModel):
-    quantity: int = Field(..., ge=1)
-    note: Optional[str] = Field(None, max_length=500)
-
-
-class StockMovementRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    box_id: uuid.UUID
-    order_id: Optional[uuid.UUID]
-    delta: int
-    reason: StockMovementReason
-    note: Optional[str]
-    user_id: uuid.UUID
-    created_at: datetime
+# WH-2 removed `RestockRequest` (the quantity-only restock endpoint it fed is gone —
+# replenishment is a material receipt now, so it carries a price) and
+# `StockMovementRead` (the packaging ledger is frozen; it had no route and no reader
+# even before that).

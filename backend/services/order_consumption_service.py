@@ -22,6 +22,21 @@ The single entry point — consume_materials_for_order — is responsible for:
      path, and there is no snapshot to protect.
   2. Iterating OrderItems, walking variant → product → BomItem rows, computing
      actual_consumed = qty_per_unit * order_item.quantity * (1 + waste_percent/100).
+
+     WH-2 adds the parcel's box to the same fold: order.packaging_id, falling back
+     to computed_packaging_box_id (the calculator's suggestion) with a warning.
+     Both NULL is legal and silent — pickup and manual shipping are real. One unit
+     per parcel, never per product: three items ship in one box, which is why a BOM
+     is structurally the wrong home for it (design §2.4) and why bom_service's
+     per-product preview cannot see it (see tests/test_bom_waste_parity.py).
+
+     The box is resolved BEFORE the first movement is staged. Every read in this
+     service precedes every write, which is what keeps the BOM fold autoflush-free.
+
+     A box whose cost cannot be booked is still consumed. When no product in the
+     order has a BOM the snapshot stays NULL rather than becoming a box-only
+     number — see the comment on the bom_equipped == 0 branch for why that would
+     corrupt five COGS aggregates and the partner PROFIT base.
   3. Calling material_stock_service.apply_movement for each BomItem (which both
      stages the MaterialMovement row AND mutates Material.stock_quantity in
      the caller's session — no commit here) — UNLESS the material is
@@ -50,6 +65,13 @@ rate, and means this path issues no new queries.
 Transactional integrity: does NOT commit. The caller (routers/orders.py or
 routers/shipping.py via change_order_status) owns the commit. If anything in
 the loop raises, the whole transition rolls back.
+
+NO REVERSAL. Moving an order back out of SHIPPED does not un-consume anything —
+not BOM materials (MAT-4 rule #10) and, as of WH-2, not the box either. Deleting a
+TTN reverts SHIPPED → IN_PRODUCTION and re-shipping is blocked from double-charging
+by the idempotency guard above, so the physical truth ("this parcel was packed
+once") survives label churn. A miscount is corrected by an ADJUSTMENT, never by an
+automatic give-back.
 """
 
 from __future__ import annotations
@@ -65,6 +87,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models.bom import BomItem
 from models.material import Material, MaterialMovement, MaterialMovementReason
 from models.order import Order, OrderItem
+from models.packaging import PackagingBox
 from services import material_stock_service
 from services.fx_service import FxRates, normalize_currency
 
@@ -76,6 +99,11 @@ class ConsumptionResult:
     partial_bom_coverage: bool = False
     negative_stock_materials: list[str] = field(default_factory=list)
     idempotent_skip: bool = False
+    # WH-2: the parcel's box. `packaging_consumed` is True once the box material has
+    # been priced into the buckets, whether or not it moved stock (an untracked box
+    # material contributes cost only, exactly like an untracked BOM line).
+    packaging_consumed: bool = False
+    packaging_fallback_used: bool = False
     # FX-CONVERSION provenance, mirrored onto the Order by the caller. All None
     # when nothing was booked or no conversion was needed — see models/order.py
     # for the NULL decode rules.
@@ -130,8 +158,39 @@ async def consume_materials_for_order(
         .options(selectinload(OrderItem.variant))
     )
     items = list(items_q.scalars())
-    if not items:
-        return ConsumptionResult()
+    # WH-2: no early return on an empty item list. The loop below is a no-op for it
+    # (bom_equipped stays 0, `partial` stays False, the result is byte-identical to
+    # the ConsumptionResult() this used to return), but an item-less order can still
+    # have a box, and the box ships either way.
+
+    # 4. WH-2: resolve the parcel's box BEFORE anything is staged, so every read in
+    #    this service still happens before its first write. BomItem.material is
+    #    lazy="joined", which is why the BOM loop emits no SQL once it starts adding
+    #    rows; a lookup placed after it would autoflush half the ledger mid-fold on
+    #    the fallback path (computed_packaging_box_id has nothing pre-loading it).
+    #
+    #    Neither branch below may raise. routers/shipping.py catches bare Exception
+    #    and rolls back — but only AFTER Nova Poshta has already minted the label,
+    #    so a raise here loses a TTN that physically exists. Every failure degrades
+    #    to a warning.
+    box_material: Material | None = None
+    packaging_warnings: list[str] = []
+    box_id = order.packaging_id or order.computed_packaging_box_id
+    packaging_fallback_used = box_id is not None and order.packaging_id is None
+    if box_id is not None:
+        box = await db.get(PackagingBox, box_id)
+        if box is None:
+            packaging_warnings.append(
+                "⚠ The packaging box recorded on this order no longer exists; "
+                "no packaging was consumed."
+            )
+        else:
+            box_material = await db.get(Material, box.material_id)
+            if box_material is None:
+                packaging_warnings.append(
+                    f"⚠ Packaging «{box.name}» has no material behind it; "
+                    f"no packaging was consumed."
+                )
 
     # Per-material-currency buckets, accumulated UN-ROUNDED. Before FX this was a
     # single running total that summed across currencies blindly — harmless only
@@ -205,6 +264,61 @@ async def consume_materials_for_order(
                 + actual * unit_cost_snapshot
             )
 
+    # WH-2: the box — exactly one per parcel, priced and staged like a BOM line.
+    # Deliberately NOT a BomItem: a box is one per SHIPMENT, not one per product, so
+    # an order of three items still ships in a single box (design §2.4). This is why
+    # bom_service's per-product preview structurally cannot see it.
+    packaging_consumed = False
+    if box_material is not None:
+        box_currency = normalize_currency(box_material.currency)
+        if not fx.can_convert(frm=box_currency, to=order_currency):
+            if box_currency not in unconvertible_currencies:
+                unconvertible_currencies.append(box_currency)
+
+        # NOT NULL in the DB, so this is only ever None on an unflushed in-memory
+        # Material — the WH-1 `is not False` trap in another costume. apply_movement
+        # answers 422 for a None cost on a consumption row, and this block may not
+        # raise, so the fallback is explicit. A box with no receipts yet legitimately
+        # contributes 0.
+        box_unit_cost = box_material.current_unit_cost
+        if box_unit_cost is None:
+            box_unit_cost = Decimal("0")
+
+        if box_material.is_stock_tracked is not False:
+            await material_stock_service.apply_movement(
+                db,
+                material_id=box_material.id,
+                delta=Decimal("-1"),
+                reason=MaterialMovementReason.CONSUMPTION,
+                user_id=user_id,
+                order_id=order.id,
+                unit_cost_at_movement=box_unit_cost,
+            )
+            if (
+                box_material.stock_quantity < 0
+                and box_material.name not in negative_stock
+            ):
+                negative_stock.append(box_material.name)
+
+        # Joins the SAME buckets as the BOM lines: one shared all-or-nothing FX rule,
+        # one final rounding. Outside the is_stock_tracked branch, so an untracked box
+        # material prices in without moving stock, exactly like a service line.
+        totals_by_currency[box_currency] = (
+            totals_by_currency.get(box_currency, Decimal("0")) + box_unit_cost
+        )
+        packaging_consumed = True
+
+        if packaging_fallback_used:
+            packaging_warnings.append(
+                f"ⓘ No packaging was set on this order; consumed "
+                f"«{box_material.name}» from the parcel calculator's suggestion."
+            )
+        if not box_material.is_active:
+            packaging_warnings.append(
+                f"⚠ Packaging «{box_material.name}» is archived but was still "
+                f"consumed — the parcel physically shipped."
+            )
+
     warnings: list[str] = []
     total_items = len(items)
     fx_rate_used: Decimal | None = None
@@ -227,7 +341,23 @@ async def consume_materials_for_order(
         )
         computed_cost: Decimal | None = None
     elif bom_equipped == 0:
+        # WH-2 decision (Sergii, 2026-08-08): a box-only cost is NOT booked.
+        # computed_production_cost is read through a ROW-WISE
+        # COALESCE(computed, manual, 0) in five aggregates — finance_service KPI
+        # cogs, _run_product_only_aggregate (the PROFIT partner base),
+        # compute_base_quality, and the dashboard — where a non-NULL computed value
+        # wins outright. Booking a 15 UAH box would therefore REPLACE a 500 UAH
+        # hand-entered production_cost everywhere, overstate net profit and the
+        # partner base (settlements are immutable once written), and make
+        # compute_base_quality's missing-COGS warning go silent on exactly the
+        # orders it was written to catch. The box is still consumed; only its
+        # costing waits for the products to get a BOM.
         computed_cost = None
+        if packaging_consumed:
+            packaging_warnings.append(
+                "ⓘ Packaging was consumed but not costed: no product in this "
+                "order has a BOM, so there is no production cost to add it to."
+            )
     else:
         # Convert each bucket un-rounded, sum, and quantize exactly ONCE. Rounding
         # per bucket would diverge from bom_service's preview, which folds the
@@ -260,6 +390,8 @@ async def consume_materials_for_order(
             f"BOM defined."
         )
 
+    warnings.extend(packaging_warnings)
+
     for name in negative_stock:
         warnings.append(
             f"⚠ Stock for «{name}» went negative. Time to restock."
@@ -270,6 +402,8 @@ async def consume_materials_for_order(
         warnings=warnings,
         partial_bom_coverage=partial,
         negative_stock_materials=negative_stock,
+        packaging_consumed=packaging_consumed,
+        packaging_fallback_used=packaging_fallback_used,
         fx_rate_used=fx_rate_used,
         basis_amount=basis_amount,
         basis_currency=basis_currency,

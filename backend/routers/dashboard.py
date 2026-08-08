@@ -8,8 +8,7 @@ from database import get_db
 from models.user import Capability, User, UserRole
 from models.order import Order, OrderRefund, OrderStatus
 from models.shop import Shop
-from models.material import OverheadMaterialReceipt
-from models.packaging import PackagingBox
+from models.material import Material, OverheadMaterialReceipt
 from schemas.dashboard import DashboardResponse, DashboardStats, RevenueByCurrency, DailyRevenue, ShopOrderCount
 from schemas.finance import CurrencyAmount
 from routers.dependencies import get_current_user, require_role
@@ -233,10 +232,22 @@ async def get_dashboard_stats(
     shop_result = await db.execute(shop_query)
     orders_by_shop = [ShopOrderCount(shop_name=name, order_count=count) for name, count in shop_result.all()]
 
-    # PKG-2: count of packaging boxes at or below their low-stock threshold.
+    # Count of packaging at or below its low-stock threshold. Same question as
+    # PKG-2 asked, new home for the numbers: WH-2 moved both counters off
+    # packaging_boxes onto the paired materials, so this now reads the materials
+    # table filtered to category='PACKAGING'.
+    #
+    # Two conditions the box-based query had no way to express, and which the
+    # response field name deliberately keeps quiet about:
+    #  - is_active — an archived box is out of the catalogue and must not nag.
+    #  - is_stock_tracked — an untracked material's counter never moves, so
+    #    comparing it against a threshold would pin the card on permanently.
     low_stock_count = await db.scalar(
-        select(func.count(PackagingBox.id)).where(
-            PackagingBox.stock_quantity <= PackagingBox.low_stock_threshold
+        select(func.count(Material.id)).where(
+            Material.category == "PACKAGING",
+            Material.is_active.is_(True),
+            Material.is_stock_tracked.is_(True),
+            Material.stock_quantity <= Material.low_stock_threshold,
         )
     )
 

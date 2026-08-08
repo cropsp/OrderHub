@@ -8,6 +8,7 @@ up/down/up round trip, not here.
 """
 
 import uuid
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -34,7 +35,13 @@ def _make_db(*, box: PackagingBox | None = None, material: Material | None = Non
     async def fake_execute(stmt):
         executed.append(stmt)
         r = MagicMock()
-        r.scalar_one_or_none = MagicMock(return_value=box)
+        # WH-2: create/update end with a re-fetch (the row has to come back with its
+        # material loaded, which db.refresh cannot do). With no explicit `box`, hand
+        # back whatever was just staged, the way the real SELECT would.
+        staged = next((o for o in reversed(adds) if isinstance(o, PackagingBox)), None)
+        r.scalar_one_or_none = MagicMock(
+            return_value=box if box is not None else staged
+        )
         return r
 
     async def fake_flush():
@@ -99,26 +106,56 @@ async def test_create_packaging_box_commits_once():
 
 
 @pytest.mark.asyncio
-async def test_create_packaging_box_pairs_without_a_user_id():
-    """The CSV-confirm path calls this with user_id=None. Materials carry no
-    author, so pairing must not have introduced a new requirement there."""
+async def test_create_packaging_box_takes_no_author():
+    """WH-1 kept a user_id parameter alive for the initial_stock ledger row. WH-2
+    deleted that row's only producer, so the parameter went with it — nothing in a
+    paired create is authored, and the CSV-confirm path (which has no user) is
+    exactly as valid as the interactive one."""
+    import inspect
+
+    params = inspect.signature(CatalogService.create_packaging_box).parameters
+    assert "user_id" not in params
+
     db, adds, _ = _make_db()
-
-    await CatalogService(db).create_packaging_box(_create_schema(), user_id=None)
-
+    await CatalogService(db).create_packaging_box(_create_schema())
     assert any(isinstance(o, Material) for o in adds)
 
 
 @pytest.mark.asyncio
-async def test_initial_quantity_still_requires_a_user_id():
-    """Pre-existing guard (the initial_stock ledger row needs an author) — the
-    paired create must not have swallowed it."""
-    db, _adds, _ = _make_db()
+async def test_create_writes_the_threshold_onto_the_material():
+    """WH-2: the box row has no low_stock_threshold column any more. The packaging
+    form still collects it — it is the surface where boxes are managed — and it has
+    to land on the material or the dashboard card silently reads a default of 0."""
+    db, adds, _ = _make_db()
 
-    with pytest.raises(ValueError, match="user_id is required"):
-        await CatalogService(db).create_packaging_box(
-            _create_schema(initial_quantity=5), user_id=None
-        )
+    await CatalogService(db).create_packaging_box(
+        _create_schema(low_stock_threshold=12)
+    )
+
+    material = next(o for o in adds if isinstance(o, Material))
+    assert material.low_stock_threshold == 12
+    box = next(o for o in adds if isinstance(o, PackagingBox))
+    assert not hasattr(type(box), "__table__") or (
+        "low_stock_threshold" not in type(box).__table__.columns
+    ), "the counter must not have a second home on the box row"
+
+
+@pytest.mark.asyncio
+async def test_threshold_update_is_routed_to_the_material():
+    material = Material(
+        name="box", unit="шт", currency="UAH", category="PACKAGING",
+        low_stock_threshold=Decimal("5"),
+    )
+    material.id = uuid.uuid4()
+    box = PackagingBox(name="box", material_id=material.id)
+    box.id = uuid.uuid4()
+    db, _adds, _ = _make_db(box=box, material=material)
+
+    await CatalogService(db).update_packaging_box(
+        box.id, PackagingBoxUpdate(low_stock_threshold=Decimal("20"))
+    )
+
+    assert material.low_stock_threshold == Decimal("20")
 
 
 @pytest.mark.asyncio
@@ -154,9 +191,11 @@ async def test_update_without_a_name_never_loads_the_material():
 
 
 @pytest.mark.asyncio
-async def test_delete_archives_the_material_rather_than_orphaning_it():
-    """Hard-deleting the material would cascade its receipts and movements away,
-    and the FK is RESTRICT. Archiving keeps the purchase history readable."""
+async def test_archive_deactivates_the_material_and_keeps_the_geometry_row():
+    """WH-2 finishes WH-1's half-measure. The geometry row used to be hard-deleted,
+    which CASCADE-ed packaging_stock_movements — the very rows WH-2 freezes as
+    read-only history — and left the material pointing at nothing. Now nothing is
+    destroyed: the box simply stops being active."""
     material = Material(
         name="100x120x50", unit="шт", currency="UAH", category="PACKAGING",
         is_active=True,
@@ -166,20 +205,20 @@ async def test_delete_archives_the_material_rather_than_orphaning_it():
     box.id = uuid.uuid4()
     db, _adds, executed = _make_db(box=box, material=material)
 
-    await CatalogService(db).delete_packaging_box(box.id)
+    await CatalogService(db).archive_packaging_box(box.id)
 
     assert material.is_active is False
-    # One SELECT for the box, one DELETE for the geometry row.
-    assert any("DELETE" in str(stmt).upper() for stmt in executed)
+    assert not any("DELETE" in str(stmt).upper() for stmt in executed), (
+        "the geometry row and its frozen ledger must survive"
+    )
     assert db.commit.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_delete_of_a_missing_box_is_a_no_op():
-    """Preserves today's silent 204 on an unknown id — no DELETE, no commit."""
+async def test_archive_of_a_missing_box_is_a_no_op():
+    """Preserves today's silent 204 on an unknown id — no write, no commit."""
     db, _adds, executed = _make_db(box=None)
 
-    await CatalogService(db).delete_packaging_box(uuid.uuid4())
+    await CatalogService(db).archive_packaging_box(uuid.uuid4())
 
-    assert not any("DELETE" in str(stmt).upper() for stmt in executed)
     assert db.commit.await_count == 0

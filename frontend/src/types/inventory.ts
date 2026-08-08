@@ -1,11 +1,9 @@
 export type PackagingType = 'BOX' | 'ENVELOPE';
 
-export type StockMovementReason =
-  | 'initial_stock'
-  | 'restock'
-  | 'ttn_create'
-  | 'ttn_delete'
-  | 'adjustment';
+// WH-2 removed `StockMovementReason` (the packaging ledger it described is frozen
+// and was never rendered) and `RestockRequest` (its endpoint is gone — packaging is
+// replenished with a material receipt, which carries a price). Box movements are
+// read from the paired material's ledger: MaterialMovement, below.
 
 export interface PackagingBox {
   id: string;
@@ -21,8 +19,15 @@ export interface PackagingBox {
   max_weight_g: number;
   tare_weight_g: number;
   sort_order: number;
-  stock_quantity: number;
-  low_stock_threshold: number;
+  // WH-2: these counters live on the paired material now, and are served as
+  // Decimals — hence `string`, matching Material below rather than the numbers
+  // they used to be. ALWAYS wrap in Number() before comparing: `"10" <= "5"` is
+  // true, which would light up the low-stock badge on every two-digit box.
+  stock_quantity: string;
+  low_stock_threshold: string;
+  // False once the box has been archived. Archived boxes are excluded from the
+  // list and the parcel calculator unless explicitly requested.
+  material_is_active: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -37,7 +42,10 @@ export interface PackagingBoxCreate {
   max_weight_g: number;
   tare_weight_g?: number;
   sort_order?: number;
-  initial_quantity?: number;
+  // WH-2: no `initial_quantity`. A new box starts empty and gains stock only
+  // through a material receipt. The backend forbids unknown fields on this
+  // payload, so a stale client sending it gets a 422 rather than a box that
+  // silently stays at zero.
   low_stock_threshold?: number;
 }
 
@@ -52,22 +60,6 @@ export interface PackagingBoxUpdate {
   tare_weight_g?: number;
   sort_order?: number;
   low_stock_threshold?: number;
-}
-
-export interface RestockRequest {
-  quantity: number;
-  note?: string | null;
-}
-
-export interface StockMovement {
-  id: string;
-  box_id: string;
-  order_id: string | null;
-  delta: number;
-  reason: StockMovementReason;
-  note: string | null;
-  user_id: string;
-  created_at: string;
 }
 
 export interface ProductVariant {

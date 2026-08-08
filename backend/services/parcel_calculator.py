@@ -2,6 +2,8 @@ import math
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import contains_eager
+from models.material import Material
 from models.order import Order, OrderItem
 from models.packaging import PackagingBox, PackagingType
 from schemas.parcel import ParcelEstimate
@@ -42,7 +44,23 @@ async def calculate_parcel_estimate(db: AsyncSession, order_id: str) -> ParcelEs
         warnings.append(f"{unlinked_items_count} item(s) have no dimensions linked — calculation is partial")
 
     # 3. Fetch packaging (shared inventory — no shop filter)
-    stmt_pkg = select(PackagingBox)
+    #
+    # WH-2: archived boxes are excluded, and the paired Material is loaded in the
+    # same statement. Both come from the same join: the estimate returns a full
+    # PackagingBoxRead, whose stock counters are properties over that material, so
+    # a box fetched without it cannot be serialized. contains_eager reuses the join
+    # the filter already needs — deliberately ONE round trip, because the callers'
+    # test harness pins db.execute to exactly two results.
+    #
+    # Stock is NOT a filter (design §10.5): the calculator answers "what fits", not
+    # "what is on the shelf". Hiding an out-of-stock box would leave the operator
+    # with no suggestion and no explanation; the Logistics panel warns instead.
+    stmt_pkg = (
+        select(PackagingBox)
+        .join(PackagingBox.material)
+        .options(contains_eager(PackagingBox.material))
+        .where(Material.is_active.is_(True))
+    )
     res_pkg = await db.execute(stmt_pkg)
     all_packaging = res_pkg.scalars().all()
 
