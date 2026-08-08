@@ -2,7 +2,7 @@
 
 Validates services.order_consumption_service.consume_materials_for_order via
 mocked AsyncSession + MagicMock objects. No real DB. Mirrors the pattern in
-test_material_receipts.py (MAT-2) and test_stock_service.py (PKG-2).
+test_material_receipts.py (MAT-2) and test_materials_router.py (MAT-1).
 
 Guards:
   1. Idempotency — existing consumption row → no-op, no apply_movement calls.
@@ -21,6 +21,11 @@ Guards:
   8. WH-1 second idempotency probe — an already-booked computed_production_cost
      blocks a re-ship from re-pricing a frozen snapshot when no ledger row exists
      to block it (all-untracked recipes).
+  9. WH-2 packaging — the parcel's box is consumed at SHIPPED and priced into the
+     same buckets; packaging_id wins over the calculator's suggestion and the
+     fallback announces itself; both ids NULL is silent; an archived box still
+     consumes; is_stock_tracked is honoured; a box-only order consumes without
+     booking a cost; nothing in the block may raise.
 
 The mock session dispatches on the ENTITY BEING QUERIED, not on call order. It
 used to key off a call counter with the comment "we rely on call order matching
@@ -39,6 +44,7 @@ import pytest
 from models.bom import BomItem
 from models.material import Material, MaterialMovement, MaterialMovementReason
 from models.order import OrderItem
+from models.packaging import PackagingBox
 from services.fx_service import FxRates
 from services.order_consumption_service import (
     ConsumptionResult,
@@ -99,6 +105,41 @@ def _make_item(*, variant, quantity: int = 1):
     return item
 
 
+def _make_box(
+    *,
+    name: str = "Коробка 100×120×50",
+    unit_cost: Decimal = Decimal("12"),
+    stock: Decimal = Decimal("40"),
+    currency: str = "UAH",
+    is_stock_tracked: bool | None = True,
+    is_active: bool = True,
+):
+    """A packaging box and its paired Material (WH-1 pairing, WH-2 consumption).
+
+    The Material is real so apply_movement can mutate its counter; the box itself is
+    a MagicMock because only `id`, `name` and `material_id` are ever read.
+    """
+    material = Material(
+        name=name,
+        unit="шт",
+        currency=currency,
+        current_unit_cost=unit_cost,
+        stock_quantity=stock,
+        low_stock_threshold=Decimal("0"),
+        waste_percent=Decimal("0"),
+        is_active=is_active,
+        category="PACKAGING",
+        is_stock_tracked=is_stock_tracked,
+    )
+    material.id = uuid.uuid4()
+    box = MagicMock()
+    box.id = uuid.uuid4()
+    box.name = name
+    box.material_id = material.id
+    box.material = material
+    return box
+
+
 def _make_bom_item(*, material: Material, qty_per_unit: Decimal):
     bom = MagicMock()
     bom.qty_per_unit = qty_per_unit
@@ -122,7 +163,7 @@ def _bound_uuid(stmt):
     return None
 
 
-def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
+def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict, box=None):
     """Mock AsyncSession, dispatching on the queried entity.
 
     - select(MaterialMovement.id) — idempotency probe; .scalar() yields a UUID
@@ -131,15 +172,26 @@ def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
     - select(BomItem)            — BOM rows for the product_id in the WHERE
                                    clause, looked up in `bom_lookup`.
     - db.get(Material, ...)      — the Material row apply_movement loads.
+    - db.get(PackagingBox, ...)  — WH-2 box resolution; `box` is registered under
+                                   its own id and its material under Material, so
+                                   an id that matches neither returns None (the
+                                   deleted-box path).
 
     Anything else raises. Dispatching on identity rather than call order is what
-    keeps this harness honest when the service gains or loses a query.
+    keeps this harness honest when the service gains or loses a query. WH-2's box
+    lookup deliberately uses db.get for exactly this reason: it lands on fake_get
+    instead of tripping the AssertionError below.
     """
     captured_adds: list = []
     materials_by_id = {}
     for boms in bom_lookup.values():
         for bom in boms:
             materials_by_id[bom.material.id] = bom.material
+    boxes_by_id = {}
+    if box is not None:
+        boxes_by_id[box.id] = box
+        if box.material is not None:
+            materials_by_id[box.material.id] = box.material
 
     def make_result(scalar_value=None, scalars_iter=None):
         result = MagicMock()
@@ -169,6 +221,8 @@ def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
     async def fake_get(model_cls, ident):
         if model_cls is Material:
             return materials_by_id.get(ident)
+        if model_cls is PackagingBox:
+            return boxes_by_id.get(ident)
         return None
 
     db = MagicMock()
@@ -179,7 +233,13 @@ def _make_db(*, idempotent_hit: bool, items: list, bom_lookup: dict):
     return db, captured_adds
 
 
-def _make_order(currency: str = "UAH", computed_production_cost=None):
+def _make_order(
+    currency: str = "UAH",
+    computed_production_cost=None,
+    *,
+    packaging_id: uuid.UUID | None = None,
+    computed_packaging_box_id: uuid.UUID | None = None,
+):
     order = MagicMock()
     order.id = uuid.uuid4()
     order.currency = currency
@@ -187,6 +247,10 @@ def _make_order(currency: str = "UAH", computed_production_cost=None):
     # bare MagicMock attribute is truthy, which would silently turn every test in
     # this module into an idempotent skip.
     order.computed_production_cost = computed_production_cost
+    # WH-2: same reason. Both default to None so the BOM-only tests never resolve a
+    # box; the packaging tests pass one in explicitly.
+    order.packaging_id = packaging_id
+    order.computed_packaging_box_id = computed_packaging_box_id
     return order
 
 
@@ -750,3 +814,310 @@ async def test_reship_after_an_fx_failure_still_recomputes():
 
     assert result.idempotent_skip is False
     assert result.computed_production_cost == Decimal("200.00")
+
+
+# ---------------------------------------------------------------------------
+# 9. WH-2 — the parcel's box
+# ---------------------------------------------------------------------------
+
+def _bom_order_parts(*, unit_cost: Decimal = Decimal("100")):
+    """One BOM-equipped item costing `unit_cost` per unit at qty_per_unit=1."""
+    material = _make_material(unit_cost=unit_cost, stock=Decimal("50"))
+    product_id = uuid.uuid4()
+    bom = _make_bom_item(material=material, qty_per_unit=Decimal("1.00"))
+    item = _make_item(variant=_make_variant(product_id), quantity=1)
+    return material, item, {product_id: [bom]}
+
+
+@pytest.mark.asyncio
+async def test_box_is_consumed_at_shipped_and_priced_into_the_snapshot():
+    """The core WH-2 invariant: one unit of the box material leaves stock and its
+    cost lands in computed_production_cost alongside the BOM lines."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(unit_cost=Decimal("12"), stock=Decimal("40"))
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.computed_production_cost == Decimal("112.00")  # 100 BOM + 12 box
+    assert result.packaging_consumed is True
+    assert result.packaging_fallback_used is False
+    assert box.material.stock_quantity == Decimal("39")
+
+    movements = _movements(adds)
+    assert len(movements) == 2
+    box_movement = next(m for m in movements if m.material_id == box.material.id)
+    assert box_movement.delta == Decimal("-1")
+    assert box_movement.reason == MaterialMovementReason.CONSUMPTION
+    assert box_movement.order_id == order.id
+    # The DB CHECK ck_material_movement_consumption_cost demands this, and
+    # apply_movement answers 422 without it.
+    assert box_movement.unit_cost_at_movement == Decimal("12")
+
+
+@pytest.mark.asyncio
+async def test_no_box_on_the_order_is_a_silent_no_op():
+    """Pickup and manual shipping are legal. Both ids NULL must not warn."""
+    material, item, bom_lookup = _bom_order_parts()
+
+    order = _make_order(currency="UAH")
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.packaging_consumed is False
+    assert result.computed_production_cost == Decimal("100.00")
+    assert result.warnings == []
+    assert len(_movements(adds)) == 1
+
+
+@pytest.mark.asyncio
+async def test_fallback_to_the_calculator_suggestion_warns():
+    """packaging_id NULL falls back to computed_packaging_box_id — the operator
+    never confirmed a box, so the consumption is announced (decision §10.4)."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(name="Конверт A5", unit_cost=Decimal("5"))
+
+    order = _make_order(currency="UAH", computed_packaging_box_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.packaging_fallback_used is True
+    assert result.packaging_consumed is True
+    assert result.computed_production_cost == Decimal("105.00")
+    assert any(
+        w.startswith("ⓘ") and "parcel calculator" in w for w in result.warnings
+    ), result.warnings
+    assert len(_movements(adds)) == 2
+
+
+@pytest.mark.asyncio
+async def test_operator_choice_wins_over_the_calculator_suggestion():
+    """packaging_id is the operator's decision; the suggestion is only a fallback."""
+    material, item, bom_lookup = _bom_order_parts()
+    chosen = _make_box(name="Обрана", unit_cost=Decimal("30"))
+
+    order = _make_order(
+        currency="UAH",
+        packaging_id=chosen.id,
+        computed_packaging_box_id=uuid.uuid4(),  # a different, ignored box
+    )
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=chosen
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.packaging_fallback_used is False
+    assert result.computed_production_cost == Decimal("130.00")
+
+
+@pytest.mark.asyncio
+async def test_archived_box_still_consumes_and_warns():
+    """The parcel physically shipped. Archiving is a catalogue decision, not a
+    reason to make the ledger lie — warn, never block."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(name="Стара коробка", unit_cost=Decimal("8"), is_active=False)
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.computed_production_cost == Decimal("108.00")
+    assert len(_movements(adds)) == 2
+    assert any("archived" in w and w.startswith("⚠") for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_untracked_box_material_prices_in_without_moving_stock():
+    """is_stock_tracked is honoured for boxes exactly as for service lines: the
+    cost lands, the counter does not move, no ledger row is written."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(unit_cost=Decimal("9"), stock=Decimal("3"), is_stock_tracked=False)
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.computed_production_cost == Decimal("109.00")
+    assert result.packaging_consumed is True
+    assert box.material.stock_quantity == Decimal("3"), "counter must not move"
+    assert len(_movements(adds)) == 1, "BOM line only — no ledger row for the box"
+
+
+@pytest.mark.asyncio
+async def test_box_only_order_consumes_but_books_no_cost():
+    """WH-2 decision: no BOM anywhere in the order → the snapshot stays NULL.
+
+    A box-only number would win the row-wise COALESCE in finance_service and the
+    PROFIT partner base and REPLACE any hand-entered production_cost. The box is
+    still consumed; the operator is told the cost was not booked."""
+    box = _make_box(unit_cost=Decimal("12"), stock=Decimal("40"))
+    item = _make_item(variant=_make_variant(uuid.uuid4()), quantity=1)
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={}, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.computed_production_cost is None
+    assert result.packaging_consumed is True
+    assert box.material.stock_quantity == Decimal("39"), "stock still moves"
+    assert len(_movements(adds)) == 1
+    assert any("not costed" in w for w in result.warnings), result.warnings
+
+
+@pytest.mark.asyncio
+async def test_item_less_order_still_consumes_its_box():
+    """The `if not items: return` early exit had to go: an order with no line items
+    can still be a parcel, and the box ships either way."""
+    box = _make_box(unit_cost=Decimal("12"), stock=Decimal("40"))
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(idempotent_hit=False, items=[], bom_lookup={}, box=box)
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.packaging_consumed is True
+    assert box.material.stock_quantity == Decimal("39")
+    assert result.computed_production_cost is None
+
+
+@pytest.mark.asyncio
+async def test_missing_box_degrades_to_a_warning():
+    """This block may not raise. routers/shipping.py catches bare Exception and
+    rolls back — but only after Nova Poshta already minted the label, so a raise
+    here would discard a TTN that physically exists."""
+    material, item, bom_lookup = _bom_order_parts()
+
+    order = _make_order(currency="UAH", packaging_id=uuid.uuid4())
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup  # no box registered
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.packaging_consumed is False
+    assert result.computed_production_cost == Decimal("100.00")
+    assert any("no longer exists" in w for w in result.warnings)
+    assert len(_movements(adds)) == 1
+
+
+@pytest.mark.asyncio
+async def test_box_with_no_receipts_yet_contributes_zero():
+    """current_unit_cost 0 is a legitimate state — a box catalogued but not yet
+    purchased. It must consume at 0, not skip and not raise."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(unit_cost=Decimal("0"), stock=Decimal("10"))
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.computed_production_cost == Decimal("100.00")
+    assert box.material.stock_quantity == Decimal("9")
+    box_movement = next(
+        m for m in _movements(adds) if m.material_id == box.material.id
+    )
+    assert box_movement.unit_cost_at_movement == Decimal("0")
+
+
+@pytest.mark.asyncio
+async def test_box_stock_going_negative_surfaces_the_material_name():
+    """Warn-and-allow, same as any material: blocking a parcel that physically
+    shipped would only make the data less true."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(name="Остання коробка", unit_cost=Decimal("7"), stock=Decimal("0"))
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert box.material.stock_quantity == Decimal("-1")
+    assert "Остання коробка" in result.negative_stock_materials
+    assert any("went negative" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_box_in_an_unconvertible_currency_voids_the_whole_rollup():
+    """The box joins the SAME buckets, so all-or-nothing FX covers it too: a box
+    with no rate to the order currency voids the cost but not the consumption."""
+    material, item, bom_lookup = _bom_order_parts()
+    box = _make_box(currency="EUR", unit_cost=Decimal("2"))
+
+    order = _make_order(currency="USD", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup=bom_lookup, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4(), fx=_fx())
+
+    assert result.computed_production_cost is None
+    assert any("no exchange rate" in w for w in result.warnings)
+    assert len(_movements(adds)) == 2, "stock stays honest when costing fails"
+
+
+@pytest.mark.asyncio
+async def test_reship_of_a_box_only_untracked_order_is_blocked_by_the_second_probe():
+    """The WH-1 rationale, extended to packaging: an untracked box material writes
+    no ledger row, so only the already-booked computed_production_cost stops a
+    SHIPPED → IN_PRODUCTION → SHIPPED cycle from re-pricing a frozen snapshot."""
+    box = _make_box(unit_cost=Decimal("12"), is_stock_tracked=False)
+    item = _make_item(variant=_make_variant(uuid.uuid4()), quantity=1)
+
+    order = _make_order(
+        currency="UAH",
+        computed_production_cost=Decimal("112.00"),
+        packaging_id=box.id,
+    )
+    db, adds = _make_db(
+        idempotent_hit=False, items=[item], bom_lookup={}, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.idempotent_skip is True
+    assert _movements(adds) == []
+
+
+@pytest.mark.asyncio
+async def test_reship_after_a_ttn_delete_does_not_double_consume():
+    """WH-2's headline behaviour change: TTN churn no longer moves stock, so the
+    only protection against ship → delete TTN → re-ship charging twice is the
+    consumption ledger probe. A box movement alone is enough to arm it."""
+    box = _make_box(unit_cost=Decimal("12"), stock=Decimal("40"))
+    item = _make_item(variant=_make_variant(uuid.uuid4()), quantity=1)
+
+    order = _make_order(currency="UAH", packaging_id=box.id)
+    db, adds = _make_db(
+        idempotent_hit=True, items=[item], bom_lookup={}, box=box
+    )
+
+    result = await consume_materials_for_order(db, order, uuid.uuid4())
+
+    assert result.idempotent_skip is True
+    assert _movements(adds) == []
+    assert box.material.stock_quantity == Decimal("40"), "counter untouched"

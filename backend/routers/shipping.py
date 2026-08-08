@@ -18,11 +18,9 @@ from database import get_db
 from models.attachment import Attachment, AttachmentType
 from models.order import Order, OrderStatus
 from models.shop import Shop
-from models.stock_movement import StockMovementReason
 from models.user import User, UserRole
 from models.wb_parcel import WbParcel
 from routers.dependencies import assert_order_access, require_role
-from services import stock_service
 from services.file_storage import save_order_bytes
 from services.order_service import get_order_detail, change_order_status
 from services.nova_poshta import NovaPoshtaClient, NovaPoshtaAPIError
@@ -283,30 +281,19 @@ async def create_np_ttn(
         # Update order with TTN
         order.ttn_number = ttn_data.get("IntDocNumber")
 
-        material_warnings: List[str] = []
+        # WH-2: creating a label moves NO stock. The packaging decrement used to
+        # live here; it now rides the SHIPPED transition below, together with the
+        # BOM materials and under the same idempotency guard. Void-and-relabel is
+        # routine ops (and orders get cancelled after a label exists), so the label
+        # is the weakest trigger available — shipping is the honest event
+        # (design §1.2). Consumption warnings, packaging included, come back from
+        # change_order_status.
+        warnings: List[str] = []
         if order.status == OrderStatus.IN_PRODUCTION:
-            # MAT-4: change_order_status fires the consumption hook on SHIPPED;
-            # warnings propagate up so they ride the same toast surface as the
-            # packaging warnings below.
-            _, material_warnings = await change_order_status(
+            _, warnings = await change_order_status(
                 db, order, OrderStatus.SHIPPED, current_user,
                 f"TTN created: {order.ttn_number}",
             )
-
-        # PKG-2: decrement packaging stock in the same transaction as the TTN write.
-        # Guarded — no movement is recorded when the operator skipped packaging.
-        packaging_warnings: List[str] = []
-        if order.packaging_id is not None:
-            packaging_warnings = await stock_service.apply_movement(
-                db,
-                box_id=order.packaging_id,
-                delta=-1,
-                reason=StockMovementReason.TTN_CREATE,
-                order_id=order.id,
-                user_id=current_user.id,
-            )
-
-        warnings = packaging_warnings + material_warnings
 
         await db.commit()
         await db.refresh(order)
@@ -374,19 +361,13 @@ async def delete_np_ttn(
         )
         await change_order_status(db, order, OrderStatus.IN_PRODUCTION, current_user, comment)
 
-        # PKG-2: refund packaging stock in the same transaction as the TTN clear.
-        # Fires on both real and soft success — semantically "no TTN exists for
-        # this order anymore", per task.md rule #4.
-        if order.packaging_id is not None:
-            await stock_service.apply_movement(
-                db,
-                box_id=order.packaging_id,
-                delta=+1,
-                reason=StockMovementReason.TTN_DELETE,
-                order_id=order.id,
-                user_id=current_user.id,
-            )
-
+        # WH-2: deleting a label moves NO stock either. The +1 packaging refund that
+        # used to sit here was the mirror of a decrement that no longer happens; with
+        # consumption anchored to SHIPPED, giving stock back on label churn would
+        # credit a box that was never taken. The parcel was packed once, and stays
+        # packed once — re-shipping is stopped from double-charging by the
+        # consumption ledger probe, not by a give-back. A genuine miscount is fixed
+        # with an ADJUSTMENT.
         await db.commit()
         await db.refresh(order)
 

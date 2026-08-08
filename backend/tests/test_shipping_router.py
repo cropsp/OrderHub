@@ -312,8 +312,7 @@ async def test_create_ttn_happy_path_with_cached_sender_refs():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status, \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status:
         result = await create_np_ttn(
             order_id=order.id,
             body=_ttn_body(),
@@ -323,8 +322,6 @@ async def test_create_ttn_happy_path_with_cached_sender_refs():
 
     assert result == {"status": "success", "ttn": "20450123456789", "warnings": []}
     assert order.ttn_number == "20450123456789"
-    # No packaging picked → no ledger row.
-    mock_stock.assert_not_called()
 
     # Cached refs path → no calls to get sender info, but recipient lookup runs.
     fake_client.get_counterparties.assert_awaited_once()
@@ -392,8 +389,7 @@ async def test_delete_ttn_happy_path():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status, \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status:
         result = await delete_np_ttn(
             order_id=order.id,
             current_user=_make_user(),
@@ -408,28 +404,31 @@ async def test_delete_ttn_happy_path():
     mock_status.assert_awaited_once()
     status_args = mock_status.await_args.args
     assert status_args[2] == OrderStatus.IN_PRODUCTION
-    # No packaging picked → no ledger refund.
-    mock_stock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# PKG-2: stock-movement hooks on TTN create/delete
+# WH-2: the TTN no longer touches stock at all
+#
+# PKG-2 used to decrement packaging here on create and refund it on delete. Both
+# calls are gone: consumption is anchored to the SHIPPED transition, which the
+# create path triggers through change_order_status and the delete path reverses
+# WITHOUT giving anything back. These tests are the regression guard against
+# someone re-introducing a second stock trigger on label churn.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_create_ttn_decrements_stock_when_packaging_selected():
-    """PKG-2: when order.packaging_id is set, apply_movement(delta=-1, TTN_CREATE) runs."""
-    from models.stock_movement import StockMovementReason
-
-    box_id = uuid.uuid4()
+async def test_create_ttn_moves_no_stock_itself():
+    """Creating a label writes no ledger row of its own. The only stock effect is
+    whatever the SHIPPED transition books, and it arrives through the status hook."""
     shop = _make_shop(sender_ref="sender-ref-1", contact_ref="sender-contact-1")
-    order = _make_order(shop=shop, packaging_id=box_id)
+    order = _make_order(shop=shop, packaging_id=uuid.uuid4())
     user = _make_user()
 
     db = MagicMock()
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
     db.rollback = AsyncMock()
+    db.add = MagicMock()
 
     fake_client = MagicMock()
     fake_client.get_counterparties = AsyncMock(return_value=[{"Ref": "rec-ref-1"}])
@@ -442,8 +441,7 @@ async def test_create_ttn_decrements_stock_when_packaging_selected():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status:
         result = await create_np_ttn(
             order_id=order.id,
             body=_ttn_body(),
@@ -452,18 +450,16 @@ async def test_create_ttn_decrements_stock_when_packaging_selected():
         )
 
     assert result == {"status": "success", "ttn": "20450123456789", "warnings": []}
-    mock_stock.assert_awaited_once()
-    kwargs = mock_stock.await_args.kwargs
-    assert kwargs["box_id"] == box_id
-    assert kwargs["delta"] == -1
-    assert kwargs["reason"] == StockMovementReason.TTN_CREATE
-    assert kwargs["order_id"] == order.id
-    assert kwargs["user_id"] == user.id
+    db.add.assert_not_called(), "the router itself stages no ledger row"
+    # The one and only stock path: SHIPPED.
+    mock_status.assert_awaited_once()
+    assert mock_status.await_args.args[2] == OrderStatus.SHIPPED
 
 
 @pytest.mark.asyncio
-async def test_create_ttn_returns_warnings_from_stock_service():
-    """PKG-2 Q4: negative-stock warning from apply_movement reaches the response."""
+async def test_create_ttn_forwards_consumption_warnings():
+    """Warnings now come from the consumption hook alone — packaging warnings
+    included, since the box is consumed inside that same transition."""
     shop = _make_shop(sender_ref="sender-ref-1", contact_ref="sender-contact-1")
     order = _make_order(shop=shop, packaging_id=uuid.uuid4())
 
@@ -480,12 +476,14 @@ async def test_create_ttn_returns_warnings_from_stock_service():
         "Ref": "ttn-ref-1",
     })
 
-    warning_msg = "Stock for «Box M» is now -1. Time to restock."
+    warning_msg = "⚠ Stock for «Коробка 100×120×50» went negative. Time to restock."
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[warning_msg])):
+         patch(
+             "routers.shipping.change_order_status",
+             AsyncMock(return_value=(MagicMock(), [warning_msg])),
+         ):
         result = await create_np_ttn(
             order_id=order.id,
             body=_ttn_body(),
@@ -497,12 +495,12 @@ async def test_create_ttn_returns_warnings_from_stock_service():
 
 
 @pytest.mark.asyncio
-async def test_delete_ttn_refunds_stock_when_packaging_selected():
-    """PKG-2: when order.packaging_id is set, apply_movement(delta=+1, TTN_DELETE) runs."""
-    from models.stock_movement import StockMovementReason
-
-    box_id = uuid.uuid4()
-    order = _make_order(ttn="20450999999999", packaging_id=box_id)
+async def test_create_ttn_on_an_already_shipped_order_does_not_re_consume():
+    """The status guard is what makes a re-issued label free: an order already in
+    SHIPPED never re-enters change_order_status, so nothing is consumed twice."""
+    shop = _make_shop(sender_ref="sender-ref-1", contact_ref="sender-contact-1")
+    order = _make_order(shop=shop, packaging_id=uuid.uuid4())
+    order.status = OrderStatus.SHIPPED
 
     db = MagicMock()
     db.commit = AsyncMock()
@@ -510,31 +508,62 @@ async def test_delete_ttn_refunds_stock_when_packaging_selected():
     db.rollback = AsyncMock()
 
     fake_client = MagicMock()
+    fake_client.get_counterparties = AsyncMock(return_value=[{"Ref": "rec-ref-1"}])
+    fake_client.get_contact_persons = AsyncMock(return_value=[{"Ref": "rec-contact-1"}])
+    fake_client.create_internet_document = AsyncMock(return_value={
+        "IntDocNumber": "20450123456789",
+        "Ref": "ttn-ref-1",
+    })
+
+    with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
+         patch("routers.shipping.decrypt_value", return_value="plain-key"), \
+         patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
+         patch("routers.shipping.change_order_status", AsyncMock()) as mock_status:
+        result = await create_np_ttn(
+            order_id=order.id,
+            body=_ttn_body(),
+            current_user=_make_user(),
+            db=db,
+        )
+
+    assert result["warnings"] == []
+    mock_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_ttn_moves_no_stock_itself():
+    """Deleting a label gives nothing back. The +1 refund PKG-2 wrote here was the
+    mirror of a decrement that no longer happens; keeping it would credit a box
+    that was never taken, and the parcel was still packed."""
+    order = _make_order(ttn="20450999999999", packaging_id=uuid.uuid4())
+
+    db = MagicMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    db.rollback = AsyncMock()
+    db.add = MagicMock()
+
+    fake_client = MagicMock()
     fake_client.delete_internet_document = AsyncMock(return_value=True)
 
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status:
         await delete_np_ttn(
             order_id=order.id,
             current_user=_make_user(),
             db=db,
         )
 
-    mock_stock.assert_awaited_once()
-    kwargs = mock_stock.await_args.kwargs
-    assert kwargs["box_id"] == box_id
-    assert kwargs["delta"] == +1
-    assert kwargs["reason"] == StockMovementReason.TTN_DELETE
+    db.add.assert_not_called()
+    # Status still reverts — only the stock give-back is gone.
+    assert mock_status.await_args.args[2] == OrderStatus.IN_PRODUCTION
 
 
 @pytest.mark.asyncio
-async def test_create_ttn_rolls_back_stock_on_np_failure():
-    """PKG-2: NP API failure → outer try/except rolls back the transaction;
-    stock_service is never called because the exception fires before our hook.
-    """
+async def test_create_ttn_rolls_back_on_np_failure():
+    """NP API failure → the whole transaction rolls back, TTN included."""
     shop = _make_shop(sender_ref="sender-ref-1", contact_ref="sender-contact-1")
     order = _make_order(shop=shop, packaging_id=uuid.uuid4())
 
@@ -551,8 +580,7 @@ async def test_create_ttn_rolls_back_stock_on_np_failure():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status:
         with pytest.raises(HTTPException):
             await create_np_ttn(
                 order_id=order.id,
@@ -561,7 +589,8 @@ async def test_create_ttn_rolls_back_stock_on_np_failure():
                 db=db,
             )
 
-    mock_stock.assert_not_called()
+    # The NP call raises before the status transition, so nothing was consumed.
+    mock_status.assert_not_awaited()
     db.rollback.assert_awaited()
     db.commit.assert_not_called()
 
@@ -573,11 +602,10 @@ async def test_create_ttn_rolls_back_stock_on_np_failure():
 @pytest.mark.asyncio
 async def test_delete_ttn_soft_success_when_np_says_already_deleted():
     """NP-UX-2: NP returns the exact 'Document already deleted ...' message that
-    NP-FIX-4 Phase A documented. Handler must clear local ttn, refund packaging
-    stock, and return status='soft_success' instead of HTTP 400.
+    NP-FIX-4 Phase A documented. Handler must clear the local ttn and return
+    status='soft_success' instead of HTTP 400.
     """
     from services.nova_poshta import NovaPoshtaAPIError
-    from models.stock_movement import StockMovementReason
 
     box_id = uuid.uuid4()
     order = _make_order(ttn="20451436562514", packaging_id=box_id)
@@ -597,8 +625,7 @@ async def test_delete_ttn_soft_success_when_np_says_already_deleted():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status, \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))) as mock_status:
         result = await delete_np_ttn(
             order_id=order.id,
             current_user=_make_user(),
@@ -615,13 +642,6 @@ async def test_delete_ttn_soft_success_when_np_says_already_deleted():
     status_args = mock_status.await_args.args
     assert status_args[2] == OrderStatus.IN_PRODUCTION
     assert "already deleted on NP side" in status_args[4]
-
-    # PKG-2 increment fires on soft-success too (rule #4).
-    mock_stock.assert_awaited_once()
-    kwargs = mock_stock.await_args.kwargs
-    assert kwargs["box_id"] == box_id
-    assert kwargs["delta"] == +1
-    assert kwargs["reason"] == StockMovementReason.TTN_DELETE
 
 
 @pytest.mark.asyncio
@@ -678,8 +698,7 @@ async def test_delete_ttn_unmatched_np_error_still_400():
     with patch("routers.shipping.get_order_detail", AsyncMock(return_value=order)), \
          patch("routers.shipping.decrypt_value", return_value="plain-key"), \
          patch("routers.shipping.NovaPoshtaClient", return_value=fake_client), \
-         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))), \
-         patch("routers.shipping.stock_service.apply_movement", AsyncMock(return_value=[])) as mock_stock:
+         patch("routers.shipping.change_order_status", AsyncMock(return_value=(MagicMock(), []))):
         with pytest.raises(HTTPException) as exc:
             await delete_np_ttn(
                 order_id=order.id,
@@ -690,6 +709,5 @@ async def test_delete_ttn_unmatched_np_error_still_400():
     assert exc.value.status_code == 400
     db.rollback.assert_awaited()
     db.commit.assert_not_called()
-    mock_stock.assert_not_called()
     # Local state preserved on hard failure.
     assert order.ttn_number == "20450999999999"

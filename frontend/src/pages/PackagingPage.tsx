@@ -1,18 +1,21 @@
 import { useState } from 'react'
-import { Plus, FileSpreadsheet, Box, Mail, Edit2, Trash2, Scale, PackagePlus } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Plus, FileSpreadsheet, Box, Mail, Edit2, Archive, Scale, PackagePlus, History } from 'lucide-react'
 import ShellPage from './ShellPage'
 import PackagingForm from '@/components/inventory/PackagingForm'
-import RestockModal from '@/components/inventory/RestockModal'
+import PackagingReceiptModal from '@/components/inventory/PackagingReceiptModal'
 import CSVImportModal from '@/components/inventory/CSVImportModal'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import {
   usePackaging,
   useCreatePackaging,
   useUpdatePackaging,
   useDeletePackaging,
-  useRestockPackaging,
 } from '@/hooks/usePackaging'
+import { useAuth } from '@/hooks/useAuth'
 import { packagingApi } from '@/api/packaging'
 import type { PackagingBox } from '@/types/inventory'
+import { Capability, UserRole } from '@/types/user'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -30,26 +33,30 @@ import { cn } from '@/lib/utils'
 export default function PackagingPage() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
+  const [includeArchived, setIncludeArchived] = useState(false)
   const [editingPackaging, setEditingPackaging] = useState<any>(null)
-  const [restockTarget, setRestockTarget] = useState<PackagingBox | null>(null)
+  const [receiptTarget, setReceiptTarget] = useState<PackagingBox | null>(null)
+  const [archiveTarget, setArchiveTarget] = useState<PackagingBox | null>(null)
 
-  const { data: packaging, isLoading } = usePackaging()
+  const { user } = useAuth()
+  const { data: packaging, isLoading } = usePackaging(includeArchived)
   const createPackaging = useCreatePackaging()
   const updatePackaging = useUpdatePackaging()
   const deletePackaging = useDeletePackaging()
-  const restockPackaging = useRestockPackaging()
+
+  // WH-2: replenishment and the movement history both live on the materials side
+  // now, and the whole /api/materials router is gated by view_costs — recording a
+  // purchase price is a cost surface. Disable the two actions rather than letting
+  // them 403 on click. Owners always qualify.
+  const canViewCosts =
+    user?.role === UserRole.OWNER ||
+    Boolean(user?.capabilities?.includes(Capability.VIEW_COSTS))
 
   const handleSave = async (data: any) => {
     if (editingPackaging) {
       await updatePackaging.mutateAsync({ id: editingPackaging.id, data })
     } else {
       await createPackaging.mutateAsync({ data })
-    }
-  }
-
-  const handleDelete = (item: any) => {
-    if (window.confirm(`Delete packaging "${item.name}"?`)) {
-      deletePackaging.mutate({ id: item.id })
     }
   }
 
@@ -60,7 +67,16 @@ export default function PackagingPage() {
     >
       <div className="space-y-6">
         {/* Header Actions */}
-        <div className="flex flex-col md:flex-row md:items-center justify-end gap-4 bg-zinc-900/20 p-6 rounded-3xl border border-zinc-800/50 backdrop-blur-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/20 p-6 rounded-3xl border border-zinc-800/50 backdrop-blur-sm">
+          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={e => setIncludeArchived(e.target.checked)}
+              className="size-3.5 rounded border-zinc-700 bg-zinc-900 accent-teal-500"
+            />
+            Show archived
+          </label>
           <div className="flex items-center gap-3">
             <Button
               variant="outline"
@@ -127,7 +143,17 @@ export default function PackagingPage() {
                             {item.packaging_type === 'BOX' ? <Box className="size-5" /> : <Mail className="size-5" />}
                           </div>
                           <div className="flex flex-col">
-                             <p className="text-sm font-bold text-zinc-100 tracking-tight">{item.name}</p>
+                             <div className="flex items-center gap-2">
+                               <p className="text-sm font-bold text-zinc-100 tracking-tight">{item.name}</p>
+                               {!item.material_is_active && (
+                                 <Badge
+                                   variant="outline"
+                                   className="border-zinc-700 bg-zinc-800/50 text-zinc-400 text-[9px] font-bold uppercase tracking-widest px-1.5 h-4"
+                                 >
+                                   Archived
+                                 </Badge>
+                               )}
+                             </div>
                              <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">{item.packaging_type}</span>
                           </div>
                         </div>
@@ -157,22 +183,33 @@ export default function PackagingPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            "text-sm font-bold tabular-nums",
-                            item.stock_quantity <= item.low_stock_threshold ? "text-amber-400" : "text-zinc-200"
-                          )}>
-                            {item.stock_quantity}
-                          </span>
-                          {item.stock_quantity <= item.low_stock_threshold && (
-                            <Badge
-                              variant="outline"
-                              className="border-l-2 border-amber-500 border-y-0 border-r-0 rounded-none bg-amber-500/10 text-amber-400 text-[9px] font-bold uppercase tracking-widest px-1.5 h-4"
-                            >
-                              Low
-                            </Badge>
-                          )}
-                        </div>
+                        {(() => {
+                          // WH-2: these arrive as Decimal strings from the paired
+                          // material. Comparing them raw is a lexicographic trap —
+                          // "10" <= "5" is true, so every two-digit box would wear
+                          // the Low badge. Same Number() guard as MaterialsPage.
+                          const stock = Number(item.stock_quantity)
+                          const threshold = Number(item.low_stock_threshold)
+                          const isLow = stock <= threshold
+                          return (
+                            <div className="flex items-center gap-2">
+                              <span className={cn(
+                                "text-sm font-bold tabular-nums",
+                                isLow ? "text-amber-400" : "text-zinc-200"
+                              )}>
+                                {stock}
+                              </span>
+                              {isLow && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-l-2 border-amber-500 border-y-0 border-r-0 rounded-none bg-amber-500/10 text-amber-400 text-[9px] font-bold uppercase tracking-widest px-1.5 h-4"
+                                >
+                                  Low
+                                </Badge>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </TableCell>
                       <TableCell>
                         <span className="text-xs font-mono text-zinc-400">#{item.sort_order}</span>
@@ -182,12 +219,40 @@ export default function PackagingPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-zinc-400 hover:text-amber-400 hover:bg-amber-400/10 rounded-xl"
-                            onClick={() => setRestockTarget(item)}
-                            title="Restock"
+                            disabled={!canViewCosts}
+                            className="h-8 w-8 text-zinc-400 hover:text-amber-400 hover:bg-amber-400/10 rounded-xl disabled:opacity-40"
+                            onClick={() => setReceiptTarget(item)}
+                            title={
+                              canViewCosts
+                                ? 'Record a purchase — adds stock at a price'
+                                : 'Recording a purchase needs the cost-visibility permission'
+                            }
                           >
                             <PackagePlus className="h-3.5 w-3.5" />
                           </Button>
+                          {canViewCosts ? (
+                            <Button
+                              asChild
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-zinc-400 hover:text-teal-400 hover:bg-teal-400/10 rounded-xl"
+                              title="Purchases and stock movements"
+                            >
+                              <Link to={`/inventory/materials/${item.material_id}`}>
+                                <History className="h-3.5 w-3.5" />
+                              </Link>
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              disabled
+                              className="h-8 w-8 text-zinc-400 rounded-xl disabled:opacity-40"
+                              title="Stock history needs the cost-visibility permission"
+                            >
+                              <History className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -199,10 +264,12 @@ export default function PackagingPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-400/10 rounded-xl"
-                            onClick={() => handleDelete(item)}
+                            disabled={!item.material_is_active}
+                            className="h-8 w-8 text-zinc-600 hover:text-red-400 hover:bg-red-400/10 rounded-xl disabled:opacity-30"
+                            onClick={() => setArchiveTarget(item)}
+                            title={item.material_is_active ? 'Archive' : 'Already archived'}
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Archive className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       </TableCell>
@@ -223,15 +290,35 @@ export default function PackagingPage() {
         isLoading={createPackaging.isPending || updatePackaging.isPending}
       />
 
-      <RestockModal
-        isOpen={restockTarget !== null}
-        onClose={() => setRestockTarget(null)}
-        onRestock={async (data) => {
-          if (!restockTarget) return
-          await restockPackaging.mutateAsync({ id: restockTarget.id, data })
+      {/* Mounted only while a box is targeted, so the material query inside always
+          has a real id to work with. */}
+      {receiptTarget && (
+        <PackagingReceiptModal
+          box={receiptTarget}
+          onClose={() => setReceiptTarget(null)}
+        />
+      )}
+
+      <ConfirmDialog
+        isOpen={archiveTarget !== null}
+        onClose={() => setArchiveTarget(null)}
+        title="Archive packaging"
+        body={
+          <>
+            <span className="font-semibold text-zinc-200">{archiveTarget?.name}</span>{' '}
+            will be hidden from the packaging picker and the parcel calculator. Its
+            purchase history and stock movements stay intact, and orders already
+            shipped in it are untouched.
+          </>
+        }
+        confirmLabel="Archive"
+        confirmVariant="destructive"
+        isLoading={deletePackaging.isPending}
+        onConfirm={async () => {
+          if (!archiveTarget) return
+          await deletePackaging.mutateAsync({ id: archiveTarget.id })
+          setArchiveTarget(null)
         }}
-        box={restockTarget}
-        isLoading={restockPackaging.isPending}
       />
 
       <CSVImportModal

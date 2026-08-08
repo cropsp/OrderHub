@@ -5,18 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.packaging import PackagingBox
-from models.stock_movement import StockMovementReason
 from models.user import UserRole
 from routers.dependencies import get_current_user, require_role
 from schemas.packaging import (
     PackagingBoxCreate,
     PackagingBoxRead,
     PackagingBoxUpdate,
-    RestockRequest,
 )
 from schemas.import_preview import ImportPreviewResponse, ImportConfirmRequest
-from services import stock_service
 from services.catalog_service import CatalogService
 from services.import_service import ImportService
 
@@ -26,12 +22,17 @@ router = APIRouter(prefix="/api", tags=["Packaging"])
 
 @router.get("/packaging-boxes", response_model=List[PackagingBoxRead])
 async def list_packaging(
+    include_archived: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    """List all packaging boxes (shared inventory, read-open to any authenticated user)."""
+    """List packaging boxes (shared inventory, read-open to any authenticated user).
+
+    Archived boxes are hidden by default — same idiom as the materials list, which
+    is where a box's cost and stock now live.
+    """
     service = CatalogService(db)
-    return await service.get_packaging_boxes()
+    return await service.get_packaging_boxes(include_archived=include_archived)
 
 
 @router.post("/packaging-boxes", response_model=PackagingBoxRead, status_code=status.HTTP_201_CREATED)
@@ -40,34 +41,15 @@ async def create_packaging(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
 ):
-    """Create a new packaging box.
+    """Create a new packaging box and its paired material.
 
-    Optional `initial_quantity` records an `initial_stock` ledger row so the
-    cached counter starts at the value the operator entered.
+    WH-2: a new box starts at zero stock. Giving it units means recording a
+    purchase against the paired material, so replenishment carries a cost by
+    construction — the old `initial_quantity` shortcut wrote a quantity with no
+    price behind it and is gone.
     """
     service = CatalogService(db)
-    return await service.create_packaging_box(schema, user_id=user.id)
-
-
-@router.post("/packaging-boxes/{box_id}/restock", response_model=PackagingBoxRead)
-async def restock_packaging(
-    box_id: uuid.UUID,
-    body: RestockRequest,
-    db: AsyncSession = Depends(get_db),
-    user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
-):
-    """Add units to a packaging box's stock — appends one `restock` ledger row."""
-    await stock_service.apply_movement(
-        db,
-        box_id=box_id,
-        delta=body.quantity,
-        reason=StockMovementReason.RESTOCK,
-        user_id=user.id,
-        note=body.note,
-    )
-    await db.commit()
-    box = await db.get(PackagingBox, box_id)
-    return box
+    return await service.create_packaging_box(schema)
 
 
 @router.patch("/packaging-boxes/{id}", response_model=PackagingBoxRead)
@@ -86,14 +68,19 @@ async def update_packaging(
 
 
 @router.delete("/packaging-boxes/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_packaging(
+async def archive_packaging(
     id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user=Depends(require_role(UserRole.OWNER, UserRole.MANAGER))
 ):
-    """Hard-delete a packaging box."""
+    """Archive a packaging box.
+
+    WH-2: no longer destructive. The geometry row stays, the paired material is
+    deactivated, and the box's receipts and movement history survive. Kept on the
+    DELETE verb so the client contract does not move.
+    """
     service = CatalogService(db)
-    await service.delete_packaging_box(id)
+    await service.archive_packaging_box(id)
 
 
 # --- Bulk CSV Import (Two-step) ---

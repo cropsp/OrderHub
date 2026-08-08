@@ -1,10 +1,24 @@
 import pytest
+from decimal import Decimal
 from uuid import uuid4
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from services.parcel_calculator import calculate_parcel_estimate
 from models.packaging import PackagingType
 from schemas.packaging import PackagingBoxRead
+
+
+def _pair_with_material(box, *, stock=Decimal("40"), threshold=Decimal("5")):
+    """WH-2: a box's counters are properties over its paired Material, and
+    PackagingBoxRead reads them plus material_is_active. Setting them on the mock
+    directly is enough — the property is shadowed by the attribute — but the
+    material_id link is kept so the fixture still resembles the real row."""
+    box.material_id = uuid4()
+    box.stock_quantity = stock
+    box.low_stock_threshold = threshold
+    box.material_is_active = True
+    return box
+
 
 @pytest.mark.asyncio
 async def test_calculate_parcel_estimate_basic():
@@ -77,7 +91,8 @@ async def test_envelope_selection():
     env.sort_order = 1
     env.created_at = now
     env.updated_at = now
-    
+    _pair_with_material(env)
+
     mock_order_result = MagicMock()
     mock_order_result.scalar_one_or_none.return_value = order
     mock_pkg_result = MagicMock()
@@ -131,7 +146,8 @@ async def test_box_fallback():
     box.sort_order = 0
     box.created_at = now
     box.updated_at = now
-    
+    _pair_with_material(box)
+
     mock_order_result = MagicMock()
     mock_order_result.scalar_one_or_none.return_value = order
     mock_pkg_result = MagicMock()
@@ -143,3 +159,61 @@ async def test_box_fallback():
     assert estimate.selected_packaging.name == "Standard Box"
     assert estimate.total_weight_g == 1100
     assert estimate.packaging_type == "BOX"
+
+
+@pytest.mark.asyncio
+async def test_archived_boxes_are_excluded_from_selection():
+    """WH-2: the query filters on the paired Material's is_active, so an archived
+    box can never be auto-suggested. Asserted on the compiled SQL because the
+    filtering happens in the database, not in the Python selection loop — the
+    fixture below would otherwise have to fake the DB's own job.
+    """
+    db = AsyncMock()
+    order_id = uuid4()
+    order = MagicMock()
+    order.id = order_id
+    order.items = []
+
+    mock_order_result = MagicMock()
+    mock_order_result.scalar_one_or_none.return_value = order
+    mock_pkg_result = MagicMock()
+    mock_pkg_result.scalars.return_value.all.return_value = []
+    db.execute.side_effect = [mock_order_result, mock_pkg_result]
+
+    await calculate_parcel_estimate(db, str(order_id))
+
+    pkg_stmt = db.execute.await_args_list[1].args[0]
+    sql = str(pkg_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "JOIN materials" in sql, "the paired material must be joined"
+
+    # Only the WHERE clause counts here: stock_quantity appears in the SELECT list
+    # because the material is eagerly loaded, which is exactly what we want — it is
+    # a filter on it that we do not.
+    where = sql.split("WHERE")[-1]
+    assert "materials.is_active" in where, "archived boxes must be filtered out"
+    # Stock is deliberately NOT a filter (design §10.5) — the calculator answers
+    # "what fits", and hiding an empty box would leave the operator with no
+    # suggestion and no reason why.
+    assert "stock_quantity" not in where
+
+
+@pytest.mark.asyncio
+async def test_packaging_is_fetched_in_a_single_round_trip():
+    """contains_eager over the join the filter already needs — not a second query.
+    The two-element execute harness above is what would break first if this
+    regressed, so state the requirement outright."""
+    db = AsyncMock()
+    order_id = uuid4()
+    order = MagicMock()
+    order.id = order_id
+    order.items = []
+
+    mock_order_result = MagicMock()
+    mock_order_result.scalar_one_or_none.return_value = order
+    mock_pkg_result = MagicMock()
+    mock_pkg_result.scalars.return_value.all.return_value = []
+    db.execute.side_effect = [mock_order_result, mock_pkg_result]
+
+    await calculate_parcel_estimate(db, str(order_id))
+
+    assert db.execute.await_count == 2

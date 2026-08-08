@@ -4,15 +4,13 @@ from datetime import datetime
 
 from sqlalchemy import select, delete, and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import contains_eager, joinedload, selectinload
 
 from models.material import Material
 from models.product import Product, ProductVariant
 from models.packaging import PackagingBox
-from models.stock_movement import StockMovementReason
 from schemas.product import ProductCreate, ProductUpdate, ProductVariantCreate, ProductVariantUpdate
 from schemas.packaging import PackagingBoxCreate, PackagingBoxUpdate
-from services import stock_service
 
 
 # WH-1: the Material minted alongside a new packaging box. Boxes are counted in
@@ -115,26 +113,42 @@ class CatalogService:
             await self.db.commit()
 
     # --- Packaging Operations ---
-    async def get_packaging_boxes(self) -> List[PackagingBox]:
-        query = select(PackagingBox).order_by(
-            PackagingBox.packaging_type, PackagingBox.sort_order
+    #
+    # WH-2: every read here loads the paired Material eagerly. PackagingBoxRead's
+    # stock counters are properties over that material, so a box serialized without
+    # it raises MissingGreenlet at response time. The relationship is deliberately
+    # left default-lazy on the model (see models/packaging.py) — making it eager
+    # there would drag a materials query onto every page of GET /api/orders, which
+    # never reads the object. Loading is the caller's job, at the three sites that
+    # actually build the read model. Precedent: get_product's selectinload re-fetch.
+    async def get_packaging_boxes(
+        self, *, include_archived: bool = False
+    ) -> List[PackagingBox]:
+        # contains_eager, not joinedload: the join is already here for the filter,
+        # and joinedload would add a second, aliased one.
+        query = (
+            select(PackagingBox)
+            .join(PackagingBox.material)
+            .options(contains_eager(PackagingBox.material))
+            .order_by(PackagingBox.packaging_type, PackagingBox.sort_order)
         )
+        if not include_archived:
+            query = query.where(Material.is_active.is_(True))
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def create_packaging_box(
-        self,
-        schema: PackagingBoxCreate,
-        user_id: Optional[uuid.UUID] = None,
-    ) -> PackagingBox:
+    async def create_packaging_box(self, schema: PackagingBoxCreate) -> PackagingBox:
         data = schema.model_dump()
-        initial_quantity = data.pop("initial_quantity", 0)
+        # WH-2: the threshold is a material setting now — the box row no longer has
+        # the column. It still enters through the packaging form because that is the
+        # one surface where boxes are managed.
+        low_stock_threshold = data.pop("low_stock_threshold")
 
         # WH-1: a box IS a material (cost, receipts, supplier article, archiving)
         # plus this geometry row. Both are staged in the caller's single transaction
         # so a box can never exist without its material. No user_id is needed — the
         # materials tables carry no author — which keeps the CSV-confirm path
-        # (routers/packaging.py, user_id=None) working exactly as before.
+        # working exactly as before.
         material = Material(
             name=data["name"],
             unit=PACKAGING_MATERIAL_UNIT,
@@ -142,6 +156,7 @@ class CatalogService:
             category="PACKAGING",
             is_stock_tracked=True,
             is_active=True,
+            low_stock_threshold=low_stock_threshold,
         )
         self.db.add(material)
         # The UUID primary key default is Python-side, applied at flush — the id has
@@ -152,25 +167,16 @@ class CatalogService:
         self.db.add(box)
         await self.db.flush()
 
-        if initial_quantity > 0:
-            if user_id is None:
-                raise ValueError(
-                    "user_id is required to record an initial_stock ledger row"
-                )
-            await stock_service.apply_movement(
-                self.db,
-                box_id=box.id,
-                delta=initial_quantity,
-                reason=StockMovementReason.INITIAL_STOCK,
-                user_id=user_id,
-            )
-
         await self.db.commit()
-        await self.db.refresh(box)
-        return box
+        # Re-fetch rather than refresh: refresh would leave `material` unloaded.
+        return await self.get_packaging_box(box.id)
 
     async def get_packaging_box(self, box_id: uuid.UUID) -> Optional[PackagingBox]:
-        query = select(PackagingBox).filter(PackagingBox.id == box_id)
+        query = (
+            select(PackagingBox)
+            .filter(PackagingBox.id == box_id)
+            .options(joinedload(PackagingBox.material))
+        )
         result = await self.db.execute(query)
         return result.scalar_one_or_none()
 
@@ -178,28 +184,37 @@ class CatalogService:
         box = await self.get_packaging_box(box_id)
         if not box:
             return None
-        
+
         update_data = schema.model_dump(exclude_unset=True)
+        # WH-2: threshold lives on the material; never setattr it onto the box.
+        new_threshold = update_data.pop("low_stock_threshold", None)
         for key, value in update_data.items():
             setattr(box, key, value)
 
         # WH-1: the packaging surface is the single place a box is named, so the
         # paired material follows it. The reverse rename is refused by the materials
         # router, which keeps the two from drifting apart.
-        if "name" in update_data:
+        if "name" in update_data or new_threshold is not None:
             material = await self.db.get(Material, box.material_id)
             if material is not None:
-                material.name = update_data["name"]
+                if "name" in update_data:
+                    material.name = update_data["name"]
+                if new_threshold is not None:
+                    material.low_stock_threshold = new_threshold
 
         await self.db.commit()
-        await self.db.refresh(box)
-        return box
+        return await self.get_packaging_box(box_id)
 
-    async def delete_packaging_box(self, box_id: uuid.UUID):
-        # WH-1: the geometry row goes, the material is ARCHIVED. Hard-deleting it
-        # would cascade its receipts and movements away (models/material.py), and
-        # the FK is RESTRICT, so an orphaned material is the only safe residue.
-        # Full soft-delete UX for boxes themselves is WH-2.
+    async def archive_packaging_box(self, box_id: uuid.UUID):
+        """Archive a box: the material is deactivated, the geometry row SURVIVES.
+
+        WH-2 finishes what WH-1 started. The geometry row used to be hard-deleted,
+        which CASCADE-ed its packaging_stock_movements history away — the very rows
+        WH-2 freezes as read-only archaeology — and left a material nothing pointed
+        at. A box lives exactly as long as its material now (design §2.6): archived
+        boxes drop out of the picker and the parcel calculator, keep their receipts
+        and their ledger, and can be brought back by reactivating the material.
+        """
         box = await self.get_packaging_box(box_id)
         if not box:
             return
@@ -208,7 +223,6 @@ class CatalogService:
         if material is not None:
             material.is_active = False
 
-        await self.db.execute(delete(PackagingBox).filter(PackagingBox.id == box_id))
         await self.db.commit()
 
     async def find_product_by_external_ref(self, shop_id: uuid.UUID, external_ref: str) -> Optional[Product]:

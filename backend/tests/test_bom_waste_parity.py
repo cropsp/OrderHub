@@ -14,6 +14,15 @@ fixture and asserts they agree to the kopeck. Cost feeds partner payouts, so
 
 Mock AsyncSession throughout — no real DB, matching test_bom_router.py (compiled
 SQL / mocked results) and test_consumption_service.py (MagicMock ORM objects).
+
+WH-2 narrowed what parity means. The booked side now also consumes the parcel's
+box, which `compute_bom_cost` structurally cannot see: a BOM is per-product, a box
+is per-shipment (design §2.4), and pricing three items in one box through a
+per-product recipe would be an approximation by construction. So the invariant is
+now "preview == booked MINUS packaging", and every fixture here ships without a box
+(`_both` pins both id fields to None) so the two numbers stay directly comparable.
+`test_packaging_is_the_entire_parity_delta` holds the other half: with a box on the
+order the gap is exactly the box's cost and nothing else.
 """
 
 import uuid
@@ -23,6 +32,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from models.material import Material
+from models.packaging import PackagingBox
 from services.bom_service import compute_bom_cost
 from services.fx_service import FxRates
 from services.order_consumption_service import consume_materials_for_order
@@ -66,12 +76,15 @@ def _preview_db(lines: list[Line]):
     return db
 
 
-def _consumption_db(lines: list[Line], product_id: uuid.UUID, quantity: int):
+def _consumption_db(
+    lines: list[Line], product_id: uuid.UUID, quantity: int, box=None
+):
     """AsyncSession mock for consume_materials_for_order.
 
     Call order (order_consumption_service.py:61-105): idempotency probe →
     OrderItem query → one BOM query per item. Real Material instances so
-    apply_movement can mutate stock_quantity.
+    apply_movement can mutate stock_quantity. `box` is WH-2's optional packaging
+    row, resolved through db.get rather than execute().
     """
     materials = [
         Material(
@@ -126,8 +139,15 @@ def _consumption_db(lines: list[Line], product_id: uuid.UUID, quantity: int):
             return make_result(scalars_iter=[item])
         return make_result(scalars_iter=bom_items)
 
+    if box is not None:
+        materials_by_id[box.material.id] = box.material
+
     async def fake_get(model_cls, ident):
-        return materials_by_id.get(ident) if model_cls is Material else None
+        if model_cls is Material:
+            return materials_by_id.get(ident)
+        if model_cls is PackagingBox:
+            return box if box is not None and ident == box.id else None
+        return None
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=fake_execute)
@@ -163,6 +183,11 @@ async def _both(
     order.currency = order_currency
     # WH-1: explicit, or the guard reads a truthy MagicMock and skips everything.
     order.computed_production_cost = None
+    # WH-2: same trap, other end. A bare MagicMock attribute is truthy, so leaving
+    # these unset would resolve a "box" on every parity run and add a phantom line
+    # to the booked side. Parity is a BOM-only invariant — see the module docstring.
+    order.packaging_id = None
+    order.computed_packaging_box_id = None
     booked = await consume_materials_for_order(
         _consumption_db(lines, product_id, quantity), order, uuid.uuid4(), fx=fx
     )
@@ -341,3 +366,60 @@ async def test_untracked_line_prices_identically_in_preview_and_booking():
     assert preview.basis[0].amount == booked
     # 3.43 × 1.15 × 580 = 2287.81 (+) 25.00 — the service line is in the number.
     assert booked == Decimal("2312.81")
+
+
+@pytest.mark.asyncio
+async def test_packaging_is_the_entire_parity_delta():
+    """WH-2 — the other half of the narrowed invariant.
+
+    Every other test here ships without a box so preview == booked exactly. This
+    one puts a box on the order and asserts the gap is the box's cost and nothing
+    else: consumption gained a per-shipment term, not a different way of pricing
+    the per-product ones. If a future change makes packaging touch the BOM lines
+    (a waste factor, a quantity multiplier, a second rounding), this subtraction
+    stops landing on zero.
+    """
+    lines = [Line(qty="3.43", unit_cost="580.0000", waste="15.00")]
+    product_id = uuid.uuid4()
+
+    preview = await compute_bom_cost(
+        _preview_db(lines), product_id=uuid.uuid4(), target_currency="UAH", fx=None
+    )
+
+    box_material = Material(
+        name="Коробка 100×120×50",
+        unit="шт",
+        currency="UAH",
+        current_unit_cost=Decimal("12.5000"),
+        stock_quantity=Decimal("40"),
+        low_stock_threshold=Decimal("0"),
+        waste_percent=Decimal("0"),
+        is_active=True,
+        category="PACKAGING",
+        is_stock_tracked=True,
+    )
+    box_material.id = uuid.uuid4()
+    box = MagicMock()
+    box.id = uuid.uuid4()
+    box.name = box_material.name
+    box.material_id = box_material.id
+    box.material = box_material
+
+    order = MagicMock()
+    order.id = uuid.uuid4()
+    order.currency = "UAH"
+    order.computed_production_cost = None
+    order.packaging_id = box.id
+    order.computed_packaging_box_id = None
+
+    booked = await consume_materials_for_order(
+        _consumption_db(lines, product_id, 1, box=box), order, uuid.uuid4()
+    )
+
+    # 3.43 × 1.15 × 580 = 2287.81, box 12.50 → 2300.31.
+    assert booked.computed_production_cost == Decimal("2300.31")
+    assert (
+        booked.computed_production_cost - preview.basis[0].amount
+        == Decimal("12.5000")
+    )
+    assert box_material.stock_quantity == Decimal("39")

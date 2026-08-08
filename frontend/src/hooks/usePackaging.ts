@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { packagingApi } from '@/api/packaging'
 import { useToastStore } from '@/components/ui/Toast'
-import type { PackagingBoxCreate, PackagingBoxUpdate, RestockRequest } from '@/types/inventory'
+import type { PackagingBoxCreate, PackagingBoxUpdate } from '@/types/inventory'
 import { getApiErrorMessage } from '@/types/api'
 
-export function usePackaging() {
+export function usePackaging(includeArchived = false) {
   return useQuery({
-    queryKey: ['packaging'],
-    queryFn: () => packagingApi.listPackaging(),
+    queryKey: ['packaging', { includeArchived }],
+    queryFn: () => packagingApi.listPackaging(includeArchived),
   })
 }
 
@@ -54,31 +54,17 @@ export function useDeletePackaging() {
       packagingApi.deletePackaging(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['packaging'] })
-      addToast('Packaging deleted successfully', 'success')
+      addToast('Packaging archived successfully', 'success')
     },
     onError: (error) => {
-      addToast(getApiErrorMessage(error, 'Failed to delete packaging'), 'error')
+      addToast(getApiErrorMessage(error, 'Failed to archive packaging'), 'error')
     }
   })
 }
 
-export function useRestockPackaging() {
-  const queryClient = useQueryClient()
-  const addToast = useToastStore(s => s.addToast)
-
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: RestockRequest }) =>
-      packagingApi.restockPackaging(id, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['packaging'] })
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
-      addToast('Packaging restocked successfully', 'success')
-    },
-    onError: (error) => {
-      addToast(getApiErrorMessage(error, 'Failed to restock packaging'), 'error')
-    }
-  })
-}
+// WH-2: useRestockPackaging is gone with its endpoint. Replenishment goes through
+// useCreateMaterialReceipt against box.material_id — see PackagingReceiptModal,
+// which re-invalidates ['packaging'] and ['dashboard'] the way this hook did.
 
 export function useBulkImportPackaging() {
   const queryClient = useQueryClient()

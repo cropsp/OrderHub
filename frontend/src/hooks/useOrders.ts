@@ -39,6 +39,12 @@ export function useUpdateOrderStatus() {
       // Invalidate both the list and the specific order to trigger refetch
       void queryClient.invalidateQueries({ queryKey: ['orders'] })
       void queryClient.invalidateQueries({ queryKey: ['orders', orderId] })
+      // WH-2: SHIPPED is now the one and only moment stock moves — BOM materials
+      // AND the parcel's box. Both counters, and the dashboard card over them, go
+      // stale the instant this succeeds.
+      void queryClient.invalidateQueries({ queryKey: ['materials'] })
+      void queryClient.invalidateQueries({ queryKey: ['packaging'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       // MAT-4: surface SHIPPED-transition warnings as toasts.
       // ⚠ prefix → error (amber); ⓘ → info; anything else → info.
       for (const warning of data?.warnings ?? []) {
@@ -64,6 +70,9 @@ export function useBulkUpdateOrderStatus() {
     }) => ordersApi.bulkUpdateStatus(orderIds, status, comment),
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: ['orders'] })
+      void queryClient.invalidateQueries({ queryKey: ['materials'] })
+      void queryClient.invalidateQueries({ queryKey: ['packaging'] })
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       // Same MAT-4 rule as the single-order path: SHIPPED consumption warnings,
       // aggregated across the batch.
       for (const warning of data?.warnings ?? []) {
