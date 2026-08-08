@@ -20,7 +20,7 @@ READ_TOOLS = {
     "list_material_movements", "list_receipts_by_invoice",
     "list_overhead_materials", "list_overhead_expenses",
     "list_products", "get_product", "get_product_bom", "compute_product_cost",
-    "check_parcel_delivery",
+    "check_parcel_delivery", "list_packaging",
 }
 WRITE_TOOLS = {
     "create_material", "update_material", "archive_material",
@@ -28,12 +28,27 @@ WRITE_TOOLS = {
     "create_overhead_material", "record_overhead_expense",
     "set_product_bom", "add_bom_line", "remove_bom_line",
     "import_etsy_statement",
+    "create_packaging_box", "update_packaging_box",
 }
 
 MATERIAL = {
     "id": "m1", "name": "Шкіра італійська чорна", "unit": "dm2", "currency": "UAH",
     "current_unit_cost": "500.0000", "stock_quantity": "10.00",
     "supplier_sku": "027515",
+}
+
+BOX = {
+    "id": "b1", "material_id": "bm1", "name": "Коробка (120 x 100 x 80), бурая",
+    "packaging_type": "BOX", "inner_length_mm": 120, "inner_width_mm": 100,
+    "inner_height_mm": 80, "max_thickness_mm": None, "max_weight_g": 5000,
+    "tare_weight_g": 42, "sort_order": 0, "stock_quantity": "0.00",
+    "low_stock_threshold": "5.00", "material_is_active": True,
+    "created_at": "2026-08-08T10:00:00", "updated_at": "2026-08-08T10:00:00",
+}
+
+BOX_GEOMETRY = {
+    "name": "Коробка (120 x 100 x 80), бурая", "inner_length_mm": 120,
+    "inner_width_mm": 100, "inner_height_mm": 80, "max_weight_g": 5000,
 }
 
 
@@ -803,3 +818,334 @@ async def test_a_rejected_statement_is_logged_as_a_failed_attempt(tmp_path):
     entry = _logged(seen)[0]
     assert entry["ok"] is False
     assert "Chargeback" in entry["error"]
+
+
+# ── packaging (WH-4) ───────────────────────────────────────
+#
+# A box is a geometry row plus a Material. Three of the material's fields have no
+# home on PackagingBoxCreate (which is extra="forbid", so sending them there is a
+# 422), so the tool composes two requests. What these tests pin is that the
+# composition is honest: the right field goes to the right endpoint, a re-run of
+# a catalog import is refused rather than duplicated, and a half-applied pair is
+# never reported as a clean success.
+
+BOX_CREATED = {**BOX, "id": "b9", "material_id": "bm9"}
+
+
+def _create_routes(materials=None, boxes=None, created=None, patch=None):
+    """Routes for a create: both dedup probes plus the two writes."""
+    return {
+        ("GET", "/api/materials"): httpx.Response(200, json=materials or []),
+        ("GET", "/api/packaging-boxes"): httpx.Response(200, json=boxes or []),
+        ("POST", "/api/packaging-boxes"): httpx.Response(
+            201, json=created or BOX_CREATED
+        ),
+        ("PATCH", "/api/materials/bm9"): patch
+        or httpx.Response(200, json={"id": "bm9", "name": BOX["name"]}),
+    }
+
+
+# ── dedup guards ───────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_duplicate_box_article_refused_even_when_the_name_differs():
+    """The article is the supplier's own key — it catches the case the name
+    check cannot, one box spelled two ways across five years of invoices."""
+    existing = {**MATERIAL, "id": "bm1", "name": "Коробка 120х100х80",
+                "supplier_sku": "140"}
+    mcp, client, seen = _build(_create_routes(materials=[existing]))
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool(
+            "create_packaging_box",
+            {**BOX_GEOMETRY, "name": "Коробка (120 x 100 x 80), бурая",
+             "supplier_sku": "140"},
+        )
+    await client.aclose()
+
+    assert "bm1" in str(exc.value)
+    assert not [r for r in seen if r.url.path == "/api/packaging-boxes" and r.method == "POST"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_box_article_override_creates_it():
+    mcp, client, seen = _build(
+        _create_routes(materials=[{**MATERIAL, "supplier_sku": "140"}])
+    )
+    await mcp.call_tool(
+        "create_packaging_box",
+        {**BOX_GEOMETRY, "supplier_sku": "140", "allow_duplicate_sku": True,
+         "allow_duplicate_name": True},
+    )
+    await client.aclose()
+    assert [r for r in seen if (r.method, r.url.path) == ("POST", "/api/packaging-boxes")]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_box_name_refused_from_the_materials_probe():
+    """Post-WH-1 every box has a material of the same name, so the materials
+    probe is the one that fires in practice."""
+    existing = {**MATERIAL, "id": "bm1", "name": BOX["name"], "is_active": True}
+    mcp, client, seen = _build(_create_routes(materials=[existing]))
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool("create_packaging_box", BOX_GEOMETRY)
+    await client.aclose()
+
+    assert "bm1" in str(exc.value)
+    assert "allow_duplicate_name" in str(exc.value)
+    assert not [r for r in seen if r.url.path == "/api/packaging-boxes" and r.method == "POST"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_box_name_refused_from_the_boxes_probe():
+    """The belt to the materials braces: it only fires on a name desync that
+    should be impossible, which is exactly why it is worth keeping."""
+    mcp, client, seen = _build(_create_routes(boxes=[BOX]))
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool("create_packaging_box", BOX_GEOMETRY)
+    await client.aclose()
+
+    assert "b1" in str(exc.value)
+    assert not [r for r in seen if r.url.path == "/api/packaging-boxes" and r.method == "POST"]
+
+
+@pytest.mark.asyncio
+async def test_name_clash_with_an_archived_box_says_it_is_archived():
+    """Archived rows are probed, because a second pair hiding behind an archived
+    namesake is invisible in every default listing. The message has to say the
+    row is archived — nothing in the API or the UI can un-archive it, so
+    "record a receipt against it instead" would be advice the agent cannot take.
+    """
+    archived = {**MATERIAL, "id": "bm1", "name": BOX["name"], "is_active": False}
+    mcp, client, _ = _build(_create_routes(materials=[archived]))
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool("create_packaging_box", BOX_GEOMETRY)
+    await client.aclose()
+
+    assert "ARCHIVED" in str(exc.value)
+    assert "un-archive" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_packaging_guard_refusals_are_not_logged():
+    """Nothing was attempted and the owner already saw the refusal in the
+    conversation — logging it would only add noise (module docstring)."""
+    mcp, client, seen = _build(
+        _create_routes(materials=[{**MATERIAL, "name": BOX["name"]}])
+    )
+    with pytest.raises(ToolError):
+        await mcp.call_tool("create_packaging_box", BOX_GEOMETRY)
+    await client.aclose()
+    assert _logged(seen) == []
+
+
+# ── composition ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_create_writes_geometry_then_the_material_fields():
+    """One tool call, two requests, and the split has to be exact: the geometry
+    schema is extra="forbid", so a supplier field sent there is a 422."""
+    mcp, client, seen = _build(_create_routes())
+    await mcp.call_tool(
+        "create_packaging_box",
+        {**BOX_GEOMETRY, "tare_weight_g": 42, "supplier_sku": "140",
+         "supplier_name": "Упаковочки"},
+    )
+    await client.aclose()
+
+    writes = [
+        (r.method, r.url.path)
+        for r in seen
+        if r.method in ("POST", "PATCH")
+        and r.url.path not in ("/api/agent-actions", "/api/auth/login")
+    ]
+    assert writes == [
+        ("POST", "/api/packaging-boxes"),
+        ("PATCH", "/api/materials/bm9"),
+    ]
+
+    posted = json.loads(next(
+        r for r in seen if (r.method, r.url.path) == ("POST", "/api/packaging-boxes")
+    ).content)
+    assert posted["tare_weight_g"] == 42
+    assert posted["low_stock_threshold"] == "5"  # rides the geometry request
+    assert "supplier_sku" not in posted
+    assert "supplier_name" not in posted
+
+    patched = json.loads(next(
+        r for r in seen if r.method == "PATCH"
+    ).content)
+    assert patched == {"supplier_sku": "140", "supplier_name": "Упаковочки"}
+
+
+@pytest.mark.asyncio
+async def test_create_without_supplier_fields_makes_only_one_write():
+    mcp, client, seen = _build(_create_routes())
+    await mcp.call_tool("create_packaging_box", BOX_GEOMETRY)
+    await client.aclose()
+    assert not [r for r in seen if r.method == "PATCH"]
+
+
+@pytest.mark.asyncio
+async def test_create_reports_the_material_id_to_book_receipts_against():
+    """The box lands at zero stock and zero cost; the material id is the only
+    way to give it either."""
+    mcp, client, seen = _build(_create_routes())
+    result = await mcp.call_tool("create_packaging_box", BOX_GEOMETRY)
+    await client.aclose()
+
+    assert "bm9" in json.dumps(result, default=str)
+    entry = _logged(seen)[0]
+    assert entry["object_type"] == "packaging_box"
+    assert entry["object_id"] == "b9"
+    assert "bm9" in entry["summary"]
+
+
+@pytest.mark.asyncio
+async def test_partial_create_names_both_ids_and_the_repair_call():
+    """The geometry write has committed: the box exists, is valid and is usable.
+    Raising would tell the agent the opposite and invite a second create, so the
+    outcome is reported in the text instead."""
+    mcp, client, seen = _build(
+        _create_routes(patch=httpx.Response(500, json={"detail": "db is down"}))
+    )
+    result = await mcp.call_tool(
+        "create_packaging_box", {**BOX_GEOMETRY, "supplier_sku": "140"}
+    )
+    await client.aclose()
+
+    text = json.dumps(result, default=str, ensure_ascii=False)
+    assert "PARTIAL" in text
+    assert "b9" in text and "bm9" in text          # what was created
+    assert "supplier_sku" in text                   # what was not set
+    assert "db is down" in text                     # why
+    assert "update_packaging_box" in text           # how to repair it
+
+    # The half-applied pair is the kind of thing the owner needs to find later.
+    failures = [e for e in _logged(seen) if not e["ok"]]
+    assert len(failures) == 1
+    assert failures[0]["object_id"] == "bm9"
+    assert failures[0]["arguments"]["phase"] == "material_fields"
+
+
+# ── update ─────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_update_rename_goes_to_the_packaging_endpoint():
+    """Renaming from the material side is a 409 by design — catalog_service syncs
+    the name the other way. The box surface is the only rename path."""
+    routes = {
+        ("GET", "/api/packaging-boxes"): httpx.Response(200, json=[BOX]),
+        ("PATCH", "/api/packaging-boxes/b1"): httpx.Response(
+            200, json={**BOX, "name": "Коробка бура 120×100×80"}
+        ),
+    }
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool(
+        "update_packaging_box",
+        {"box_id": "b1", "name": "Коробка бура 120×100×80"},
+    )
+    await client.aclose()
+
+    assert [r.url.path for r in seen if r.method == "PATCH"] == [
+        "/api/packaging-boxes/b1"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_with_only_supplier_fields_patches_the_material():
+    routes = {
+        ("GET", "/api/packaging-boxes"): httpx.Response(200, json=[BOX]),
+        ("PATCH", "/api/materials/bm1"): httpx.Response(200, json={"id": "bm1"}),
+    }
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool(
+        "update_packaging_box", {"box_id": "b1", "supplier_sku": "140"}
+    )
+    await client.aclose()
+
+    assert [r.url.path for r in seen if r.method == "PATCH"] == ["/api/materials/bm1"]
+
+
+@pytest.mark.asyncio
+async def test_update_unknown_box_refuses_before_writing_anything():
+    mcp, client, seen = _build(
+        {("GET", "/api/packaging-boxes"): httpx.Response(200, json=[BOX])}
+    )
+    with pytest.raises(ToolError, match="No packaging box"):
+        await mcp.call_tool("update_packaging_box", {"box_id": "nope", "sort_order": 3})
+    await client.aclose()
+    assert not [r for r in seen if r.method == "PATCH"]
+
+
+@pytest.mark.asyncio
+async def test_empty_packaging_update_rejected():
+    mcp, client, seen = _build({})
+    with pytest.raises(ToolError, match="Nothing to update"):
+        await mcp.call_tool("update_packaging_box", {"box_id": "b1"})
+    await client.aclose()
+    assert not [r for r in seen if r.method == "GET"]
+
+
+@pytest.mark.asyncio
+async def test_bad_packaging_type_rejected_before_any_request():
+    mcp, client, seen = _build({})
+    with pytest.raises(ToolError, match="ENVELOPE"):
+        await mcp.call_tool(
+            "create_packaging_box", {**BOX_GEOMETRY, "packaging_type": "TUBE"}
+        )
+    await client.aclose()
+    assert not [r for r in seen if r.url.path != "/api/auth/login"]
+
+
+# ── error translation ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_geometry_validation_error_names_the_field_and_the_constraint():
+    """The backfill walks straight into max_weight_g > 0 and inner_height_mm > 0
+    (an envelope has no height). The agent acts on this text, so the field and
+    the rule have to be the readable part, not buried in a repr of FastAPI's
+    error list."""
+    routes = {
+        ("GET", "/api/materials"): httpx.Response(200, json=[]),
+        ("GET", "/api/packaging-boxes"): httpx.Response(200, json=[]),
+        ("POST", "/api/packaging-boxes"): httpx.Response(
+            422,
+            json={"detail": [{
+                "type": "greater_than",
+                "loc": ["body", "max_weight_g"],
+                "msg": "Input should be greater than 0",
+                "input": 0,
+                "ctx": {"gt": 0},
+                "url": "https://errors.pydantic.dev/2.10/v/greater_than",
+            }]},
+        ),
+    }
+    mcp, client, _ = _build(routes)
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool("create_packaging_box", {**BOX_GEOMETRY, "max_weight_g": 0})
+    await client.aclose()
+
+    message = str(exc.value)
+    assert "max_weight_g: Input should be greater than 0" in message
+    assert "greater_than" not in message.split("max_weight_g")[0]  # no repr noise
+
+
+@pytest.mark.asyncio
+async def test_box_backed_rename_409_reaches_the_agent_readably():
+    """update_material answers 409 for a box-backed rename. The agent has to
+    understand it well enough to reach for update_packaging_box instead."""
+    routes = {
+        ("GET", "/api/materials"): httpx.Response(200, json=[]),
+        ("PATCH", "/api/materials/bm1"): httpx.Response(
+            409,
+            json={"detail": "This material backs a packaging box; change its name "
+                            "on the packaging page instead"},
+        ),
+    }
+    mcp, client, seen = _build(routes)
+    with pytest.raises(ToolError) as exc:
+        await mcp.call_tool("update_material", {"material_id": "bm1", "name": "X"})
+    await client.aclose()
+
+    assert "packaging page instead" in str(exc.value)
+    assert [e["ok"] for e in _logged(seen)] == [False]

@@ -272,6 +272,33 @@ def test_detail_of_handles_non_json_body():
     assert _detail_of(response) == "upstream boom"
 
 
+def test_detail_of_renders_validation_errors_as_field_and_rule():
+    """A repr of FastAPI's error list buries the one thing that matters — which
+    field broke which rule — under `type`, `ctx` and a pydantic docs URL. The
+    agent acts on these messages, so that has to be the readable part."""
+    response = httpx.Response(
+        422,
+        json={"detail": [
+            {"type": "greater_than", "loc": ["body", "max_weight_g"],
+             "msg": "Input should be greater than 0", "input": 0,
+             "ctx": {"gt": 0}, "url": "https://errors.pydantic.dev/2.10/v/greater_than"},
+            {"type": "missing", "loc": ["body", "inner_height_mm"],
+             "msg": "Field required", "input": {}},
+        ]},
+    )
+    assert _detail_of(response) == (
+        "max_weight_g: Input should be greater than 0 (got 0); "
+        "inner_height_mm: Field required (got {})"
+    )
+
+
+def test_detail_of_keeps_the_repr_for_a_shape_it_does_not_recognise():
+    """Falling back rather than guessing: an unrecognised structure must reach
+    the agent whole, not be silently reduced to nothing."""
+    response = httpx.Response(400, json={"detail": {"code": "E17", "hint": "retry"}})
+    assert "E17" in _detail_of(response)
+
+
 # ── Cloudflare Access service token ────────────────────────
 
 CF_ID = "abc123.access"

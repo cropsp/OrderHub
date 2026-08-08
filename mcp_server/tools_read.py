@@ -5,6 +5,14 @@ Each tool is a 1:1 passthrough to an existing REST endpoint — no aggregation, 
 reformatting, no rounding. Money values reach the agent exactly as the API
 serialised them.
 
+`list_packaging` (WH-4) is the single exception, and a narrow one: it merges two
+passthroughs into one row. A box's geometry and its cost live on different
+endpoints *by design* — `PackagingBoxRead` deliberately carries no cost field,
+because its router is not cost-gated and the model is nested into ParcelEstimate
+and OrderResponse (see the comment on that schema). Joining here rather than
+there is what keeps the money behind `view_costs`. Still no arithmetic and no
+rounding: every value is the string the API produced.
+
 Tool docstrings are what the agent actually reads, so they carry the domain
 rules it would otherwise have to guess (currency is locked at creation, BOMs are
 product-level, receipts drive the weighted average).
@@ -15,7 +23,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from client import OrderHubClient
+from client import OrderHubClient, OrderHubError
 
 
 def dump(payload: Any) -> str:
@@ -177,6 +185,66 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
                 limit=limit,
             )
         )
+
+    # ── packaging (WH-4) ───────────────────────────────────
+
+    @mcp.tool()
+    async def list_packaging(include_archived: bool = False) -> str:
+        """List packaging boxes with their paired material — geometry and money
+        in one view.
+
+        Every box **is** a material (WH-1). The box row carries the geometry the
+        parcel calculator fits products into; the material carries stock,
+        weighted-average unit cost, the supplier article and the archive state.
+        Each row here joins the two and includes `material_id`.
+
+        **Stock and cost are not changed here, or by any packaging tool.** Use
+        `material_id` with the materials tools: `record_material_receipt` to book
+        a purchase of boxes (this is what sets their unit cost),
+        `adjust_material_stock` for a stocktake correction,
+        `list_material_receipts` / `list_material_movements` for the history.
+
+        Dimensions are **inner** millimetres — the usable space inside the box.
+        `tare_weight_g` is the weight of the empty box; `max_weight_g` is what it
+        may carry. The two are easy to confuse on a supplier's card.
+
+        Args:
+            include_archived: include boxes whose material has been deactivated.
+                Default false. An archived box drops out of the packaging picker
+                and the parcel calculator but keeps its receipts and its ledger.
+        """
+        boxes = await client.get(
+            "/api/packaging-boxes", include_archived=include_archived
+        )
+
+        # Archived materials are always fetched: which boxes are shown is decided
+        # by the geometry endpoint above, and a row it returned must never lose
+        # its cost half here.
+        try:
+            materials = await client.get(
+                "/api/materials", category="PACKAGING", include_inactive=True
+            )
+        except OrderHubError as exc:
+            return (
+                f"WARNING: the paired materials could not be read ({exc}). The "
+                "geometry below is complete; stock, unit cost and supplier "
+                "article are missing from every row.\n" + dump(boxes)
+            )
+
+        by_id = {m["id"]: m for m in materials}
+        rows = []
+        for box in boxes:
+            material = by_id.get(box["material_id"], {})
+            rows.append(
+                {
+                    **box,
+                    "current_unit_cost": material.get("current_unit_cost"),
+                    "currency": material.get("currency"),
+                    "supplier_sku": material.get("supplier_sku"),
+                    "supplier_name": material.get("supplier_name"),
+                }
+            )
+        return dump(rows)
 
     # ── catalog + BOM ──────────────────────────────────────
 
