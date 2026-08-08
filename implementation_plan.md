@@ -5152,7 +5152,15 @@ archive HAS one — bundle with WH-2, which reworks the delete path anyway).
 
 ### WH-2 — packaging consumed at SHIPPED, costed, counters unified (closed 2026-08-08)
 
-**Status: built on `feat/wh-2-consumption-shipped` (`08d2b30`); NOT merged, NOT deployed.**
+**Status: MERGED + DEPLOYED 2026-08-08** — feature `08d2b30`, merge `07700bd` (--no-ff,
+35 files +2151/−774), docs `1405cec`; `main == origin/main ==` prod `== 07700bd`.
+Migration `f2a7c1d84b63` applied by the entrypoint on backend start ("counters for 0
+packaging box(es)" — prod had zero boxes, as known); `alembic current` = single head.
+Prod schema gate passed: `packaging_boxes` 15 → 13 columns (no stock_quantity /
+low_stock_threshold), materials carry the counters + category + is_stock_tracked, frozen
+`packaging_stock_movements` present, carrier table self-cleaned. Post-merge tests:
+backend 978, frontend 233. Health verified through the real proxy path (nginx
+`frontend:80/api/health` 200 + SPA root), durable log zero new ERRORs.
 Second sprint of the warehouse-unification epic (design:
 `docs/warehouse/DESIGN-inventory-architecture.md`; WH-1 closure above).
 
@@ -5218,6 +5226,49 @@ closed by this sprint (marked in their rows).
 
 ---
 
+### WH-4 — MCP packaging tools (closed 2026-08-08)
+
+**Status: built on `feat/wh-4-mcp-packaging` (`bbd8f67`, 7 files, `mcp_server/` only);
+NOT merged, NOT deployed.** Third and last code sprint of the warehouse-unification epic
+(order revised 2026-08-08: WH-4 before WH-3 — see the design doc §9; WH-3 is now a purely
+operational MCP backfill).
+
+**What shipped (CC, plan-mode gated):**
+- `list_packaging` (read): one joined row per box — geometry + `material_id`, stock,
+  threshold, `current_unit_cost`, currency, `supplier_sku`/`supplier_name`;
+  `include_archived` default false; degrades to geometry+WARNING if the materials fetch
+  is denied rather than failing.
+- `create_packaging_box` / `update_packaging_box` (write): **tool-side composition**
+  (OQ1 — `PATCH /api/materials` 409s only on name/category change, other fields pass
+  through; zero backend changes, neither completeness guard touched). Dedup guards
+  mirror `create_material` (article first, then exact name, against materials AND boxes,
+  archived included). A material-phase failure returns a **PARTIAL** block naming both
+  ids, the unset fields and the repair call, and logs `ok=false` — never a silently
+  half-configured pair.
+- `client._detail_of` now renders FastAPI 422s readably
+  (`max_weight_g: Input should be greater than 0 (got 0)`), repr fallback retained.
+- Docstrings carry the agent-facing contract: receipts/adjustments via `material_id`
+  through the existing materials tools, inner-mm dims, `max_weight_g > 0` (backfill
+  default 5000), ENVELOPE `inner_height_mm > 0` caveat.
+
+**Verification:** MCP suite 79 → **102** (23 new, same `_build(routes)` /
+`httpx.MockTransport` idiom); backend 978 untouched-green; no frontend files. **Live
+demo against dev**: create-with-article → joined row → same-article refused → rename via
+the box surface (synced to material) → `record_material_receipt` moved cost 0 → 8.40 and
+stock 0 → 100 → joined row showed both; archive-cleanup honoured `include_archived`.
+**Cowork smoke (browser, 2026-08-08):** dev UI confirms the demo state exactly — active
+list holds only the genuine `100x120x50`; "Show archived" reveals the two `SMOKE WH-4`
+boxes (100 units @ 8.40 UAH each, max 5000 g default applied, tare 42 g) plus the WH-2-era
+SMOKE box. Demo ran twice (first output truncated by a pipe) — hence two archived rows;
+receipts are append-only so their ledger rows stay. Harmless dev residue.
+
+**Finding promoted to the backlog (`MATERIAL-UNARCHIVE`):** there is NO un-archive path
+on any surface — `MaterialUpdate` has no `is_active` (`backend/schemas/material.py:45-58`),
+the router only soft-deletes, `MaterialsPage.tsx:311` renders Archive only when active.
+Archiving is a one-way door; the MCP name-guard message states this explicitly.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -5228,6 +5279,7 @@ in this document where applicable, to avoid duplication.
 |---|---|---|
 | WH-1-followup-1 | **CLOSED 2026-08-08 by WH-2** (`шт` added to the unit list; verified in smoke). ~~Material form unit vocabulary lacks `шт`~~ | Found in the WH-1 Cowork smoke (2026-08-07). |
 | WH-1-followup-2 | **CLOSED 2026-08-08 by WH-2** (box delete → styled Archive dialog; geometry + ledger survive). ~~Packaging box delete has NO confirmation dialog~~ | Found in the WH-1 Cowork smoke (2026-08-07). |
+| MATERIAL-UNARCHIVE | Archiving a material (incl. a box-backed one) is a one-way door — no un-archive on any surface | Found during WH-4 (2026-08-08). `MaterialUpdate` has no `is_active` (`backend/schemas/material.py:45-58`), the materials router only soft-deletes, `MaterialsPage.tsx:311` shows Archive only when active, and MCP has no restore tool. A mis-click or a mistaken agent archive is permanent without SQL. Fix: allow `is_active: true` via PATCH (+ UI Restore action on archived rows + optionally an MCP tool). Small; decide whether restoring a box-backed material should also restore its geometry row's visibility (it should — they archive together). |
 | WH-2-followup-1 | Archiving a box blanks the packaging selector display on orders that shipped in it | Found in the WH-2 Cowork smoke (2026-08-08). After archiving `SMOKE-WH2 Box`, order `#SMOKE-WH2` (shipped in it, consumption booked) shows packaging "— None —" — the picker filters archived boxes, so the `<select>` has no option to match. Verify via API whether `order.packaging_id` is still set (almost certainly display-only, since the archive dialog promises orders untouched); fix = render the archived box as a disabled "(archived)" option. Also note: a hypothetical re-ship of such an order would fall back to the computed box. Small frontend fix; bundle with the next order-detail sprint. |
 | WH-2-followup-2 | `low_stock_threshold` NULL: material page says "not set", packaging list + dashboard treat it as LOW | Found in the WH-2 Cowork smoke (2026-08-08). Pre-existing box `100x120x50` (stock 0, threshold NULL post-migration) wears a LOW badge on /packaging and counts in the dashboard card, while its material page renders "— not set —". Numbers are consistent; the surfaces disagree on what NULL means. Decide the semantics (NULL = no alerting, or NULL = default 5) and align the three surfaces. Tiny. |
 | WH-2-followup-3 | Order timeline renders one frozen timestamp for every entry | Found in the WH-2 Cowork smoke (2026-08-08): every timeline row on two different orders reads `25.04.2026 20:11` while the order header and the materials ledger show correct times. Pre-existing rendering (or dev-data) bug, NOT WH-2 — but it makes the audit trail unreadable. Investigate `DetailTimeline.tsx` formatting vs the `order_status_history` rows. |
