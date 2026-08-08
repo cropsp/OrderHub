@@ -227,6 +227,39 @@ def _detail_of(response: httpx.Response) -> str:
         return response.text.strip() or response.reason_phrase
     if isinstance(payload, dict) and "detail" in payload:
         detail = payload["detail"]
+        if isinstance(detail, str):
+            return detail
         # 422s from FastAPI validation carry a list of error objects.
-        return detail if isinstance(detail, str) else repr(detail)
+        return _render_validation(detail) or repr(detail)
     return repr(payload)
+
+
+def _render_validation(detail: Any) -> str | None:
+    """Render FastAPI's validation error list as `field: message (got value)`.
+
+    The raw list reaches the agent as a repr otherwise — a wall of `type`, `loc`,
+    `ctx` and a pydantic docs URL in which the one thing that matters, *which
+    field broke which rule*, is buried. The agent acts on these messages (the
+    packaging backfill walks straight into `max_weight_g > 0` and
+    `inner_height_mm > 0`), so the field name and the constraint have to be the
+    readable part.
+
+    Returns None for anything that is not that shape, so the caller can fall back
+    to the repr rather than lose information it did not recognise.
+    """
+    if not isinstance(detail, list) or not detail:
+        return None
+
+    lines = []
+    for error in detail:
+        if not isinstance(error, dict) or "msg" not in error:
+            return None
+        # loc is ("body", "max_weight_g") — or ("body", "items", 0, "qty") for a
+        # nested one, where the last element is still the field that broke.
+        loc = [str(part) for part in error.get("loc", []) if part not in ("body", "query")]
+        field = ".".join(loc) if loc else "request"
+        line = f"{field}: {error['msg']}"
+        if "input" in error:
+            line += f" (got {error['input']!r})"
+        lines.append(line)
+    return "; ".join(lines)

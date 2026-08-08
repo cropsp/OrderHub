@@ -135,6 +135,95 @@ def _dec(value: str, field: str) -> Decimal:
         raise ToolError(f"{field} must be a decimal number, got {value!r}")
 
 
+# ── packaging pairing (WH-4) ───────────────────────────────
+#
+# A packaging box is a geometry row plus a Material, created together and kept in
+# step by catalog_service. Three of the material's fields have no home on the
+# geometry schema (which is extra="forbid", so sending them there is a 422), and
+# the packaging surface is the only place a box may be named. So the box tools
+# compose two requests: the geometry endpoint, then the material one.
+#
+# `low_stock_threshold` is deliberately NOT one of them: PackagingBoxCreate and
+# PackagingBoxUpdate already carry it and catalog_service writes it onto the
+# material, so it rides the geometry request like any other box field.
+
+
+def _present(**fields: Any) -> dict[str, Any]:
+    """Drop unset (None) arguments so a PATCH touches only what was named."""
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+def _material_side(
+    supplier_sku: str | None, supplier_name: str | None, notes: str | None
+) -> dict[str, Any]:
+    """The fields a box carries on its material rather than on its geometry.
+
+    One definition for both tools: the split has to be identical on create and on
+    update, or a field would land on the wrong endpoint on one of the two paths.
+    """
+    return _present(
+        supplier_sku=supplier_sku, supplier_name=supplier_name, notes=notes
+    )
+
+
+def _name_clash(rows: list[dict], name: str) -> dict | None:
+    """First row whose name matches `name` exactly, ignoring case and padding."""
+    target = name.strip().lower()
+    return next((r for r in rows if (r.get("name") or "").strip().lower() == target), None)
+
+
+async def _apply_material_side(
+    client: OrderHubClient,
+    tool: str,
+    box_id: str,
+    material_id: str,
+    patch: dict[str, Any],
+    box_result: str,
+) -> str:
+    """Set the paired material's supplier fields, reporting a failure loudly.
+
+    The geometry write has already committed by the time this runs, so a failure
+    here is a PARTIAL, not a failure: the box exists, is valid and is usable —
+    it is just missing its article. Raising would tell the agent the opposite and
+    invite it to create the box a second time, so the outcome is reported in the
+    returned text instead, naming both ids and the exact repair call. Same shape
+    as the action-log warning in `_report`: the write happened, something
+    adjacent did not.
+
+    The failed attempt IS written to the action log, because a half-configured
+    pair is precisely the kind of thing the owner needs to find later.
+    """
+    if not patch:
+        return box_result
+
+    try:
+        await client.patch(f"/api/materials/{material_id}", patch)
+    except OrderHubError as exc:
+        await _report(
+            client,
+            tool,
+            {"box_id": box_id, "material_id": material_id, "phase": "material_fields", **patch},
+            ok=False,
+            object_type="material",
+            object_id=material_id,
+            error=str(exc),
+        )
+        unset = ", ".join(f"{k}={v!r}" for k, v in patch.items())
+        fix = ", ".join(f'{k}="{v}"' for k, v in patch.items())
+        return (
+            "PARTIAL — the box was written, the supplier fields were not.\n\n"
+            f"  box_id:      {box_id}\n"
+            f"  material_id: {material_id}\n"
+            f"  NOT set:     {unset}\n"
+            f"  reason:      {exc}\n\n"
+            "Do NOT create the box again. Set the fields with:\n"
+            f'  update_packaging_box(box_id="{box_id}", {fix})\n\n'
+            f"{box_result}"
+        )
+
+    return box_result
+
+
 # ── BOM diffing (§5.5) ─────────────────────────────────────
 
 def _bom_index(items: list[dict]) -> dict[str, dict]:
@@ -331,6 +420,271 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
             lambda: client.delete(f"/api/materials/{material_id}"),
             summarise=lambda r: f"Archived material {material_id}.",
             object_id=lambda r: material_id,
+        )
+
+    # ── packaging (WH-4) ───────────────────────────────────
+
+    async def _find_box(box_id: str) -> dict:
+        """Resolve one box, archived or not. There is no GET by id on this router."""
+        boxes = await client.get("/api/packaging-boxes", include_archived=True)
+        box = next((b for b in boxes if str(b["id"]) == str(box_id)), None)
+        if box is None:
+            raise ToolError(
+                f"No packaging box with id {box_id}. Call list_packaging "
+                "(include_archived=True to see archived ones) for the current ids."
+            )
+        return box
+
+    @mcp.tool()
+    async def create_packaging_box(
+        name: str,
+        inner_length_mm: int,
+        inner_width_mm: int,
+        inner_height_mm: int,
+        max_weight_g: int,
+        packaging_type: str = "BOX",
+        max_thickness_mm: int | None = None,
+        tare_weight_g: int = 0,
+        sort_order: int = 0,
+        low_stock_threshold: str = "5",
+        supplier_sku: str | None = None,
+        supplier_name: str | None = None,
+        notes: str | None = None,
+        allow_duplicate_sku: bool = False,
+        allow_duplicate_name: bool = False,
+    ) -> str:
+        """Create a packaging box — the geometry row **and** its paired material.
+
+        A box is a material with a shape (WH-1), and this makes both in one call:
+        the geometry the parcel calculator fits products into, and the material
+        that carries stock, weighted-average cost, the supplier article and the
+        archive flag. The `material_id` comes back in the result.
+
+        The new box starts at **zero stock and zero cost**. Give it both by
+        calling `record_material_receipt` against that `material_id` — there is
+        deliberately no way to hand a box units with no price behind them.
+
+        All dimensions are **inner** millimetres: the usable space inside, not
+        the outside of the carton. Suppliers usually publish inner dims, but a
+        size lifted from a product name may be either — check before trusting it.
+
+        Two duplicate guards, the same pair as `create_material`, so re-running a
+        catalog import is safe: an existing material with this exact
+        `supplier_sku` (checked first, and reported even when the name differs —
+        it is the supplier's own key), then an existing box or material with this
+        exact name, archived ones included. Call `list_packaging` first.
+
+        Args:
+            name: as the supplier lists it, e.g. "Коробка (120 x 100 x 80),
+                бурая". Max 100 characters.
+            packaging_type: "BOX" or "ENVELOPE".
+            inner_length_mm: inner length, must be > 0.
+            inner_width_mm: inner width, must be > 0.
+            inner_height_mm: inner height, must be > 0 — **including for an
+                ENVELOPE**, which has no real height. Give the flat thickness
+                (1 if it is genuinely flat) and put the true limit in
+                `max_thickness_mm`.
+            max_weight_g: what the box may **carry**. Required, must be > 0, and
+                is NOT the weight of the box itself. Suppliers rarely publish a
+                load limit; 5000 is the agreed default when it is unknown, to be
+                corrected later on the boxes that matter.
+            tare_weight_g: the weight of the **empty** box. Defaults to 0, which
+                makes the parcel calculator estimate parcels lighter than they
+                are — set it whenever the supplier's card gives it.
+            low_stock_threshold: decimal string. Stored on the paired material;
+                the box is flagged when stock falls to or below it.
+            supplier_sku: the supplier's article (артикул). Always set it when
+                the invoice or product card shows one — it is what ties this box
+                to a later purchase instead of spawning a second row.
+        """
+        if packaging_type not in ("BOX", "ENVELOPE"):
+            raise ToolError(
+                f"packaging_type must be 'BOX' or 'ENVELOPE', got {packaging_type!r}"
+            )
+        _dec(low_stock_threshold, "low_stock_threshold")
+
+        if supplier_sku and not allow_duplicate_sku:
+            by_sku = await client.get("/api/materials", search=supplier_sku)
+            clash = [
+                m
+                for m in by_sku
+                if (m.get("supplier_sku") or "").strip().lower()
+                == supplier_sku.strip().lower()
+            ]
+            if clash:
+                raise ToolError(
+                    f"Article {supplier_sku!r} already belongs to "
+                    f"{clash[0]['name']!r} (material id {clash[0]['id']}). The "
+                    "article is the supplier's own key, so this is very likely "
+                    "the same box under a different name — record a receipt "
+                    "against it instead of creating a second one. Pass "
+                    "allow_duplicate_sku=True only if the supplier genuinely "
+                    "reuses this code for a different item."
+                )
+
+        if not allow_duplicate_name:
+            # Archived rows are probed too. A second pair created behind an
+            # archived namesake is exactly the drift this guard exists to stop,
+            # and it would be invisible in the default listing.
+            #
+            # Both probes run because rule 3 names both surfaces. In practice the
+            # materials one subsumes the boxes one — the pair is 1:1 and both
+            # rename paths sync or refuse — so the second only fires on a desync
+            # that should be impossible, which is a reason to keep it.
+            by_name = await client.get(
+                "/api/materials", search=name, include_inactive=True
+            )
+            clash, kind = _name_clash(by_name, name), "material"
+            archived = clash is not None and not clash.get("is_active", True)
+            if clash is None:
+                boxes = await client.get("/api/packaging-boxes", include_archived=True)
+                clash, kind = _name_clash(boxes, name), "box"
+                archived = clash is not None and not clash.get("material_is_active", True)
+
+            if clash is not None:
+                remedy = (
+                    "it is ARCHIVED. Nothing in the API or the UI can un-archive "
+                    "it, so bringing it back is a database job for the owner."
+                    if archived
+                    else "Record a receipt against it instead of creating a second one."
+                )
+                raise ToolError(
+                    f"A {kind} named {name!r} already exists (id {clash['id']}) — "
+                    f"{remedy} Pass allow_duplicate_name=True if these really are "
+                    "two different things."
+                )
+
+        payload = {
+            "name": name,
+            "packaging_type": packaging_type,
+            "inner_length_mm": inner_length_mm,
+            "inner_width_mm": inner_width_mm,
+            "inner_height_mm": inner_height_mm,
+            "max_thickness_mm": max_thickness_mm,
+            "max_weight_g": max_weight_g,
+            "tare_weight_g": tare_weight_g,
+            "sort_order": sort_order,
+            "low_stock_threshold": low_stock_threshold,
+        }
+        material_patch = _material_side(supplier_sku, supplier_name, notes)
+        args = {**payload, **material_patch}
+
+        # PackagingBoxCreate is extra="forbid", so the material-side fields must
+        # not ride this payload — they are a second request.
+        created: list[dict] = []
+
+        async def _create():
+            result = await client.post("/api/packaging-boxes", payload)
+            created.append(result)
+            return result
+
+        box_result = await _logged(
+            client, "create_packaging_box", args, "packaging_box", _create,
+            summarise=lambda r: (
+                f"Created packaging box {r['name']} ({r['packaging_type']}, "
+                f"{r['inner_length_mm']}×{r['inner_width_mm']}×{r['inner_height_mm']}mm "
+                f"inner, max {r['max_weight_g']}g). Material {r['material_id']} — "
+                "book a receipt against it to give the box stock and a unit cost."
+            ),
+        )
+
+        box = created[0]
+        return await _apply_material_side(
+            client, "create_packaging_box", str(box["id"]),
+            str(box["material_id"]), material_patch, box_result,
+        )
+
+    @mcp.tool()
+    async def update_packaging_box(
+        box_id: str,
+        name: str | None = None,
+        packaging_type: str | None = None,
+        inner_length_mm: int | None = None,
+        inner_width_mm: int | None = None,
+        inner_height_mm: int | None = None,
+        max_thickness_mm: int | None = None,
+        max_weight_g: int | None = None,
+        tare_weight_g: int | None = None,
+        sort_order: int | None = None,
+        low_stock_threshold: str | None = None,
+        supplier_sku: str | None = None,
+        supplier_name: str | None = None,
+        notes: str | None = None,
+    ) -> str:
+        """Update a packaging box — geometry, name, or its material's supplier
+        fields. Omitted fields are left alone.
+
+        **This is where a box is renamed.** The rename syncs onto the paired
+        material automatically. Renaming it from the material side is refused
+        with a 409 ("This material backs a packaging box; change its name on the
+        packaging page instead"), because a rename there would desync the pair
+        with nothing to detect the drift — so never reach for `update_material`
+        on a box-backed material, for its name or its category. Its supplier
+        article, supplier name and notes are fine to set from either side; this
+        tool sets them for you.
+
+        **Stock and cost are not touched here and cannot be.** Use
+        `record_material_receipt` or `adjust_material_stock` against the box's
+        `material_id`, which `list_packaging` returns.
+
+        Every dimension is **inner** millimetres and must be > 0 if given, as
+        must `max_weight_g` — which is the load the box may carry, not the weight
+        of the box (that is `tare_weight_g`).
+        """
+        if packaging_type is not None and packaging_type not in ("BOX", "ENVELOPE"):
+            raise ToolError(
+                f"packaging_type must be 'BOX' or 'ENVELOPE', got {packaging_type!r}"
+            )
+        if low_stock_threshold is not None:
+            _dec(low_stock_threshold, "low_stock_threshold")
+
+        geometry = _present(
+            name=name,
+            packaging_type=packaging_type,
+            inner_length_mm=inner_length_mm,
+            inner_width_mm=inner_width_mm,
+            inner_height_mm=inner_height_mm,
+            max_thickness_mm=max_thickness_mm,
+            max_weight_g=max_weight_g,
+            tare_weight_g=tare_weight_g,
+            sort_order=sort_order,
+            low_stock_threshold=low_stock_threshold,
+        )
+        material_patch = _material_side(supplier_sku, supplier_name, notes)
+        if not geometry and not material_patch:
+            raise ToolError("Nothing to update — pass at least one field.")
+
+        box = await _find_box(box_id)
+        material_id = str(box["material_id"])
+        args = {"box_id": box_id, **geometry, **material_patch}
+
+        if geometry:
+            box_result = await _logged(
+                client, "update_packaging_box", args, "packaging_box",
+                lambda: client.patch(f"/api/packaging-boxes/{box_id}", geometry),
+                summarise=lambda r: (
+                    f"Updated {box['name']}"
+                    + (f" -> {r['name']}" if "name" in geometry else "")
+                    + f": {', '.join(geometry)}."
+                ),
+                object_id=lambda r: box_id,
+            )
+        else:
+            # Nothing to change on the geometry row — the material patch below is
+            # the whole write, and reports itself.
+            box_result = await _logged(
+                client, "update_packaging_box", args, "packaging_box",
+                lambda: client.patch(f"/api/materials/{material_id}", material_patch),
+                summarise=lambda r: (
+                    f"Updated {box['name']}: {', '.join(material_patch)}."
+                ),
+                object_id=lambda r: box_id,
+            )
+            return box_result
+
+        return await _apply_material_side(
+            client, "update_packaging_box", box_id, material_id,
+            material_patch, box_result,
         )
 
     # ── receipts + stock ───────────────────────────────────

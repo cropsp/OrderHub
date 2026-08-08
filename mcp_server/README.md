@@ -86,6 +86,7 @@ deliberately absent — every one has irreversible real-world side effects.
 | `list_material_movements` | the append-only stock ledger |
 | `list_receipts_by_invoice` | every line of one supplier invoice — direct materials **and** overhead, no total |
 | `list_overhead_materials` / `list_overhead_expenses` | indirect costs |
+| `list_packaging` | boxes and envelopes joined to their paired material — geometry + stock + unit cost + article (`include_archived`) |
 | `list_products` / `get_product` | catalog + variants |
 | `get_product_bom` | a product's recipe + per-line costs |
 | `compute_product_cost` | recompute a product's cost from current material prices |
@@ -100,6 +101,8 @@ deliberately absent — every one has irreversible real-world side effects.
 | `record_material_receipt` | book a purchase — **this is what sets cost** |
 | `adjust_material_stock` | stocktake correction or waste, no cost change |
 | `create_overhead_material` / `record_overhead_expense` | indirect costs |
+| `create_packaging_box` | new box + its paired material in one call (refuses a duplicate article or name) |
+| `update_packaging_box` | geometry, rename, supplier article — the **only** rename path for a box |
 | `set_product_bom` | replace a whole recipe (guarded, see below) |
 | `add_bom_line` / `remove_bom_line` | change one recipe line, preserving the rest |
 | `import_etsy_statement` | book one month's Etsy payment statement — exact per-order fees + ad/listing overhead (STATEMENT-IMPORT) |
@@ -135,6 +138,38 @@ binary floats do not round-trip cents.
 - **Append-only reality.** Receipts and stock movements cannot be edited or
   deleted. A mistake is corrected by another receipt or an adjustment, and both
   stay in the ledger.
+
+### Packaging (WH-4)
+
+A packaging box **is** a material with a shape: a geometry row (dimensions, load
+limit, tare) paired 1:1 with a `Material` that carries its stock, weighted-average
+cost, supplier article and archive state.
+
+- **Stock and cost never move through the packaging tools.** `list_packaging`
+  returns each box's `material_id`; give it units and a price with
+  `record_material_receipt` against that id, correct a stocktake with
+  `adjust_material_stock`, read history with `list_material_receipts` /
+  `list_material_movements`. A new box starts at zero stock and zero cost, and
+  there is deliberately no way to hand it units with no price behind them.
+- **Renaming happens only on the box.** `update_packaging_box` renames both halves;
+  `update_material` answers **409** for a rename or a category change on a
+  box-backed material, because a rename there would desync the pair with nothing
+  to detect the drift.
+- **`create_packaging_box` composes two requests** — the geometry endpoint, then
+  the material one for `supplier_sku` / `supplier_name` / `notes`, which have no
+  home on the geometry schema. If the second fails the box still exists and is
+  usable, so the tool reports a loud `PARTIAL` naming both ids, the fields it did
+  not set and the `update_packaging_box` call that repairs it — and logs the
+  failed half. It never reports that as a clean success, and never as a failure.
+- **Duplicate guards mirror `create_material`**: the supplier article first, then
+  the exact name against both materials and boxes, **archived rows included**.
+  That is what makes re-running a catalog import safe. Note there is no un-archive
+  path anywhere in the API or the UI, so a clash with an archived box says so
+  rather than suggesting a receipt the agent cannot book.
+- Dimensions are **inner** millimetres. `max_weight_g` is the load the box may
+  carry (required, `> 0`); `tare_weight_g` is the weight of the empty box. An
+  `ENVELOPE` still needs `inner_height_mm > 0` — give the flat thickness and put
+  the real limit in `max_thickness_mm`.
 
 ### Action log
 

@@ -29,6 +29,7 @@ EXPECTED_TOOLS = {
     "get_product_bom",
     "compute_product_cost",
     "check_parcel_delivery",
+    "list_packaging",
 }
 
 
@@ -266,3 +267,105 @@ async def test_compute_product_cost_omits_the_param_when_unset():
 
     cost_calls = [r for r in seen if r.url.path == "/api/products/p1/bom/cost"]
     assert "in" not in cost_calls[0].url.params
+
+
+# ── list_packaging (WH-4) ──────────────────────────────────
+#
+# The one read tool that merges two endpoints. It has to, because a box's
+# geometry and its cost live apart on purpose: PackagingBoxRead carries no cost
+# field, so that the un-cost-gated packaging router (and ParcelEstimate and
+# OrderResponse, which nest it) stay off the money surface. Joining in the tool
+# keeps the money behind view_costs where the materials router put it.
+
+BOX_ROW = {
+    "id": "b1", "material_id": "bm1", "name": "Коробка (120 x 100 x 80), бурая",
+    "packaging_type": "BOX", "inner_length_mm": 120, "inner_width_mm": 100,
+    "inner_height_mm": 80, "max_weight_g": 5000, "tare_weight_g": 42,
+    "stock_quantity": "620.00", "low_stock_threshold": "5.00",
+    "material_is_active": True,
+}
+
+BOX_MATERIAL = {
+    "id": "bm1", "name": "Коробка (120 x 100 x 80), бурая", "unit": "pcs",
+    "currency": "UAH", "current_unit_cost": "8.4000", "stock_quantity": "620.00",
+    "supplier_sku": "140", "supplier_name": "Упаковочки", "is_active": True,
+}
+
+
+def _packaging_routes(boxes=None, materials=None):
+    def handler(request):
+        if request.url.path == "/api/packaging-boxes":
+            return httpx.Response(200, json=boxes if boxes is not None else [BOX_ROW])
+        if request.url.path == "/api/materials":
+            return httpx.Response(
+                200, json=materials if materials is not None else [BOX_MATERIAL]
+            )
+        return httpx.Response(404, json={"detail": f"unrouted {request.url.path}"})
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_list_packaging_joins_geometry_to_its_material():
+    """One row per box: the geometry, plus the four money/supplier fields the
+    packaging endpoint deliberately does not carry."""
+    mcp, client, _ = _build(_packaging_routes())
+    result = await mcp.call_tool("list_packaging", {})
+    await client.aclose()
+
+    row = _payload(result)[0]
+    # geometry, untouched
+    assert row["inner_length_mm"] == 120
+    assert row["material_id"] == "bm1"
+    # merged from the cost-gated materials endpoint
+    assert row["current_unit_cost"] == "8.4000"
+    assert row["currency"] == "UAH"
+    assert row["supplier_sku"] == "140"
+    assert row["supplier_name"] == "Упаковочки"
+
+
+@pytest.mark.asyncio
+async def test_list_packaging_reads_archived_materials_regardless_of_the_flag():
+    """`include_archived` decides which BOXES are listed. The materials fetch
+    always includes inactive ones, or an archived box the caller did ask for
+    would come back stripped of its cost."""
+    mcp, client, seen = _build(_packaging_routes())
+    await mcp.call_tool("list_packaging", {"include_archived": True})
+    await client.aclose()
+
+    boxes = next(r for r in seen if r.url.path == "/api/packaging-boxes")
+    materials = next(r for r in seen if r.url.path == "/api/materials")
+    assert boxes.url.params.get("include_archived") == "true"
+    assert materials.url.params.get("include_inactive") == "true"
+    assert materials.url.params.get("category") == "PACKAGING"
+
+
+@pytest.mark.asyncio
+async def test_list_packaging_defaults_to_active_boxes_only():
+    mcp, client, seen = _build(_packaging_routes())
+    await mcp.call_tool("list_packaging", {})
+    await client.aclose()
+
+    boxes = next(r for r in seen if r.url.path == "/api/packaging-boxes")
+    assert boxes.url.params.get("include_archived") == "false"
+
+
+@pytest.mark.asyncio
+async def test_list_packaging_degrades_loudly_when_the_cost_half_is_denied():
+    """view_costs revoked: the geometry is still worth returning, but the agent
+    must be told the money is missing rather than reading absent as zero."""
+    def handler(request):
+        if request.url.path == "/api/packaging-boxes":
+            return httpx.Response(200, json=[BOX_ROW])
+        return httpx.Response(
+            403, json={"detail": "You do not have permission to view this financial data"}
+        )
+
+    mcp, client, _ = _build(handler)
+    result = await mcp.call_tool("list_packaging", {})
+    await client.aclose()
+
+    text = result[0][0].text if isinstance(result, tuple) else result[0].text
+    assert text.startswith("WARNING:")
+    assert "permission" in text
+    assert "Коробка (120 x 100 x 80), бурая" in text  # geometry still delivered
