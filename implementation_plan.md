@@ -5228,10 +5228,22 @@ closed by this sprint (marked in their rows).
 
 ### WH-4 — MCP packaging tools (closed 2026-08-08)
 
-**Status: built on `feat/wh-4-mcp-packaging` (`bbd8f67`, 7 files, `mcp_server/` only);
-NOT merged, NOT deployed.** Third and last code sprint of the warehouse-unification epic
+**Status: MERGED + RELEASED 2026-08-08** — feature `bbd8f67`, merge `19cb7d5` (--no-ff,
+7 files +969/−3), docs `bc619e3`; `main == origin/main ==` server `== 19cb7d5`
+(fast-forward checkout only — `mcp_server/` is outside every Docker build context, no
+rebuild, no migration, containers untouched). **The real rollout is local:** stdio
+`initialize + tools/list` against `mcp_server/venv` shows server `orderhub-warehouse`
+v1.28.1 with **27 tools (24 → 27)**, the three new ones present; handshake called no
+tool, so nothing was logged or written. MCP suite 102 in its own venv (pydantic 2.13.4
+vs app 2.10.4), backend 978. Prod agent grants verified read-only via
+`provision_agent_user.py --show` (returns before any mutation path): MANAGER, active,
+`view_costs=True`, all three prod shops — exactly what the tools need;
+AGENT-GRANT-REPLACE caveat re-confirmed. Creds layout re-documented: password manager
+(master) → `mcp_server/.env` (dev working copy) → `.mcp.json` (chmod 600, separate
+`orderhub-dev` / `orderhub-prod` servers so a write can't land in the wrong DB).
+Third and last code sprint of the warehouse-unification epic
 (order revised 2026-08-08: WH-4 before WH-3 — see the design doc §9; WH-3 is now a purely
-operational MCP backfill).
+operational MCP backfill — runbook: `docs/warehouse/RUNBOOK-wh3-backfill.md`).
 
 **What shipped (CC, plan-mode gated):**
 - `list_packaging` (read): one joined row per box — geometry + `material_id`, stock,
@@ -5269,6 +5281,75 @@ Archiving is a one-way door; the MCP name-guard message states this explicitly.
 
 ---
 
+### WH-4b — list_materials category filter + documented search scope (closed 2026-08-08)
+
+**Status: MERGED 2026-08-08** — feature `e1a3faf`, merge `f0dced5`, `main == origin ==`
+server (checkout hygiene only; the stdio MCP process picks the new tool schema up on
+client restart). Micro-sprint closing `MCP-MATERIALS-FILTERS`: `list_materials` gained
+optional `category` passthrough (default: no filter — regression-locked by a test so the
+default can't silently change), docstring now states the honest search scope (name +
+supplier_sku, never supplier_name) and warns about short numeric box articles. 3 files,
+`mcp_server/` only; MCP suite 102 → 104; live dev check: MATERIAL → 17 rows (packaging
+excluded), unfiltered → 18 with `category` absent from the URL (`_drop_none` verified).
+Same-day operational work alongside it (WH-3 tails, all on prod via the backfill agent +
+a Cowork browser subagent): source-file counters corrected (23/49 unknown, 26 confirmed,
+20 with tare, 29 with article), `max_weight_g` 5000 → 15000 on the two giant boxes,
+three Boryspil VIP envelopes moved from overhead into packaging (paired ENVELOPE rows
+created; the three overhead items archived via UI — their 5 historic expense rows stay
+booked; catalog now 52 items incl. 4 envelopes), last purchase prices pinned for Phase 4
+(2.34 / 3.00 / 3.60 UAH). Running record: `docs/warehouse/RUNBOOK-wh3-backfill.md`.
+
+---
+
+### WH-5 — product default box + retro-consumption runner (closed 2026-08-08)
+
+**Status: built on `feat/wh-5-default-box-retro-runner` (`4911cad`); NOT merged, NOT
+deployed.** Last code sprint of the warehouse epic; the runner's prod execution is
+deliberately NOT part of it (runbook Phase 5, after BOM coverage + stocktake receipts).
+
+**What shipped (CC, plan-mode gated):**
+- `products.default_packaging_box_id` (nullable FK, SET NULL, no backfill) on
+  ProductBase/ProductUpdate; both write routes refuse an archived box (400); product
+  editor native select of ACTIVE boxes; MCP `set_default_packaging(product_id,
+  box_id|null, clear)` — read tools are dump() passthroughs, docstrings only.
+- `POST /api/warehouse/backfill-consumption` — OWNER-only, `dry_run=true` default,
+  `statuses`/`limit`/`shop_id` body. Resolution ①-⑤ per spec; ③/④ persist through
+  `update_order` (audit row); consumption via `consume_materials_for_order` unchanged.
+- **Design upgrade over the spec (accepted):** dry-run is not an estimate — dry-run and
+  execute run byte-identical code, differing only in whether the transaction commits.
+  Savepoints isolate per-order failures AND undo the `packaging_id` write when the
+  service's idempotency guard reports a skip — the guard stays the single source of
+  truth, and no order is left claiming a box it never consumed.
+
+**Verification (CC):** backend 978 → **1033**, MCP → **113**, frontend 233 → **238**;
+both completeness guards green; lint identical (87 pre-existing), tsc clean; migration
+round-trip on the real dev DB (which was one revision behind — WH-2's migration applied
+in passing). Real-DB dry run exercised ③-resolution, box consumption, FX-converted BOM
+cost, no-BOM-→-NULL-cost, and the negative-stock cascade — then persisted NOTHING
+(movement/history/packaging_id counts identical); execute booked one order; re-run
+reported ALREADY_CONSUMED. A test-harness bug (select(distinct(...)) `_no_label`
+collision) was caught by the parity test's first run — in the harness, not the service.
+**Cowork smoke (browser, dev):** Default Packaging select present on the product card,
+listing active boxes only (archived correctly excluded).
+
+**Major pre-existing defect found by CC (NOT fixed here — promoted to the backlog as
+`TIMESTAMP-DEFAULT-FROZEN`):** three timestamp columns carry a FROZEN literal default —
+the initial migration (`541a6af5ae43:143`) passes `server_default='now()'` as a plain
+string, which PostgreSQL evaluates ONCE at DDL time. Affected: `order_status_history.
+changed_at`, `order_items.created_at`, `attachments.created_at` (the other 56 timestamp
+defaults are live). Every order-audit row on dev shares `2026-04-25 17:11:54` — prod
+came from the same migration and is almost certainly identical. This is the root cause
+of `WH-2-followup-3` (frozen order-timeline timestamps) and it weakens every
+order-audit argument, including the runner's own audit rows (right actor/order/comment,
+useless time). Needs its own migration + a decision about existing rows.
+
+**Dev residue from the sanctioned execute smoke:** product "Personalized Bat ID Card
+Holder" carries a default box; order `4030976190` has packaging_id + one consumption
+movement + an audit row; box `100x120x50` material stock is −1.00. Kept (harmless,
+representative); revert only if a pristine dev dataset is ever needed.
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -5279,10 +5360,11 @@ in this document where applicable, to avoid duplication.
 |---|---|---|
 | WH-1-followup-1 | **CLOSED 2026-08-08 by WH-2** (`шт` added to the unit list; verified in smoke). ~~Material form unit vocabulary lacks `шт`~~ | Found in the WH-1 Cowork smoke (2026-08-07). |
 | WH-1-followup-2 | **CLOSED 2026-08-08 by WH-2** (box delete → styled Archive dialog; geometry + ledger survive). ~~Packaging box delete has NO confirmation dialog~~ | Found in the WH-1 Cowork smoke (2026-08-07). |
+| MCP-MATERIALS-FILTERS | **CLOSED 2026-08-08 by WH-4b** (merge `f0dced5` — category passthrough + documented search scope). ~~`list_materials` MCP tool: no `category` filter, `search` ignores `supplier_name`~~ | Found during the WH-3 backfill (2026-08-08). Post-backfill `list_materials()` returns 68 rows — 49 paired PACKAGING materials interleaved with real BOM materials (the REST accepts `category=` but the tool doesn't expose it), and box articles are short numerics (140, 125, 165…) so a future SKU search can hit a box by accident. Also `search=` matches name+sku only, not supplier_name. Fix: expose `category` on the tool (default MATERIAL to mirror the UI default? — decide), document the search scope in the docstring. Small, mcp_server-only. |
 | MATERIAL-UNARCHIVE | Archiving a material (incl. a box-backed one) is a one-way door — no un-archive on any surface | Found during WH-4 (2026-08-08). `MaterialUpdate` has no `is_active` (`backend/schemas/material.py:45-58`), the materials router only soft-deletes, `MaterialsPage.tsx:311` shows Archive only when active, and MCP has no restore tool. A mis-click or a mistaken agent archive is permanent without SQL. Fix: allow `is_active: true` via PATCH (+ UI Restore action on archived rows + optionally an MCP tool). Small; decide whether restoring a box-backed material should also restore its geometry row's visibility (it should — they archive together). |
 | WH-2-followup-1 | Archiving a box blanks the packaging selector display on orders that shipped in it | Found in the WH-2 Cowork smoke (2026-08-08). After archiving `SMOKE-WH2 Box`, order `#SMOKE-WH2` (shipped in it, consumption booked) shows packaging "— None —" — the picker filters archived boxes, so the `<select>` has no option to match. Verify via API whether `order.packaging_id` is still set (almost certainly display-only, since the archive dialog promises orders untouched); fix = render the archived box as a disabled "(archived)" option. Also note: a hypothetical re-ship of such an order would fall back to the computed box. Small frontend fix; bundle with the next order-detail sprint. |
 | WH-2-followup-2 | `low_stock_threshold` NULL: material page says "not set", packaging list + dashboard treat it as LOW | Found in the WH-2 Cowork smoke (2026-08-08). Pre-existing box `100x120x50` (stock 0, threshold NULL post-migration) wears a LOW badge on /packaging and counts in the dashboard card, while its material page renders "— not set —". Numbers are consistent; the surfaces disagree on what NULL means. Decide the semantics (NULL = no alerting, or NULL = default 5) and align the three surfaces. Tiny. |
-| WH-2-followup-3 | Order timeline renders one frozen timestamp for every entry | Found in the WH-2 Cowork smoke (2026-08-08): every timeline row on two different orders reads `25.04.2026 20:11` while the order header and the materials ledger show correct times. Pre-existing rendering (or dev-data) bug, NOT WH-2 — but it makes the audit trail unreadable. Investigate `DetailTimeline.tsx` formatting vs the `order_status_history` rows. |
+| TIMESTAMP-DEFAULT-FROZEN (ex WH-2-followup-3) | Three timestamp columns have a FROZEN DDL-time default — every order-audit row carries the same useless time | **Root cause found by CC during WH-5 (2026-08-08), upgrading the WH-2 smoke observation:** the initial migration (`541a6af5ae43:143`) passes `server_default='now()'` as a plain STRING, which PostgreSQL evaluates once at DDL time. Affected: `order_status_history.changed_at`, `order_items.created_at`, `attachments.created_at`; the other 56 timestamp defaults are live. On dev every audit row reads `2026-04-25 17:11:54` (the WH-2 smoke saw it as `25.04.2026 20:11` Kyiv); prod came from the same migration — almost certainly identical (verify). No code sets `changed_at` explicitly. Consequence: the entire order audit trail has right actor/order/comment but no usable time — including the WH-5 runner's rows. Fix: migration switching the three defaults to a live `now()` (`sa.text`/`func.now()`), plus a decision on existing rows (real times unrecoverable; consider best-effort backfill from `orders.updated_at` neighbours or accept and annotate). **Raise priority** — this is audit-integrity, and cheap to fix forward. |
 | SVC-MATERIAL-NONSTOCK-OP | Flip `is_stock_tracked=false` on the real cutting/sewing service materials | The WH-1 code fix is built; this is the post-deploy operator data action (UI checkbox per material). WH-1 is deployed since 2026-08-07 — **can be done now**; until then the negative-stock noise continues. |
 | CTRY-FOLLOWUPS | Country UX follow-ups surfaced by CTRY-1 | Two small, independent, both parked: (a) **Customer country search** — `CustomersPage.tsx:63` placeholder advertises "Search by name, email or country" but `routers/customers.py:50` only searches `email` + `full_name`; country search has never worked (pre-existing, not a CTRY-1 regression). Fix = add country to the backend customer search. (b) **Searchable country picker** — the two ISO-2 text inputs (`DetailLogistics.tsx:361`, `CreateOrderView.tsx:446`) could become a searchable dropdown that writes the ISO code (nicer entry; reuses the same `Intl.DisplayNames` name resolution). Both low-priority. |
 | ADDR-VAL-USER-ACCESS | Admin-granted per-user access to address validation | Idea (Sergii, 2026-07-15): let an OWNER/admin grant specific users permission to run address validation, rather than it being available to all order-endpoint roles. Deferred — ADDR-VAL-1/2 ship the feature gated by the existing order roles first; add fine-grained per-user access after the core works. Would build on the existing role/designer-access model. |
