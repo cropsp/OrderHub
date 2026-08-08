@@ -274,6 +274,11 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
 
         A BOM (recipe) attaches to the **product**, not to individual variants —
         so use the product id from here when reading or writing a recipe.
+
+        `default_packaging_box_id` is the box this product normally ships in (WH-5),
+        or null. It is a bare id — `list_packaging` maps ids to names. Set it with
+        `set_default_packaging`, never through a recipe line: a box is one per
+        parcel, not one per product.
         """
         return dump(
             await client.get(f"/api/shops/{shop_id}/products", is_active=is_active)
@@ -281,7 +286,10 @@ def register_read_tools(mcp: FastMCP, client: OrderHubClient) -> None:
 
     @mcp.tool()
     async def get_product(product_id: str) -> str:
-        """Fetch one product with its variants (SKU, dimensions, price, stock)."""
+        """Fetch one product with its variants (SKU, dimensions, price, stock).
+
+        Also carries `default_packaging_box_id` — see `list_products`.
+        """
         return dump(await client.get(f"/api/products/{product_id}"))
 
     @mcp.tool()

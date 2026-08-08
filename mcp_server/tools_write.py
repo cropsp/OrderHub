@@ -993,6 +993,72 @@ def register_write_tools(mcp: FastMCP, client: OrderHubClient) -> None:
         result = await _write_bom(product_id, remaining, "remove_bom_line", args)
         return f"Removed {material_id} from the recipe.\n{result}"
 
+    # ── product defaults (WH-5) ────────────────────────────
+
+    @mcp.tool()
+    async def set_default_packaging(
+        product_id: str, box_id: str | None = None, clear: bool = False
+    ) -> str:
+        """Set (or clear) the packaging box a product normally ships in.
+
+        This is **not** a recipe line. A box is one per PARCEL, not one per
+        product — an order of three items still ships in a single box — so it
+        never belongs in a BOM. This field records which box a product normally
+        goes out in, and the order's own packaging choice always wins over it.
+
+        What reads it: the retro-consumption backfill, when an already-shipped
+        order has no box recorded on it at all. If the order's items point at
+        products with different defaults, the largest of them is used, because
+        one parcel takes one box.
+
+        Args:
+            box_id: from `list_packaging`. The box must be active — pointing a
+                product at an archived box is refused, since every shipment would
+                then consume a box that is no longer in the catalogue.
+            clear: pass True (and no box_id) to remove the default. There is no
+                "empty string means null" here — clearing has to be said out loud.
+        """
+        if clear and box_id is not None:
+            raise ToolError("Pass box_id or clear=True, not both.")
+        if not clear and box_id is None:
+            raise ToolError(
+                "Pass box_id, or clear=True to remove the default."
+            )
+
+        target = None if clear else str(box_id)
+        box = None if clear else await _find_box(target)
+
+        # No-op guard, like the empty-patch refusals above: a PATCH that changes
+        # nothing still lands in the action log, and a re-run of a backfill script
+        # would fill it with noise.
+        product = await client.get(f"/api/products/{product_id}")
+        current = product.get("default_packaging_box_id")
+        if (str(current) if current is not None else None) == target:
+            raise ToolError(
+                f"«{product['title']}» already "
+                + (
+                    "has no default packaging."
+                    if clear
+                    else f"ships in «{box['name']}» by default."
+                )
+            )
+
+        return await _logged(
+            client, "set_default_packaging",
+            {"product_id": product_id, "box_id": target},
+            "product",
+            lambda: client.patch(
+                f"/api/products/{product_id}",
+                {"default_packaging_box_id": target},
+            ),
+            summarise=lambda r: (
+                f"«{r['title']}» now has no default packaging."
+                if clear
+                else f"«{r['title']}» now ships in «{box['name']}» by default."
+            ),
+            object_id=lambda r: product_id,
+        )
+
     @mcp.tool()
     async def import_etsy_statement(
         shop_id: str, file_path: str, dry_run: bool = True

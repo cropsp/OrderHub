@@ -29,6 +29,7 @@ WRITE_TOOLS = {
     "set_product_bom", "add_bom_line", "remove_bom_line",
     "import_etsy_statement",
     "create_packaging_box", "update_packaging_box",
+    "set_default_packaging",
 }
 
 MATERIAL = {
@@ -1148,4 +1149,164 @@ async def test_box_backed_rename_409_reaches_the_agent_readably():
     await client.aclose()
 
     assert "packaging page instead" in str(exc.value)
+    assert [e["ok"] for e in _logged(seen)] == [False]
+
+
+# ── set_default_packaging (WH-5) ───────────────────────────
+
+PRODUCT = {
+    "id": "p1", "shop_id": "s1", "title": "Гаманець «Київ»",
+    "description": None, "external_ref": None, "is_active": True,
+    "default_packaging_box_id": None, "image_url": None, "variants": [],
+    "archived_at": None,
+    "created_at": "2026-08-08T10:00:00", "updated_at": "2026-08-08T10:00:00",
+}
+
+
+def _product_routes(*, current_box_id=None, patched=None):
+    product = {**PRODUCT, "default_packaging_box_id": current_box_id}
+    return {
+        ("GET", "/api/packaging-boxes"): httpx.Response(200, json=[BOX]),
+        ("GET", "/api/products/p1"): httpx.Response(200, json=product),
+        ("PATCH", "/api/products/p1"): httpx.Response(
+            200, json={**product, "default_packaging_box_id": patched}
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_set_default_packaging_patches_the_product():
+    captured = {}
+
+    def patch(request):
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={**PRODUCT, "default_packaging_box_id": "b1"})
+
+    routes = {**_product_routes(), ("PATCH", "/api/products/p1"): patch}
+    mcp, client, seen = _build(routes)
+    result = await mcp.call_tool(
+        "set_default_packaging", {"product_id": "p1", "box_id": "b1"}
+    )
+    await client.aclose()
+
+    assert captured["body"] == {"default_packaging_box_id": "b1"}
+    assert "Коробка (120 x 100 x 80), бурая" in str(result)
+    assert [e["ok"] for e in _logged(seen)] == [True]
+
+
+@pytest.mark.asyncio
+async def test_clear_sends_an_explicit_null():
+    """The drop-None patch idiom used everywhere else cannot express "set to
+    null", which is why clearing is its own argument."""
+    captured = {}
+
+    def patch(request):
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json=PRODUCT)
+
+    routes = {
+        **_product_routes(current_box_id="b1"),
+        ("PATCH", "/api/products/p1"): patch,
+    }
+    mcp, client, _ = _build(routes)
+    result = await mcp.call_tool(
+        "set_default_packaging", {"product_id": "p1", "clear": True}
+    )
+    await client.aclose()
+
+    assert captured["body"] == {"default_packaging_box_id": None}
+    assert "no default packaging" in str(result)
+
+
+@pytest.mark.asyncio
+async def test_clearing_does_not_look_up_a_box():
+    """There is no box to resolve, and demanding one would make clearing depend
+    on the box still existing."""
+    routes = {
+        ("GET", "/api/products/p1"): httpx.Response(
+            200, json={**PRODUCT, "default_packaging_box_id": "b1"}
+        ),
+        ("PATCH", "/api/products/p1"): httpx.Response(200, json=PRODUCT),
+    }
+    mcp, client, seen = _build(routes)
+    await mcp.call_tool("set_default_packaging", {"product_id": "p1", "clear": True})
+    await client.aclose()
+
+    assert not [r for r in seen if r.url.path == "/api/packaging-boxes"]
+
+
+@pytest.mark.asyncio
+async def test_setting_the_value_it_already_has_is_refused_without_writing():
+    """A no-op PATCH still lands in agent_action_log; a re-run of a catalog
+    script would fill it with noise."""
+    mcp, client, seen = _build(_product_routes(current_box_id="b1"))
+    with pytest.raises(ToolError, match="already"):
+        await mcp.call_tool(
+            "set_default_packaging", {"product_id": "p1", "box_id": "b1"}
+        )
+    await client.aclose()
+
+    assert not [r for r in seen if r.method == "PATCH"]
+    assert _logged(seen) == []
+
+
+@pytest.mark.asyncio
+async def test_clearing_an_already_empty_default_is_refused():
+    mcp, client, seen = _build(_product_routes(current_box_id=None))
+    with pytest.raises(ToolError, match="already"):
+        await mcp.call_tool("set_default_packaging", {"product_id": "p1", "clear": True})
+    await client.aclose()
+
+    assert not [r for r in seen if r.method == "PATCH"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        ({"product_id": "p1"}, "clear=True to remove"),
+        ({"product_id": "p1", "box_id": "b1", "clear": True}, "not both"),
+    ],
+)
+async def test_ambiguous_arguments_are_refused_before_any_request(args, message):
+    mcp, client, seen = _build({})
+    with pytest.raises(ToolError, match=message):
+        await mcp.call_tool("set_default_packaging", args)
+    await client.aclose()
+
+    assert not seen or not [r for r in seen if r.url.path != "/api/auth/login"]
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_box_is_refused_with_a_way_to_find_the_right_one():
+    routes = {("GET", "/api/packaging-boxes"): httpx.Response(200, json=[BOX])}
+    mcp, client, seen = _build(routes)
+    with pytest.raises(ToolError, match="list_packaging"):
+        await mcp.call_tool(
+            "set_default_packaging", {"product_id": "p1", "box_id": "nope"}
+        )
+    await client.aclose()
+
+    assert not [r for r in seen if r.method == "PATCH"]
+
+
+@pytest.mark.asyncio
+async def test_an_archived_box_400_reaches_the_agent_readably():
+    """The API refuses an archived box; every shipment would otherwise consume a
+    box that has left the catalogue."""
+    routes = {
+        **_product_routes(),
+        ("PATCH", "/api/products/p1"): httpx.Response(
+            400,
+            json={"detail": "Packaging box 'Коробка' is archived and cannot be a "
+                            "product's default"},
+        ),
+    }
+    mcp, client, seen = _build(routes)
+    with pytest.raises(ToolError, match="archived"):
+        await mcp.call_tool(
+            "set_default_packaging", {"product_id": "p1", "box_id": "b1"}
+        )
+    await client.aclose()
+
     assert [e["ok"] for e in _logged(seen)] == [False]

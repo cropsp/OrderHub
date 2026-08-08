@@ -87,7 +87,7 @@ deliberately absent — every one has irreversible real-world side effects.
 | `list_receipts_by_invoice` | every line of one supplier invoice — direct materials **and** overhead, no total |
 | `list_overhead_materials` / `list_overhead_expenses` | indirect costs |
 | `list_packaging` | boxes and envelopes joined to their paired material — geometry + stock + unit cost + article (`include_archived`) |
-| `list_products` / `get_product` | catalog + variants |
+| `list_products` / `get_product` | catalog + variants + `default_packaging_box_id` |
 | `get_product_bom` | a product's recipe + per-line costs |
 | `compute_product_cost` | recompute a product's cost from current material prices |
 
@@ -105,6 +105,7 @@ deliberately absent — every one has irreversible real-world side effects.
 | `update_packaging_box` | geometry, rename, supplier article — the **only** rename path for a box |
 | `set_product_bom` | replace a whole recipe (guarded, see below) |
 | `add_bom_line` / `remove_bom_line` | change one recipe line, preserving the rest |
+| `set_default_packaging` | the box a product normally ships in (`clear=True` removes it) |
 | `import_etsy_statement` | book one month's Etsy payment statement — exact per-order fees + ad/listing overhead (STATEMENT-IMPORT) |
 
 `import_etsy_statement` is the one tool that takes a **local file path** rather
@@ -170,6 +171,26 @@ cost, supplier article and archive state.
   carry (required, `> 0`); `tare_weight_g` is the weight of the empty box. An
   `ENVELOPE` still needs `inner_height_mm > 0` — give the flat thickness and put
   the real limit in `max_thickness_mm`.
+
+### Default packaging (WH-5)
+
+`set_default_packaging` records which box a product normally ships in. It is
+deliberately **not** a recipe line: a box is one per PARCEL, not one per product,
+so an order of three items still goes out in a single box and a BOM — which is
+per-product — is structurally the wrong home for it.
+
+- **The order always wins.** The box actually consumed at SHIPPED is the one
+  chosen on the order, then the parcel calculator's suggestion. This default is
+  the last resort, and its real consumer is the retro-consumption backfill, which
+  walks orders that shipped before any of this existed and have no box recorded at
+  all. Where several products in one order name different defaults, the largest by
+  inner volume wins — one parcel, one box.
+- **Active boxes only.** Pointing a product at an archived box is refused with a
+  400: every shipment would otherwise consume a box that has left the catalogue.
+- **Clearing is explicit** — `clear=True`, with no `box_id`. There is no
+  empty-string-means-null convention here.
+- Re-setting the value a product already has is refused rather than written, so
+  re-running a catalog script does not fill the action log with no-op patches.
 
 ### Action log
 

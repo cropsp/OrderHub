@@ -26,6 +26,32 @@ class CatalogService:
         self.db = db
 
     # --- Product Operations ---
+    async def _assert_default_box_usable(self, box_id: uuid.UUID) -> None:
+        """WH-5: guard the product's default packaging box at write time.
+
+        Raises ValueError (both product routes map that to 400) when the box does
+        not exist or its paired material is archived. Rejecting an archived box is
+        the point: `order_consumption_service` consumes one anyway and warns
+        "archived but was still consumed", so pointing a product's default at one
+        would manufacture that warning on every future shipment. Fail here instead,
+        once, where a human can see it.
+
+        Clearing to None never reaches this — that is always allowed.
+        """
+        result = await self.db.execute(
+            select(PackagingBox)
+            .where(PackagingBox.id == box_id)
+            .options(joinedload(PackagingBox.material))
+        )
+        box = result.scalar_one_or_none()
+        if box is None:
+            raise ValueError(f"Packaging box {box_id} not found")
+        if not box.material_is_active:
+            raise ValueError(
+                f"Packaging box '{box.name}' is archived and cannot be a "
+                f"product's default"
+            )
+
     async def get_products(self, shop_id: uuid.UUID, is_active: Optional[bool] = True) -> List[Product]:
         query = select(Product).filter(Product.shop_id == shop_id).options(selectinload(Product.variants))
         if is_active is not None:
@@ -35,12 +61,18 @@ class CatalogService:
         return list(result.scalars().all())
 
     async def create_product(self, shop_id: uuid.UUID, schema: ProductCreate) -> Product:
+        if schema.default_packaging_box_id is not None:
+            await self._assert_default_box_usable(schema.default_packaging_box_id)
+
         product = Product(
             shop_id=shop_id,
             title=schema.title,
             description=schema.description,
             external_ref=schema.external_ref,
-            is_active=schema.is_active
+            is_active=schema.is_active,
+            # WH-5. This constructor names its fields explicitly, so a new column
+            # is silently dropped unless it is listed here.
+            default_packaging_box_id=schema.default_packaging_box_id,
         )
         self.db.add(product)
         await self.db.flush()
@@ -77,6 +109,14 @@ class CatalogService:
             return None
 
         update_data = schema.model_dump(exclude_unset=True)
+
+        # WH-5: validate before the setattr loop below picks the field up for free.
+        # There is nothing to validate in the two other cases, and both must reach
+        # that loop unblocked: an explicit null clears the default (and must not be
+        # refused because the box has since been archived), and an absent key is
+        # already dropped by exclude_unset.
+        if update_data.get('default_packaging_box_id') is not None:
+            await self._assert_default_box_usable(update_data['default_packaging_box_id'])
 
         # Extract variants before setting product-level fields
         variant_patches = update_data.pop('variants', None)

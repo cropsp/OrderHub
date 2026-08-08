@@ -16,6 +16,7 @@ from routers import (
     auth, users, shops, customers, orders, imports, attachments, dashboard, shipping, webhooks,
     products, packaging, finance, materials, overhead_materials, receipts,
     partner_payouts, partners, idlaser, app_settings, westernbid, agent_actions,
+    warehouse,
 )
 
 from logger import setup_logging, get_logger
@@ -116,6 +117,7 @@ app.include_router(webhooks.router)
 app.include_router(idlaser.router)
 app.include_router(westernbid.router)
 app.include_router(agent_actions.router)
+app.include_router(warehouse.router)
 
 
 # ─── Health Check ──────────────────────────────────────────
