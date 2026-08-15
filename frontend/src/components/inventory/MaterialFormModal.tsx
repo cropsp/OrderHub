@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 import type { Material, MaterialCreate, MaterialUpdate } from '@/types/inventory'
 
 // 'шт' is the canonical piece unit for this business and what the backend mints
@@ -148,9 +149,19 @@ export default function MaterialFormModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl border-zinc-800 bg-zinc-950 text-zinc-100 p-0 overflow-hidden rounded-3xl">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader className="p-6 border-b border-zinc-800">
+      {/* MAT-UI-1: the dialog primitive is `fixed` + `-translate-y-1/2` with no height
+          cap, so a form taller than the viewport overflowed off both ends with body
+          scroll locked — the footer, and with it Save, became physically unreachable and
+          a click aimed at it landed on the overlay, closing the dialog with nothing
+          saved. Capping the shell and scrolling the body (the ProductForm pattern) keeps
+          header and footer pinned and Save clickable at any viewport height. */}
+      {/* `sm:max-w-3xl`, not `max-w-3xl`: the primitive's own `sm:max-w-sm`
+          (ui/dialog.tsx) is a media-query utility, so an unconditional max-w from the
+          caller loses to it above 640px and the dialog renders 384px wide. That is the
+          "cramped single narrow column" — it was never honouring max-w-2xl either. */}
+      <DialogContent className="sm:max-w-3xl max-h-[94vh] border-zinc-800 bg-zinc-950 text-zinc-100 p-0 overflow-hidden rounded-3xl">
+        <form onSubmit={handleSubmit} className="flex flex-col max-h-[94vh] overflow-hidden">
+          <DialogHeader className="shrink-0 p-6 border-b border-zinc-800">
             <DialogTitle className="text-xl font-bold tracking-tight">
               {isEdit ? 'Edit Material' : 'Register New Material'}
             </DialogTitle>
@@ -159,8 +170,10 @@ export default function MaterialFormModal({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="p-8 space-y-6">
-            <div className="space-y-2">
+          {/* Two columns from md up, so eight fields fit 1440×900 without scrolling.
+              Short fields pair; anything that needs the full width says col-span-2. */}
+          <div className="min-h-0 overflow-y-auto px-8 py-5 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+            <div className="space-y-2 md:col-span-2">
               <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <Package className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Name</p>
@@ -174,39 +187,38 @@ export default function MaterialFormModal({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Unit</p>
-                <Select value={unit} onValueChange={setUnit}>
-                  <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="border-zinc-800 bg-zinc-950">
-                    {UNIT_OPTIONS.map((u) => (
-                      <SelectItem key={u} value={u}>
-                        {u}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-                  Currency {isEdit && <span className="text-zinc-600">(locked)</span>}
-                </p>
-                <Select value={currency} onValueChange={setCurrency} disabled={isEdit}>
-                  <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="border-zinc-800 bg-zinc-950">
-                    {CURRENCY_OPTIONS.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Unit</p>
+              <Select value={unit} onValueChange={setUnit}>
+                <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-zinc-800 bg-zinc-950">
+                  {UNIT_OPTIONS.map((u) => (
+                    <SelectItem key={u} value={u}>
+                      {u}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                Currency {isEdit && <span className="text-zinc-600">(locked)</span>}
+              </p>
+              <Select value={currency} onValueChange={setCurrency} disabled={isEdit}>
+                <SelectTrigger className="border-zinc-800 bg-zinc-900/50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-zinc-800 bg-zinc-950">
+                  {CURRENCY_OPTIONS.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
@@ -244,7 +256,20 @@ export default function MaterialFormModal({
             {/* WH-1: settable at creation too, so a service position can be entered
                 correctly the first time instead of being fixed after it has already
                 driven its stock negative. */}
-            <label className="flex items-start gap-3 p-4 rounded-2xl border border-zinc-800/50 bg-zinc-900/30 cursor-pointer">
+            <label
+              className={cn(
+                'flex items-start gap-3 p-4 rounded-2xl border cursor-pointer transition-colors',
+                // On edit it shares a row with the Stock policy card — both govern
+                // stock, and pairing them is what keeps the form off a scrollbar.
+                !isEdit && 'md:col-span-2',
+                // MAT-UI-1: this decides whether shipping decrements stock — the most
+                // consequential control on the form. It read as filler between two
+                // blocks; the accent makes the chosen state legible at a glance.
+                isStockTracked
+                  ? 'border-zinc-800/50 bg-zinc-900/30 hover:border-zinc-700'
+                  : 'border-teal-500/30 bg-teal-500/[0.07]',
+              )}
+            >
               <input
                 type="checkbox"
                 checked={!isStockTracked}
@@ -252,7 +277,12 @@ export default function MaterialFormModal({
                 className="mt-0.5 size-4 rounded border-zinc-700 bg-zinc-900 accent-teal-500"
               />
               <span>
-                <span className="block text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                <span
+                  className={cn(
+                    'block text-xs font-bold uppercase tracking-widest',
+                    isStockTracked ? 'text-zinc-300' : 'text-teal-300',
+                  )}
+                >
                   Does not consume stock
                 </span>
                 <span className="block text-[10px] text-zinc-500 mt-1">
@@ -313,13 +343,15 @@ export default function MaterialFormModal({
               </div>
             )}
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <div className="flex items-center gap-1.5 text-zinc-400 mb-1">
                 <FileText className="size-3" />
                 <p className="text-[10px] font-bold uppercase tracking-widest">Notes (optional)</p>
               </div>
+              {/* Six-plus lines without an inner scrollbar; these carry sourcing and
+                  costing context that is useless when read three words at a time. */}
               <textarea
-                className="w-full min-h-[80px] rounded-md border border-zinc-800 bg-zinc-900/50 p-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-teal-500"
+                className="w-full min-h-[8.5rem] resize-y rounded-md border border-zinc-800 bg-zinc-900/50 p-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-teal-500"
                 placeholder="Grade, color descriptors, lot info..."
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
@@ -327,14 +359,14 @@ export default function MaterialFormModal({
             </div>
 
             {error && (
-              <div className="flex items-center gap-2 p-3 rounded-xl border border-red-500/20 bg-red-500/5 text-xs text-red-400">
+              <div className="md:col-span-2 flex items-center gap-2 p-3 rounded-xl border border-red-500/20 bg-red-500/5 text-xs text-red-400">
                 <AlertCircle className="size-4" />
                 {error}
               </div>
             )}
           </div>
 
-          <DialogFooter className="bg-zinc-900/30 p-6 border-t border-zinc-800">
+          <DialogFooter className="shrink-0 bg-zinc-900/30 p-6 border-t border-zinc-800">
             <Button
               type="button"
               variant="ghost"
