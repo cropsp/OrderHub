@@ -35,20 +35,36 @@ const serviceMaterial: Material = {
 
 function setup(initialData: Material | null = null) {
   const onSave = vi.fn().mockResolvedValue(undefined)
-  render(
+  const onClose = vi.fn()
+  const { rerender } = render(
     <MaterialFormModal
       isOpen
-      onClose={vi.fn()}
+      onClose={onClose}
       onSave={onSave}
       initialData={initialData}
     />,
   )
-  return onSave
+  // Re-render with a different `initialData` and nothing else changed — the seam
+  // where a background refetch replaces the object the modal was opened with.
+  const rerenderWith = (next: Material | null) =>
+    rerender(
+      <MaterialFormModal
+        isOpen
+        onClose={onClose}
+        onSave={onSave}
+        initialData={next}
+      />,
+    )
+  return { onSave, rerenderWith }
+}
+
+function stockCheckbox() {
+  return screen.getByLabelText(/does not consume stock/i) as HTMLInputElement
 }
 
 describe('MaterialFormModal — stock tracking', () => {
   it('sends is_stock_tracked=false on create when the box is ticked', async () => {
-    const onSave = setup()
+    const { onSave } = setup()
 
     fireEvent.change(screen.getByPlaceholderText(/Шкіра італійська чорна/i), {
       target: { value: 'Пошиття' },
@@ -64,7 +80,7 @@ describe('MaterialFormModal — stock tracking', () => {
   })
 
   it('defaults a new material to stock-tracked', async () => {
-    const onSave = setup()
+    const { onSave } = setup()
 
     fireEvent.change(screen.getByPlaceholderText(/Шкіра італійська чорна/i), {
       target: { value: 'Нитка' },
@@ -76,10 +92,9 @@ describe('MaterialFormModal — stock tracking', () => {
   })
 
   it('reflects an existing untracked material and sends it back on update', async () => {
-    const onSave = setup(serviceMaterial)
+    const { onSave } = setup(serviceMaterial)
 
-    const checkbox = screen.getByLabelText(/does not consume stock/i) as HTMLInputElement
-    expect(checkbox.checked).toBe(true)
+    expect(stockCheckbox().checked).toBe(true)
 
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
 
@@ -88,10 +103,9 @@ describe('MaterialFormModal — stock tracking', () => {
   })
 
   it('leaves a tracked material tracked when editing', async () => {
-    const onSave = setup(trackedMaterial)
+    const { onSave } = setup(trackedMaterial)
 
-    const checkbox = screen.getByLabelText(/does not consume stock/i) as HTMLInputElement
-    expect(checkbox.checked).toBe(false)
+    expect(stockCheckbox().checked).toBe(false)
 
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
 
@@ -103,6 +117,52 @@ describe('MaterialFormModal — stock tracking', () => {
     setup(trackedMaterial)
     expect(screen.queryByText(/packaging/i)).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/category/i)).not.toBeInTheDocument()
+  })
+})
+
+// MAT-UI-1. The seam no other case covers: the modal is open with edits in it and
+// the parent hands down a *new* `initialData` object. On the detail page that is a
+// React Query refetch — a receipt or a stock adjustment invalidates ['materials', id]
+// and the resolved data arrives as a fresh reference. Keying the reset on that
+// reference silently threw the user's typing away and then saved the server's values
+// back, with no error and a closed modal. The reset must key on the target's id.
+describe('MaterialFormModal — in-progress edits survive a refetch', () => {
+  it('keeps the ticked flag when initialData is replaced by an identical object', async () => {
+    const { onSave, rerenderWith } = setup(trackedMaterial)
+
+    fireEvent.click(stockCheckbox())
+    rerenderWith({ ...trackedMaterial })
+
+    expect(stockCheckbox().checked).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ is_stock_tracked: false })
+  })
+
+  it('keeps typed text when initialData is replaced by an identical object', async () => {
+    const { onSave, rerenderWith } = setup(trackedMaterial)
+
+    fireEvent.change(screen.getByPlaceholderText(/Grade, color descriptors/i), {
+      target: { value: 'Партія 2026-08' },
+    })
+    rerenderWith({ ...trackedMaterial })
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ notes: 'Партія 2026-08' })
+  })
+
+  it('still re-syncs when the target material changes', () => {
+    const { rerenderWith } = setup(trackedMaterial)
+    expect(stockCheckbox().checked).toBe(false)
+
+    // Different id — a different row, not a refetch of the same one.
+    rerenderWith(serviceMaterial)
+
+    expect(stockCheckbox().checked).toBe(true)
   })
 })
 

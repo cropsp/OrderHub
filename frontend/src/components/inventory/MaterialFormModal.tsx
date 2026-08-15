@@ -60,10 +60,17 @@ export default function MaterialFormModal({
   )
   const [error, setError] = useState<string | null>(null)
 
-  // Reset state on open/target change — derive during render, matches PackagingForm pattern.
-  const [resetKey, setResetKey] = useState({ isOpen, initialData })
-  if (resetKey.isOpen !== isOpen || resetKey.initialData !== initialData) {
-    setResetKey({ isOpen, initialData })
+  // MAT-UI-1. Reset on the open transition and on a change of *which* material is being
+  // edited — never on the object identity of `initialData`. The parent feeds this from a
+  // React Query result, and a refetch (a receipt or a stock adjustment invalidates
+  // ['materials', id]) resolves to a fresh reference; keying on that reference re-synced
+  // the form from server data mid-edit, silently discarding whatever the user had already
+  // typed and then saving the old values back. In-progress edits always win.
+  // Still derived during render rather than in an effect, to avoid a cascading re-render.
+  const targetId = initialData?.id ?? null
+  const [resetKey, setResetKey] = useState({ isOpen, targetId })
+  if (resetKey.isOpen !== isOpen || resetKey.targetId !== targetId) {
+    setResetKey({ isOpen, targetId })
     setName(initialData?.name || '')
     setUnit(initialData?.unit || 'dm2')
     setCurrency(initialData?.currency || 'UAH')

@@ -102,7 +102,10 @@ export default function MaterialDetailPage() {
     material?.is_stock_tracked !== false && thresholdNum > 0 && stockNum <= thresholdNum
 
   const handleSaveEdit = async (payload: MaterialUpdate) => {
-    if (!material) return
+    // MAT-UI-1: throw, don't return. Resolving here sends no request but still counts as
+    // success to the modal, which then closes on a save that never happened — the same
+    // silent data loss this sprint is about. Throwing surfaces it in the form's error box.
+    if (!material) throw new Error('Material not loaded yet — reopen the editor')
     await updateMaterial.mutateAsync({ id: material.id, data: payload })
   }
 
