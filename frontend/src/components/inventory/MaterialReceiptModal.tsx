@@ -108,8 +108,11 @@ export default function MaterialReceiptModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl border-zinc-800 bg-zinc-950 text-zinc-100 p-0 overflow-hidden rounded-3xl">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader className="p-6 border-b border-zinc-800">
+        {/* max-h-[inherit] takes the cap from DialogContent, so the number stays
+            in the primitive; header and footer are pinned outside the scroller
+            so the submit button can never leave the viewport. */}
+        <form onSubmit={handleSubmit} className="flex max-h-[inherit] flex-col overflow-hidden">
+          <DialogHeader className="shrink-0 p-6 border-b border-zinc-800">
             <div className="flex items-center gap-3">
               <div className="size-10 rounded-xl flex items-center justify-center border border-amber-500/20 bg-amber-500/10 text-amber-500">
                 <PackagePlus className="size-5" />
@@ -127,7 +130,7 @@ export default function MaterialReceiptModal({
             </div>
           </DialogHeader>
 
-          <div className="p-8 space-y-6">
+          <div className="min-h-0 overflow-y-auto p-8 space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
@@ -259,7 +262,7 @@ export default function MaterialReceiptModal({
             )}
           </div>
 
-          <DialogFooter className="bg-zinc-900/30 p-6 border-t border-zinc-800">
+          <DialogFooter className="shrink-0 bg-zinc-900/30 p-6 border-t border-zinc-800">
             <Button
               type="button"
               variant="ghost"

@@ -101,8 +101,11 @@ export default function PackagingForm({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl border-zinc-800 bg-zinc-950 text-zinc-100 p-0 overflow-hidden rounded-3xl">
-        <form onSubmit={handleSubmit}>
-          <DialogHeader className="p-6 border-b border-zinc-800">
+        {/* max-h-[inherit] takes the cap from DialogContent, so the number stays
+            in the primitive; header and footer are pinned outside the scroller
+            so the submit button can never leave the viewport. */}
+        <form onSubmit={handleSubmit} className="flex max-h-[inherit] flex-col overflow-hidden">
+          <DialogHeader className="shrink-0 p-6 border-b border-zinc-800">
             <DialogTitle className="text-xl font-bold tracking-tight">
               {initialData ? 'Edit Packaging Specs' : 'Register New Packaging'}
             </DialogTitle>
@@ -111,7 +114,7 @@ export default function PackagingForm({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="p-8 space-y-6">
+          <div className="min-h-0 overflow-y-auto p-8 space-y-6">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Internal Name</p>
@@ -262,7 +265,7 @@ export default function PackagingForm({
             )}
           </div>
 
-          <DialogFooter className="bg-zinc-900/30 p-6 border-t border-zinc-800">
+          <DialogFooter className="shrink-0 bg-zinc-900/30 p-6 border-t border-zinc-800">
             <Button 
               type="button" 
               variant="ghost" 
