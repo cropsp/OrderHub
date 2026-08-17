@@ -250,7 +250,7 @@ export default function UsersPage() {
               </p>
             )}
 
-            <DialogFooter className="bg-zinc-900/30 -mx-6 -mb-6 p-6 mt-8 flex flex-row gap-3">
+            <DialogFooter className="bg-zinc-900/30 p-6 mt-8 flex flex-row gap-3">
               <Button
                 type="button"
                 variant="ghost"
@@ -327,7 +327,7 @@ export default function UsersPage() {
               </p>
             )}
 
-            <DialogFooter className="bg-zinc-900/30 -mx-6 -mb-6 p-6 mt-8 flex flex-row gap-3">
+            <DialogFooter className="bg-zinc-900/30 p-6 mt-8 flex flex-row gap-3">
               <Button
                 type="button"
                 variant="ghost"

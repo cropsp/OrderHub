@@ -522,7 +522,7 @@ export default function ShopsPage() {
               </div>
             )}
 
-            <DialogFooter className="bg-zinc-900/20 p-6 -m-6 mt-6 border-t border-zinc-800">
+            <DialogFooter className="bg-zinc-900/20 p-6 mt-6 border-t border-zinc-800">
               <Button
                 type="button"
                 variant="ghost"

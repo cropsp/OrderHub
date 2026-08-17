@@ -113,6 +113,11 @@ function DialogFooter({
   return (
     <div
       data-slot="dialog-footer"
+      // `-mx-4 -mb-4` cancels DialogContent's `p-4` exactly, which is what makes
+      // this a flush full-bleed bar. Do not restate them at a call site: a
+      // hardcoded `-m-6` overhangs by 8px, and now that the content is a scroll
+      // container that overhang is a permanent scrollbar rather than an
+      // invisible spill.
       className={cn(
         "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
         className
