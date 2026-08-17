@@ -5357,6 +5357,186 @@ representative); revert only if a pristine dev dataset is ever needed.
 
 ---
 
+### MAT-UI-1 — material form: unreachable footer + reset that survives a refetch (closed 2026-08-17)
+
+**Status: MERGED + DEPLOYED 2026-08-17** — fast-forward `303e50d → ffc9d8e`, no merge commit,
+linear history. Frontend-only, **no migration**. Commits after a trailer-stripping rebase:
+`f235eea` (reset keyed on id + `handleSaveEdit` throws), `239dcdd` (`max-h-[94vh]`,
+`sm:max-w-3xl`, two columns), `ffc9d8e` (docs WH-3). Two doc-only commits followed —
+`67545f0` (CLAUDE.md typecheck gate) and `b6dae9a` (`npm run typecheck` script) — so
+`main == origin/main == b6dae9a` while **prod stays on `ffc9d8e`**: both are outside
+`frontend/src`, the bundle is unchanged, and `Dockerfile.deploy` calls `npx vite build`
+directly, so no redeploy was warranted. Container serves `index-Bime1w8m.js`, hash matching
+the local build of the same commit.
+
+**Why the sprint existed.** `SVC-MATERIAL-NONSTOCK-OP` could not be completed through the UI:
+ticking "Does not consume stock", clicking Save, and the modal closed with no error and
+nothing persisted — three attempts, full reload between each.
+
+**The filed hypothesis was wrong, and CC refuted it with evidence rather than adopting it.**
+`task.md` blamed a render-phase reset keyed on `initialData` object identity, triggered by a
+React Query refetch. Three independent facts killed it: `main.tsx:13` sets
+`refetchOnWindowFocus: **false**` (since `dc3e46b`, 2026-04-19) — the named trigger has never
+been enabled in this app; React Query v5 `structuralSharing` returns the **previous** object
+when refetched content is identical, so identity would not change anyway; and the prod access
+log shows **no GET** between page load and save on all three attempts, and **no PATCH at all**
+on two of them. A save that never reaches the network is not a payload bug.
+
+**Actual mechanism — the dialog footer was off-screen.** `ui/dialog.tsx:62` gives
+`DialogContent` no height cap and no overflow; Radix locks body scroll. The edit variant renders
+a "Stock policy" card the create variant does not, putting it at **1012 px in a 900 px
+viewport** (measured: top −56, bottom 956; Save at y916–948; `elementFromPoint` over it returns
+`null`). A click aimed there hits the overlay and `onPointerDownOutside` closes the dialog.
+Underneath sat a second defect: the dialog was **never** `max-w-2xl` — the primitive's own
+`sm:max-w-sm` is a media-query utility, so an unconditional `max-w-*` from a caller loses on
+specificity above 640 px and the form rendered as a **384 px** column. The excessive height was
+a consequence of the width. The reported "intermittency" was viewport-height dependence, not
+timing.
+
+**Reset fix kept anyway.** Though not the cause, keying the reset on `initialData?.id` is
+correct per the brief's settled rule that in-progress edits always beat a background refetch.
+Reachable today only by recording a receipt or adjustment and reopening Edit before the
+`['materials', id]` invalidation resolves — narrow, but real. `MaterialDetailPage.handleSaveEdit`
+now throws instead of returning silently when the material is not yet loaded: the silent return
+resolved successfully, so the modal counted it as a save and closed on a lie.
+
+**Verification.** 241/241 vitest, lint 87 = baseline, `npx vite build` exit 0 in 980 ms.
+`npx tsc -p tsconfig.app.json --noEmit` = 21 errors, **byte-identical to `main` `303e50d`** and
+none in the sprint's files (see `TYPECHECK-1`). Rebase proof: `git diff 2a9a383 HEAD` empty —
+only messages changed. Three regression tests added, red before / green after, including the
+jsdom analogue of the manual smoke (`MaterialFormModal.test.tsx:144` — type into Notes, replace
+`initialData` with an identical object, submit, assert the typed text still reaches the payload).
+
+**Prod verification (Cowork, live, 2026-08-17).** Geometry `[true, true, true]` at 2133×995:
+dialog **759×730** against the broken **1012×384**, 118 px clearance top and bottom. Computed
+styles: `max-height` 995 px ≈ 94vh, `max-width` **768 px** (so `sm:max-w-3xl` now wins),
+`grid-template-columns: 340px 340px`, and — the structural guarantee — the **footer sits outside
+the scroll container**, so shrinking is absorbed by the body while header and footer stay pinned.
+Smoke passed both directions: a marker appended to `Лазерна порізка`'s Notes survived a reload,
+then was removed the same way and confirmed gone, notes byte-identical to the original.
+
+**Two honest gaps in the prod verification, accepted:** (1) the second viewport (1280×720) was
+**not** measured — `resize_window` reported success but the window manager ignored it. An attempt
+to simulate a small screen by clamping `max-height` on the dialog was **discarded as invalid**
+rather than reported: it clamps the dialog without shrinking the internal scroller, a state that
+cannot occur naturally since both bounds are expressed in `vh` and shrink together — it produced
+a false negative. Coverage rests on the structural check plus CC's dev-time measurement at
+1280×720 and 375×667. (2) The smoke click was DOM-level (`button.click()`), not an OS-level
+pointer event, because coordinate clicks and synthetic typing proved unreliable in that window.
+The geometric half is nonetheless proven directly: `elementFromPoint` at the button's centre
+returns **the button** — the literal negation of the broken state, where an overlay sat there.
+
+**Left standing, filed as `MAT-UI-2`:** `ui/dialog.tsx` has **0 commits** on this branch, so
+`PackagingForm`, `MaterialReceiptModal`, `OverheadMaterialFormModal` and
+`OverheadMaterialReceiptModal` are byte-identical and still carry both defects. Measured on prod:
+the packaging `Register Receipt` dialog is 718 px tall, 384 px wide, `max-height: none` — already
+broken on any viewport under ~718 px.
+
+**Method note worth keeping.** During `SVC-MATERIAL-NONSTOCK-OP` (all 12 service materials flipped
+by Cowork through the UI on the *unfixed* build) the workaround was `form.requestSubmit()`, which
+submits without touching the button and therefore bypasses the geometry entirely. It is available
+to automation only — a human's fallback was pressing Enter in a text field, which is what made
+Sergii's single manual flip succeed and produced the misleading "works on a taller display"
+reading. His display is 1920×1080; the maximum browser viewport there is 953 px, still short of
+the 1012 px dialog. **Clicking never worked for anyone on this form.**
+
+### MAT-UI-2 — dialog primitive: height cap, pinned footer, callers own their width (closed 2026-08-17)
+
+**Status: MERGED + DEPLOYED 2026-08-17** — `b6dae9a → f5bb75f`, linear, no branch (both commits
+straight on `main`). Frontend-only, no migration, backend untouched. Prod `ffc9d8e → f5bb75f`;
+bundle `index-Bime1w8m.js` → **`index-CbYSLsTg.js`**, CSS → **`index-9bg9Y8-A.css`**, both
+verified live. Two commits: **`cbf453d`** (primitive + four callers + 11 tests), **`f5bb75f`**
+(stale footer margins).
+
+**Why.** `MAT-UI-1` fixed one component's `className`; the defects lived in the shared primitive
+and four sibling dialogs still carried them. Measured on prod before the fix: the packaging
+`Register Receipt` dialog was **718 px tall, 384 px wide, `max-height: none`** — reachable only
+because the operator's viewport is 953 px; a 1366×768 laptop (~660 px) was already broken.
+
+**Root cause of the width half — diagnosed precisely, not guessed.** `cn()` is `tailwind-merge`,
+and `sm:max-w-sm` (primitive) and `max-w-2xl` (caller) land in **different twMerge buckets**, so
+both survive. Specificity is **equal**; the media-query rule simply sits later in the compiled
+CSS — `.max-w-2xl` at byte **20665**, `.sm\:max-w-sm` at **112644** — so source order decides and
+the caller loses. Every dialog that believed it was 672 px was 384 px.
+
+**The fix (`ui/dialog.tsx:62`, one class string):** `w-full max-w-[calc(100%-2rem)]` →
+`w-[calc(100%-2rem)]` so the gutter lives in the `w-` bucket and `max-w-` belongs entirely to the
+caller; `sm:max-w-sm` → `max-w-sm` so twMerge can *remove* it rather than lose to it;
+`+ max-h-[calc(100dvh-2rem)]`; `+ overflow-x-hidden overflow-y-auto`. Four callers got an
+identical 4-line change — form `flex max-h-[inherit] flex-col overflow-hidden`, header/footer
+`shrink-0`, body `min-h-0 overflow-y-auto`. **`max-h-[inherit]` rather than a magic number** is
+what makes the structure shrink as one unit, and it is also what made the small-viewport
+simulation *valid* this time (see verification).
+
+**Side effect worth recording:** below 640 px, `max-w-2xl` used to delete
+`max-w-[calc(100%-2rem)]`, so **every dialog ran edge-to-edge on mobile**. The fix restores the
+gutter. Nobody had noticed.
+
+**A regression caught inside the sprint, by adversarial review + independent confirmation.** A
+lone `overflow-y-auto` promotes the visible X axis to `auto`; `ShopsPage`'s footer carries `-m-6`
+against the primitive's `p-4`, overhanging 8 px, which would have produced a permanent horizontal
+scrollbar. CC added `overflow-x-hidden` + a test. Cowork's prod/dev measurement then found the
+**mirror on the Y axis** — `clientHeight 569 / scrollHeight 577` — a spurious vertical scrollbar
+on a dialog whose content fits. Root cause was deeper than the symptom: `-m-6` is −24 px, written
+when the primitive had `p-6`; it now has `p-4`. The margin had been stale and invisible for as
+long as `overflow` was `visible`. CC then **narrowed Cowork's finding rather than accepting it** —
+of the three sites, only `ShopsPage` was a live regression; the two `UsersPage` dialogs pass their
+own `overflow-hidden`, so their overhang was clipped byte-identically before and after. Fixed by
+**removing** the negative margins (not `-6`→`-4`): the base `-mx-4 -mb-4` is already tuned to the
+primitive's `p-4`, so no hardcoded duplicate can drift again. `mt-6` / `mt-8` sit in a different
+twMerge group and survive — vertical spacing above the footer is unchanged.
+
+**Verification — dev (`cbf453d`) and prod (`f5bb75f`), Cowork:**
+
+| Dialog | width before → after | `hitOk` | footer outside scroller |
+|---|---|---|---|
+| Register Receipt (packaging) | 384 → **638** (cap 672) | ✅ | ✅ |
+| Register New Packaging | 384 → **638** | ✅ | ✅ |
+| Register Overhead Material | 384 → **638** | ✅ | ✅ |
+| Edit Overhead Material | 384 → **638** | ✅ | ✅ |
+
+Prod, same dialog before and after: `718×384 / max-height: none / no scroller` →
+`635×638 / max-height 921px / scroller present, footer outside it`.
+`Edit Store Settings` regression closed on both environments: `569/577 → **577/577**` vertical,
+`753/761 → **768/768**` horizontal, footer margin `24px -16px -16px`.
+
+**Small-viewport simulation was valid this time, and provably so.** Clamping the dialog's
+`max-height` made the form's computed `max-height` track it exactly (700→700 px, 600→600 px), the
+scroller absorbed the difference (487 → 438 → 338 → 258 → 198), and `hitOk` stayed `true` down to
+**360 px** — smaller than any real device. The identical trick produced a *false negative* during
+MAT-UI-1 and was discarded there, because that body had its own `vh`-based cap that did not shrink
+with the clamp. `max-h-[inherit]` is the difference.
+
+**Gates (both commits):** vitest **252/252** (241 baseline + 11 new, 40 files) ·
+`tsc -p tsconfig.app.json --noEmit` **21**, list diff against `main` empty · lint **87** = baseline ·
+`npx vite build` exit 0. Compiled CSS confirmed to contain `max-height:calc(100dvh - 2rem)`,
+`width:calc(100% - 2rem)`, `max-height:inherit`, `overflow-x:hidden`.
+
+**Red-before:** 9 of the 11 new tests fail against `main` (4 × "scroller does not exist at all",
+5 × structural), obtained by stashing the source. The 2 that pass in both states guard the
+caller-override path and are expected to.
+
+**The "before" proof is DERIVED, not measured — stated plainly.** Neither actor could shrink the
+browser viewport (`resize_window` was accepted and then ignored by the window manager), and at the
+operator's real 953–995 px the *old* dialog fits, so `hitOk` there is legitimately `true`. CC's
+initial prediction of `hitOk: false` on prod was **wrong** — it silently assumed a sub-720 px
+viewport — and he retracted it. The failure below ~718 px rests on three converging lines instead:
+arithmetic (an uncapped 718 px centred dialog in a 660 px viewport hangs 29 px off each end, with
+Radix locking body scroll so nothing can bring it back), the 9/11 red tests, and MAT-UI-1's direct
+measurement of the identical failure at 1012 px in 900 px with `elementFromPoint` over Save
+returning `null`.
+
+**Blast radius, approved in advance:** 15 of 18 dialogs changed width; **none narrowed** — each
+now gets the width it always asked for. The three unchanged are exactly those that had already
+worked around the trap correctly. Only three dialogs inherit the primitive's new `overflow`
+(`ShopsPage:268`, `ConfirmSoftDeleteModal:31`, `DraftGenerator:107`) and only one of those carried
+a negative margin.
+
+**Left open, filed:** `DIALOG-FOOTER-INSET` — the mirror defect on the 12 `p-0` dialogs, found by
+CC during this sprint and deliberately not fixed (pre-existing, out of scope).
+
+---
+
 **Explicitly deferred (parked, no work this round)**
 
 Tracked here so the roadmap is exhaustive — none of these is forgotten,
@@ -5379,7 +5559,9 @@ in this document where applicable, to avoid duplication.
 | ADDR-VAL-JP | JP address validation (currently short-circuits to `unsupported`) | ADDR-VAL-1 real-API sign-off (2026-07-17) = **NO-GO as built**: Google returns romaji input as fullwidth kanji (romaji→kanji false diff on ~100% of JP orders) and 2/6 valid JP addresses returned `couldnt_verify`. Removed from the GA allowlist by **AV1-FIX-2** (`PREVIEW_COUNTRIES_SENT` now empty; code TODO left to re-enable). Re-enable only once the diff layer detects romaji-in / kanji-out and suppresses script-conversion-only changes — this naturally lands with ADDR-VAL-2's diff/apply UI (same suppression also cleans the cosmetic zip+4 / street-suffix diffs on GA countries). |
 | ADDR-VAL-2-followup-1 | Apply's confirmation uses a native `confirm()` rather than a styled dialog | Surfaced during the ADDR-VAL-2 Cowork smoke (2026-07-17). Apply *does* confirm before overwriting the customer-entered address (as specced in rule 4), but via the browser's native `confirm()` — unstyled, and it blocks the renderer while open (froze the browser automation for ~30s mid-smoke). Purely cosmetic/UX; the guard itself works correctly and the write path is sound. Fix: swap for the project's own modal/confirm idiom. Deliberately left out of ADDR-VAL-2 scope; bundle with the next order-detail frontend sprint. |
 | NETPROFIT-RECONCILE | Dashboard Net Profit excludes allocated overhead; Finance subtracts it | Surfaced by DASH-PERIOD when comparing the dashboard to `/shops/{id}/finance` for the same shop+period. Dashboard `net_profit = revenue − COGS − fees − shipping` (`dashboard.py:90`); Finance subtracts a 4th term `allocated_overhead` (`finance_service.py:501-506`). Revenue/COGS/Fees reconcile exactly; only Net Profit diverges, and only for shops with overhead in the window. Pre-existing definitional difference (not introduced by DASH-PERIOD). Needs a decision: align the dashboard headline Net Profit to include allocated overhead (like Finance), or document the two as intentionally different. Low-risk; ~1 term added to one aggregate if we align. |
-| TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. **Update (2026-07-18, surfaced during USERS-LIST-500):** CC reported `npm run build` failing on `useProducts.ts`, `setupTests.ts` and `types/shipping.ts`, and characterised it as blocking a production build. Empirically it is **not** blocking today — the prod frontend image built and deployed successfully three times this week (ADDR-VAL-1 `bdb5866`, ADDR-VAL-2 `2f94b28`, USERS-LIST-500 `e44f6e2`), so `Dockerfile.deploy` evidently does not run `tsc` during the image build. Fold these three files into part (a) rather than filing a separate ticket, and confirm what the Docker build step actually runs before ever treating this as a deploy blocker. **Update (2026-08-07, PARTNER-CONFIG-1):** `main`'s real count has drifted 21 → **27** tsc errors (the sprint diffed byte-identical against `main`, so none are its) — six new errors entered `main` since this row was measured. The debt grows while unwatched. |
+| TYPECHECK-1 | Frontend typecheck gate never actually ran + 25 pre-existing type errors on `main` | Discovered during ORD-BULK-1 (CC). `npm run typecheck` from CLAUDE.md **does not exist**, and the documented `npx tsc --noEmit` is a **no-op** — root `tsconfig.json` is a solution file with `"files": []`. The real command is `npx tsc -p tsconfig.app.json --noEmit` (or `tsc -b` via `npm run build`), which reports **25 type errors on main** (e.g. `RevenueChart.tsx`, `CSVImportModal.tsx`, `ProductForm.tsx`, `DetailHeader.tsx`) — all pre-existing, in files untouched by recent sprints. Prior "tsc --noEmit clean" gates (ORD-UX-1, PC-F-1) were this same no-op. Two parts: (a) fix the 25 errors in a dedicated cleanup sprint (surgical, no behaviour change); (b) correct CLAUDE.md's Build/Verify section to document the real typecheck command + add a `typecheck` npm script so the gate is real going forward. **Update (2026-07-18, surfaced during USERS-LIST-500):** CC reported `npm run build` failing on `useProducts.ts`, `setupTests.ts` and `types/shipping.ts`, and characterised it as blocking a production build. Empirically it is **not** blocking today — the prod frontend image built and deployed successfully three times this week (ADDR-VAL-1 `bdb5866`, ADDR-VAL-2 `2f94b28`, USERS-LIST-500 `e44f6e2`), so `Dockerfile.deploy` evidently does not run `tsc` during the image build. Fold these three files into part (a) rather than filing a separate ticket, and confirm what the Docker build step actually runs before ever treating this as a deploy blocker. **Update (2026-08-07, PARTNER-CONFIG-1):** `main`'s real count has drifted 21 → **27** tsc errors (the sprint diffed byte-identical against `main`, so none are its) — six new errors entered `main` since this row was measured. The debt grows while unwatched. **Update (2026-08-17, MAT-UI-1 deploy) — part (b) is CLOSED:** count moved back **27 → 21** (six fixed since the 08-07 measurement; measured on `main` `303e50d` and on the MAT-UI-1 branch, lists byte-identical, so the sprint contributed none). Confirmed a third time via `--listFiles` that `npx tsc --noEmit` compiles **0** files; all 21 come from `tsconfig.app.json` (`tsconfig.node.json` = 0). **CLAUDE.md § Test & Verify now documents the real command with a warning and the current number 21** (`67545f0`), and **`npm run typecheck` exists** as `tsc -p tsconfig.app.json --noEmit`, verified to exit 2 rather than a silent 0 (`b6dae9a`) — the name is now occupied by the correct command instead of being free for someone to fill wrongly. Note the loop this closes: CC reported "typecheck clean" **again** during this very sprint, because it followed the documented command — the doc was manufacturing false green reports, which is why (b) was worth doing before (a). **Remaining: part (a)** — fix the 21 — and after it, re-enable `tsc` in `Dockerfile.deploy` per `PROD-BUILD-NO-TYPECHECK`. Composition measured 2026-08-17: **1 real defect** (`RevenueChart.tsx:63` — `new Date(label)` where Recharts types `label` as `string \| number \| undefined`; the guard checks `active`/`payload` but not `label`, so an undefined label renders `Invalid Date` in the tooltip), **7 implicit-any** (`ProductForm` ×5, `DetailLogistics` ×2 — latent type holes in `.map((_, i) =>)` callbacks), **8 dead code** (unused `Badge`, `FileSpreadsheet`, `X`, `file`, `shopId` ×2, `target` across `CSVImportModal` ×4, `ProductForm` ×1, `useProducts` ×2, `setupTests` ×1), **5 pure config** (4× `vi` not found in `setupTests.ts` — `tsconfig.app.json` excludes `*.test.ts*` and `__tests__/**` but **not** `src/test/setupTests.ts`, so it is typechecked without vitest globals; 1× `TS1484` type-only import in `types/shipping.ts` from `verbatimModuleSyntax`). Cheapest first move: excluding `setupTests.ts` (or giving it `types: ["vitest/globals"]`) plus the type-only import removes **5 of 21 with one config edit**, and deleting the dead imports removes 8 more — leaving 8 that need actual thought. |
+| MAT-UI-2 | Four sibling dialogs still carry the exact bug MAT-UI-1 just fixed — silent data loss with no error | Filed 2026-08-17 from the MAT-UI-1 deploy. `MaterialFormModal` was fixed; **`PackagingForm`, `MaterialReceiptModal`, `OverheadMaterialFormModal` and `OverheadMaterialReceiptModal` were not** — CC confirmed `ui/dialog.tsx` has **0 commits** on the MAT-UI-1 branch, so the shared primitive is untouched and all four keep the original two defects: (a) an unconditional `max-w-2xl` **loses on specificity** to the primitive's own `sm:max-w-sm` (`ui/dialog.tsx:62`), so they render as a **384 px** column; (b) there is **no height cap and no internal scroll**, so a tall form overflows the viewport symmetrically and its footer goes off-screen. **Measured on prod 2026-08-17 (Cowork, live):** the packaging `Register Receipt` dialog reports `max-height: none`, `max-width: 384px`, actual height **718 px**. It fits today only because the operator's viewport is 995 px; **on any viewport below ~718 px CSS px the Save/Register button is unreachable** — a 1366×768 laptop gives roughly 660 px and is therefore **already broken**. The failure mode is the dangerous one, established during MAT-UI-1: the pointer lands on the Radix overlay instead of the button, `onPointerDownOutside` closes the dialog, and the user sees a modal that closed with **no error and nothing saved**. **Preferred fix: repair the primitive, not the four callers** — give `DialogContent` a default height cap plus a pinned header/footer around a scrollable body, and resolve the `sm:max-w-*` specificity trap so a caller's `max-w-*` actually wins (or document the `sm:`-prefixed form as the only supported override). That heals every current and future dialog in one place; patching four `className` strings leaves the trap armed for the fifth. Verification must be the geometric one that proved MAT-UI-1: `document.elementFromPoint` at the submit button's centre must return the button, measured at ≥2 viewport heights including one below 720 px. **Priority note (corrected 2026-08-17):** originally argued as blocking Phase 4 of the warehouse epic on the assumption that inventory would be entered through these screens — **Sergii confirmed inventory will run through Cowork + Claude Code over MCP instead**, so that urgency does not hold. It stays worth doing because silent data loss is the worst failure mode a form can have, the fix is one shared component, and these screens will be opened by hand eventually. |
+| DIALOG-FOOTER-INSET | Footer buttons sit closer to the dialog edge than the fields above them, on all 12 `p-0` dialogs | Found by CC during MAT-UI-2 (2026-08-17) and **deliberately left unfixed** — pre-existing, not introduced by that sprint, and out of its scope. Mirror image of the regression MAT-UI-2 *did* fix: `DialogFooter`'s base `-mx-4 -mb-4` is tuned to the primitive's `p-4`, but the 12 dialogs that pass `p-0` (including all four MAT-UI-2 targets) give it nothing to cancel, so the footer overhangs **16 px on each side**. Their own `overflow-hidden` clips it, so it is invisible as an overhang — but visible as **misalignment**: footer buttons end up ~8 px from the dialog edge while the body's fields sit at ~32 px (`p-8`). Cosmetic only; no data loss, no unreachable control. Fix shape: either give `DialogFooter` a variant whose negative margin matches the content padding it is actually placed in, or stop expressing the full-bleed footer as a negative margin at all (a footer that is a sibling of the padded body rather than a child of it needs no negative margin). Cheap to verify — compare `getComputedStyle(footer).margin` against the content wrapper's padding. Bundle with the next dialog-touching sprint; do **not** patch 12 call sites. |
 | PC-F-1-followup-1 | Products-list thumbnail (small image in the ProductsPage name cell so near-identical products are distinguishable at a glance) | Deferred per PC-F-1 OQ-4 to keep v1 bounded to the detail card. Needs a batch image endpoint or signed URLs — the current per-product authenticated blob fetch would mean N fetches per list render. |
 | PC-F-1-followup-2 | `GET /products/{id}` and the mirrored `GET /products/{id}/image` lack shop-scoping | **Security.** Pre-existing SEC-05 gap (the product GET never scoped by shop); the new PC-F-1 image route inherits it by mirroring the pattern — any authenticated user can read another shop's product / product image by id. NOT introduced by PC-F-1. Prioritise: add the shop-scope guard to both the product GET and the image GET. |
 | BUG-4 | Orders list TOTAL + Dashboard widgets read stale `order.total_price` | Pending more user interaction with the system before deciding if it's a bug or by-design |

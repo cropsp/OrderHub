@@ -100,7 +100,7 @@
 
 **Скидання форми лишається реальним, але вузьким латентним дефектом** (`MaterialFormModal.tsx:64-81`, скидає всі 9 полів + `setError`). За `refetchOnWindowFocus: false` плюс структурне шарування дістати його можна лише одним шляхом: зробити receipt або adjustment на сторінці деталі й відкрити Edit до того, як розв'яжеться інвалідаційний refetch (`hooks/useMaterials.ts:113-116,143-145`). Виправляється в тому ж спринті.
 
-**Спринт: `MAT-UI-1`** (`task.md`). Спорідненого масштабу follow-up-и, знайдені по ходу: той самий дефект скидання у `PackagingForm.tsx:52-53` (дослівна копія, ще й не скидає `error`); той самий необмежений `DialogContent` у **`MaterialReceiptModal`, `PackagingForm`, `OverheadMaterialFormModal`, `OverheadMaterialReceiptModal`** — усі експоновані на недосяжний футер; клас `custom-scrollbar` (`ProductForm.tsx:135`) використовується один раз і ніде не визначений.
+**Спринт `MAT-UI-1` — ✅ змержено й задеплоєно 2026-08-17** (`303e50d → ffc9d8e`, fast-forward; closure entry в `implementation_plan.md`). Перевірено на проді: діалог 759×730 проти зламаних 1012×384, футер поза скрол-контейнером, смоук збереження пройдено в обидва боки. Follow-up-и, знайдені по ходу: той самий дефект скидання у `PackagingForm.tsx:52-53` (дослівна копія, ще й не скидає `error`); той самий необмежений `DialogContent` у **`MaterialReceiptModal`, `PackagingForm`, `OverheadMaterialFormModal`, `OverheadMaterialReceiptModal`** — усі експоновані на недосяжний футер; клас `custom-scrollbar` (`ProductForm.tsx:135`) використовується один раз і ніде не визначений.
 
 > ⚠️ **Операційно:** `MaterialReceiptModal` — це те саме вікно, в якому задаються ставки пошиття. Після кожної ставки звіряй `AVG UNIT COST` на картці матеріалу; якщо там 0.00, збереження не відбулось.
 

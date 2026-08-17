@@ -18,7 +18,7 @@ uvicorn main:app --reload --port 8000
 
 # Frontend
 cd frontend && npm install
-npm run dev          # dev server on :5173
+npm run dev          # dev server on :3000 (vite.config.ts:16 — NOT Vite's default 5173)
 npm run build        # tsc -b && vite build — ЧЕРВОНИЙ на main, див. § Test & Verify
 npx tsc -p tsconfig.app.json --noEmit   # typecheck — див. § Test & Verify
 
