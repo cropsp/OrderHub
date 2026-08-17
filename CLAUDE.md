@@ -19,8 +19,8 @@ uvicorn main:app --reload --port 8000
 # Frontend
 cd frontend && npm install
 npm run dev          # dev server on :5173
-npm run build        # production build
-npm run typecheck    # must pass before committing
+npm run build        # tsc -b && vite build — ЧЕРВОНИЙ на main, див. § Test & Verify
+npx tsc -p tsconfig.app.json --noEmit   # typecheck — див. § Test & Verify
 
 # Database
 cd backend && alembic upgrade head   # apply migrations
@@ -35,9 +35,15 @@ cd backend && python -m pytest tests/ -v
 python -m pytest tests/ -k "test_name"  # single test
 
 # Frontend checks
-cd frontend && npx tsc --noEmit        # typecheck
-npm run lint                            # eslint
+cd frontend && npx tsc -p tsconfig.app.json --noEmit   # typecheck — THE REAL ONE
+npm run lint                                            # eslint
 ```
+
+> ⚠️ **`npx tsc --noEmit` — це no-op. Не використовуй її.** Кореневий `tsconfig.json` є solution-файлом з `"files": []`, тож команда перевіряє **нуль** файлів із `src/` і завжди виходить із кодом 0. Перевірено `--listFiles` тричі (останній раз 2026-08-17). Агенти регулярно доповідають «typecheck чисто», виконавши саме її — рівно тому, що ця інструкція раніше стояла тут.
+>
+> Справжній тайпчек — `npx tsc -p tsconfig.app.json --noEmit`. **Станом на 2026-08-17 він дає 21 помилку на `main`** (див. `TYPECHECK-1` в `implementation_plan.md`): 1 справжній дефект (`RevenueChart.tsx:63`), 7 implicit-any, 8 мертвих імпортів/змінних, 5 конфігурних. Це успадкований борг, не твоя регресія — але **порівнюй свій результат із цим числом**, а не з нулем.
+>
+> `npm run build` (`tsc -b && vite build`) червоний з тієї ж причини. Прод це не ламає: `frontend/Dockerfile.deploy` збирає через `npx vite build`, який тайпчек не запускає взагалі (`PROD-BUILD-NO-TYPECHECK`). Наслідок, який варто тримати в голові: **на шляху до продакшену типи не перевіряє ніхто, крім тебе вручну.**
 
 **Always run typecheck + lint after frontend changes. Always run pytest after backend changes.**
 
