@@ -5303,8 +5303,15 @@ booked; catalog now 52 items incl. 4 envelopes), last purchase prices pinned for
 
 ### WH-5 — product default box + retro-consumption runner (closed 2026-08-08)
 
-**Status: built on `feat/wh-5-default-box-retro-runner` (`4911cad`); NOT merged, NOT
-deployed.** Last code sprint of the warehouse epic; the runner's prod execution is
+**Status: MERGED + DEPLOYED 2026-08-08** — feature `4911cad`, merge `303e50d`, docs
+`5bbfc53` (incl. the runbook, now tracked); `main == origin ==` prod. Migration
+`a3c5e7b91d40` applied on container start (single head; `default_packaging_box_id` uuid
+NULL confirmed via information_schema). Post-merge: backend 1033 / MCP 113 / frontend
+238 — all matching the branch's claims. Prod healthy, zero new ERRORs, the OWNER-only
+backfill endpoint registered and NOT called (verified by route-table introspection, not
+HTTP). MCP test-count discrepancy resolved: 91 = `def` count, 104/113 = collected incl.
+parametrize expansion — like-for-like WH-5 moved the suite 104 → 113, nothing skipped.
+Last code sprint of the warehouse epic; the runner's prod execution is
 deliberately NOT part of it (runbook Phase 5, after BOM coverage + stocktake receipts).
 
 **What shipped (CC, plan-mode gated):**
