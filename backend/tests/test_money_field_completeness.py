@@ -197,6 +197,11 @@ MONEY_FIELD_CLASSIFICATION: dict[str, str] = {
     # /api/westernbid/tracking carries a currency amount.
     "days_overdue": "neutral",
     "days_since_movement": "neutral",
+    # WB-ALERTS-1: how long a dashboard parcel alert has been waiting. Same
+    # reasoning as its two neighbours — a float on purpose, so this guard sees
+    # it and forces the verdict rather than letting an int slip past
+    # unclassified. /api/westernbid/alerts carries no currency amount.
+    "age_days": "neutral",
     # PARTNER-CONFIG-1
     #
     # `fx_rate_used`: NEUTRAL, and the obvious verdict is the wrong one. The

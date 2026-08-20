@@ -95,6 +95,23 @@ def _db(execute_results=()):
     return db
 
 
+def _alert_sync_results(
+    parcels=(), tracking_rows=(), thresholds=(), open_alerts=(), orders=None
+):
+    """The `db.execute` tail `run_poll` grew when WB-ALERTS-1 added alert sync.
+
+    In order: classify_parcels (stalled-days scalar, parcels, tracking rows,
+    plus an order lookup only when some parcel carries an order_id), then the
+    one thresholds query, then the open-alert query.
+    """
+    results = [_scalar(None), _scalars(list(parcels)), _scalars(list(tracking_rows))]
+    if orders is not None:
+        results.append(list(orders))
+    results.append(list(thresholds))
+    results.append(_scalars(list(open_alerts)))
+    return results
+
+
 def _parcel(**kwargs):
     defaults = dict(
         shipment_id=uuid.uuid4(),
@@ -843,11 +860,14 @@ async def test_the_classification_carries_the_wb_leg_and_every_number():
 
 @pytest.mark.asyncio
 async def test_a_poll_with_nothing_to_track_makes_no_request():
-    db = _db([_scalars([]), _scalars([])])
+    db = _db([_scalars([]), _scalars([]), *_alert_sync_results()])
     with patch.object(wb_tracking_service, "NovaPoshtaTrackingClient") as client_cls:
         summary = await wb_tracking_service.run_poll(db)
 
     client_cls.assert_not_called()
+    # Alert sync still ran (WB-ALERTS-1) — untracked parcels are never poll
+    # candidates, so this branch is exactly where an untracked_aging alert would
+    # be raised, and auto-resolve has to run whether or not anything was polled.
     assert summary == {
         "polled": 0,
         "created": 0,
@@ -855,6 +875,8 @@ async def test_a_poll_with_nothing_to_track_makes_no_request():
         "delivered": 0,
         "no_data": 0,
         "missing": 0,
+        "alerts_opened": 0,
+        "alerts_resolved": 0,
     }
 
 
@@ -869,7 +891,13 @@ async def test_one_poll_is_one_batched_request_for_every_candidate():
         ),
         _untracked_parcel(),
     ]
-    db = _db([_scalars(parcels), _scalars([])])
+    db = _db(
+        [
+            _scalars(parcels),
+            _scalars([]),
+            *_alert_sync_results(parcels=parcels),
+        ]
+    )
     client = MagicMock()
     client.get_status_documents = AsyncMock(return_value=[])
 

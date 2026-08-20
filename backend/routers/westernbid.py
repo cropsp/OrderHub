@@ -21,6 +21,7 @@ WB-TRACK-1 keeps both verdicts for `/tracking`, and neither is a copy-paste:
     and `RecipientAddress`, so a destination city is all it returns.
 """
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -30,9 +31,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models.user import User, UserRole
 from models.wb_parcel import WbParcel
+from models.wb_parcel_alert import WbParcelAlert
 from models.wb_tracking import WbParcelTracking, WbTrackingEvent
 from routers.dependencies import require_role
 from schemas.common import PaginatedResponse
+from schemas.wb_alert import ParcelAlertListResponse, ParcelAlertResponse
 from schemas.wb_parcel import WbParcelResponse
 from schemas.wb_tracking import (
     TrackedParcelResponse,
@@ -214,3 +217,139 @@ async def refresh_tracking(
         **summary,
         polled_at=await wb_tracking_service.load_last_polled_at(db),
     )
+
+
+def _serialise_alert(
+    alert: WbParcelAlert, parcel: WbParcel | None, now: datetime
+) -> ParcelAlertResponse:
+    """One alert row plus the display fields joined from the parcel mirror.
+
+    `parcel` is never None in practice — the FK is `ON DELETE CASCADE` — but a
+    monitoring surface degrading to a blank cell beats it 500-ing.
+    """
+    return ParcelAlertResponse(
+        id=alert.id,
+        kind=alert.kind,
+        detail=alert.detail,
+        shipment_id=alert.shipment_id,
+        tracking_number=(
+            wb_tracking_service.extract_novapost_number(parcel) if parcel else None
+        ),
+        tracking_numbers=(
+            wb_tracking_service.carrier_tracking_numbers(parcel) if parcel else []
+        ),
+        recipient_name=parcel.recipient_name if parcel else None,
+        carrier=parcel.shipping_type if parcel else None,
+        raised_at=alert.raised_at,
+        age_days=wb_tracking_service.alert_age_days(now, alert.raised_at),
+        dismissed_at=alert.dismissed_at,
+        dismissed_by_id=alert.dismissed_by_id,
+    )
+
+
+@router.get("/alerts", response_model=ParcelAlertListResponse)
+async def list_parcel_alerts(
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Open, undismissed parcel alerts for the dashboard block (WB-ALERTS-1).
+
+    A plain read — the alerts were computed during the poll, not here, so this
+    endpoint never classifies and never writes. That matters: the dashboard
+    calls it on every load for every OWNER/MANAGER.
+
+    Same access stance as the rest of this router (`WB-TRACK-1` OQ6): parcels
+    are global, not shop-scoped, and with three roles in the system
+    OWNER+MANAGER is exactly "everyone who sees the dashboard, minus DESIGNER"
+    (task rule 8).
+
+    Ordering groups a parcel's alerts together, worst parcel first. Several
+    kinds may be open on one parcel — task rule 3 dedupes per (parcel, kind) —
+    so `59500007135457` can legitimately occupy two rows, and they should read
+    as one block rather than being scattered across the list. Sorted in Python
+    like `/tracking` does: this is a handful of rows, and the severity order
+    lives in the service beside the kinds it ranks.
+    """
+    rows = (
+        await db.execute(
+            select(WbParcelAlert, WbParcel)
+            .outerjoin(WbParcel, WbParcel.shipment_id == WbParcelAlert.shipment_id)
+            .where(
+                WbParcelAlert.resolved_at.is_(None),
+                WbParcelAlert.dismissed_at.is_(None),
+            )
+        )
+    ).all()
+
+    now = datetime.now(timezone.utc)
+    order = wb_tracking_service.ALERT_KIND_ORDER
+
+    def kind_rank(kind: str) -> int:
+        # An unknown kind sorts last rather than raising — the vocabulary can
+        # grow without this route needing a deploy in lockstep.
+        return order.index(kind) if kind in order else len(order)
+
+    worst_per_parcel: dict[uuid.UUID, int] = {}
+    for alert, _parcel in rows:
+        rank = kind_rank(alert.kind)
+        current = worst_per_parcel.get(alert.shipment_id)
+        if current is None or rank < current:
+            worst_per_parcel[alert.shipment_id] = rank
+
+    ordered = sorted(
+        rows,
+        key=lambda pair: (
+            worst_per_parcel[pair[0].shipment_id],
+            str(pair[0].shipment_id),
+            kind_rank(pair[0].kind),
+        ),
+    )
+
+    return ParcelAlertListResponse(
+        alerts=[_serialise_alert(alert, parcel, now) for alert, parcel in ordered],
+        synced_at=await wb_tracking_service.load_last_polled_at(db),
+    )
+
+
+@router.post("/alerts/{alert_id}/dismiss", response_model=ParcelAlertResponse)
+async def dismiss_parcel_alert(
+    alert_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark one alert as handled, recording who and when (task rule 4).
+
+    Same gate as `POST /tracking/refresh` — DESIGNER neither sees nor dismisses
+    alerts.
+
+    The row stays OPEN (`resolved_at` untouched). That is what stops the next
+    poll from re-raising it while the condition persists, and it is also what
+    lets the condition's eventual disappearance close it normally, so a later
+    recurrence is a genuinely new episode (task rule 5).
+
+    Dismissing an already-dismissed alert is a no-op rather than an error: a
+    double-click must not rewrite who dismissed it or when.
+    """
+    alert = await db.get(WbParcelAlert, alert_id)
+    if alert is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No parcel alert {alert_id}",
+        )
+
+    if alert.resolved_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This alert closed itself already (resolution: "
+                f"{alert.resolution}); there is nothing to dismiss."
+            ),
+        )
+
+    now = datetime.now(timezone.utc)
+    if alert.dismissed_at is None:
+        alert.dismissed_at = now
+        alert.dismissed_by_id = current_user.id
+
+    parcel = await db.get(WbParcel, alert.shipment_id)
+    return _serialise_alert(alert, parcel, now)

@@ -297,17 +297,28 @@ async def run_wb_tracking_poll():
             # aged-out retirements stamped by `select_candidates`.
             await db.commit()
             if not summary["polled"] and not summary["missing"]:
-                logger.info("WB tracking poll: no parcels to track")
+                # WB-ALERTS-1: alert sync still ran — untracked parcels are
+                # never poll candidates, so this branch is exactly where an
+                # untracked_aging alert gets raised.
+                logger.info(
+                    "WB tracking poll: no parcels to track "
+                    "(alerts_opened=%d alerts_resolved=%d)",
+                    summary["alerts_opened"],
+                    summary["alerts_resolved"],
+                )
                 return
             logger.info(
                 "WB tracking poll complete: polled=%d created=%d changed=%d "
-                "delivered=%d no_data=%d missing=%d",
+                "delivered=%d no_data=%d missing=%d "
+                "alerts_opened=%d alerts_resolved=%d",
                 summary["polled"],
                 summary["created"],
                 summary["changed"],
                 summary["delivered"],
                 summary["no_data"],
                 summary["missing"],
+                summary["alerts_opened"],
+                summary["alerts_resolved"],
             )
         except Exception as e:
             logger.error(f"WB tracking poll failed: {e}")

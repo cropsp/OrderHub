@@ -63,6 +63,20 @@ FX_FETCHED_AT = "fx_fetched_at"
 # Non-secret, so plaintext. Default lives in services/wb_tracking_service.py.
 WB_TRACKING_STALLED_DAYS = "wb_tracking_stalled_days"
 
+# ── WB-ALERTS-1 ────────────────────────────────────────────────────────────
+# Age thresholds for the four dashboard parcel alerts. Configuration, never
+# literals in a condition (WB-TRACK-1 task rule 4, repeated here). All three are
+# non-secret, so plaintext. Defaults + the evidence behind each number live in
+# services/wb_tracking_service.py.
+#
+# NOTE: like `wb_tracking_stalled_days`, none of these has a settings-page
+# surface — routers/app_settings.py handles only the Google key and the two
+# WesternBid secrets. They are set by hand in `app_settings` when a threshold
+# needs retuning.
+WB_ALERT_NO_DATA_DAYS = "wb_alert_no_data_days"
+WB_ALERT_OVERDUE_DAYS = "wb_alert_overdue_days"
+WB_ALERT_UNTRACKED_DAYS = "wb_alert_untracked_days"
+
 
 # Storage discipline, asserted by tests. Making `value_encrypted` nullable (to
 # admit plaintext rows) removed the schema-level guarantee that secrets are
@@ -83,6 +97,9 @@ PLAINTEXT_SETTING_KEYS = frozenset(
         FX_RATE_DATE,
         FX_FETCHED_AT,
         WB_TRACKING_STALLED_DAYS,
+        WB_ALERT_NO_DATA_DAYS,
+        WB_ALERT_OVERDUE_DAYS,
+        WB_ALERT_UNTRACKED_DAYS,
     }
 )
 

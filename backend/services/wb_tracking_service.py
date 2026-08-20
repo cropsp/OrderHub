@@ -1,17 +1,25 @@
 """
 OrderHub CRM — WesternBid Delivery Tracking Service (WB-TRACK-1)
 
-Three jobs, in the order the data flows:
+Four jobs, in the order the data flows:
 
   1. `select_candidates`  — which parcels to poll, and when one stops being polled.
   2. `record_poll`        — turn a batch of NP records into status CHANGES.
   3. `classify_parcels`   — the ONE definition of delivered / moving / problem /
                             no-data / untracked, plus the two attention signals.
+  4. `sync_alerts`        — WB-ALERTS-1: turn point 3's output into the handful
+                            of alerts worth pushing onto the dashboard.
 
-Point 3 is load-bearing. The MCP tool consumes it today and the `WB-TRACK-2`
-monitoring page will consume the same call unchanged; neither classifies
-anything in its own response-shaping code. That is how two definitions of
-"stuck" would otherwise come to exist and disagree.
+Point 3 is load-bearing. The MCP tool consumes it today, the `WB-TRACK-2`
+monitoring page consumes the same call unchanged, and point 4 reads its output
+rather than re-deriving anything; none of the three classifies in its own
+response-shaping code. That is how two definitions of "stuck" would otherwise
+come to exist and disagree.
+
+Point 4 lives here rather than in a `wb_alert_service` module for one concrete
+reason: `run_poll` would import it and it would import `classify_parcels` back,
+and a circular import broken by a function-level import is worse than one more
+section in a cohesive file.
 """
 
 import logging
@@ -23,9 +31,16 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.app_setting import AppSetting, WB_TRACKING_STALLED_DAYS
+from models.app_setting import (
+    AppSetting,
+    WB_ALERT_NO_DATA_DAYS,
+    WB_ALERT_OVERDUE_DAYS,
+    WB_ALERT_UNTRACKED_DAYS,
+    WB_TRACKING_STALLED_DAYS,
+)
 from models.order import Order
 from models.wb_parcel import WbParcel
+from models.wb_parcel_alert import WbParcelAlert
 from models.wb_tracking import WbParcelTracking, WbTrackingEvent
 from services.np_tracking import (
     NovaPoshtaTrackingClient,
@@ -133,6 +148,77 @@ STOPPED_DELIVERED = "delivered"
 STOPPED_AGED_OUT = "aged_out"
 
 
+# ── alerts (WB-ALERTS-1) ───────────────────────────────────────────────────
+#
+# Four kinds, each mapping to ONE concrete action. They exist because two weeks
+# after `/westernbid` shipped, nobody had opened it — a pull surface does not
+# get pulled — so the page's findings now come to the operator on the dashboard.
+#
+# Every condition below reads a field `classify_parcels` already computed.
+# Nothing here re-derives "stuck": that would be the second definition this
+# whole subsystem is built to avoid.
+
+# Nova Poshta reports a problem code. Keyed off the `problem` STATE rather than
+# a literal "111": `classify_parcels` already owns the code→meaning mapping, and
+# narrowing to 111 would silently drop the other thirteen PROBLEM_CODES (broker
+# refusal, cargo lost at customs, storage period expired) — each of which needs
+# a human just as much. Only 111 has ever been OBSERVED. Action: contact the
+# customer.
+ALERT_DELIVERY_PROBLEM = "delivery_problem"
+
+# Nova Poshta has returned a stub for this parcel for longer than any recovery
+# we have ever seen. Action: look it up in the WesternBid cabinet.
+ALERT_NO_DATA_STUCK = "no_data_stuck"
+
+# Past Nova Poshta's own delivery promise by a wide margin. Deliberately NOT
+# every overdue parcel — 17 of 19 attention rows were overdue on 2026-08-20, and
+# an alert that fires on all of them is the ignored surface again.
+ALERT_OVERDUE_LONG = "overdue_long"
+
+# A carrier we cannot query at all (UPS / USPS / the cancelled parcel), old
+# enough that "still in flight" has stopped being a plausible explanation.
+# Action: check the carrier's own number by hand.
+ALERT_UNTRACKED_AGING = "untracked_aging"
+
+# Severity, worst first. Used to order the wire payload; NOT a precedence rule —
+# several kinds may be open on one parcel at once (task rule 3 dedupes per
+# (parcel, kind), not per parcel).
+ALERT_KIND_ORDER = (
+    ALERT_DELIVERY_PROBLEM,
+    ALERT_NO_DATA_STUCK,
+    ALERT_OVERDUE_LONG,
+    ALERT_UNTRACKED_AGING,
+)
+
+# How an alert closed itself. Two values, distinguished on purpose:
+#   cleared  — the parcel is still classified and the condition went away.
+#   aged_out — the parcel left the WB_TRACKING_MAX_AGE_DAYS window, i.e. we
+#              stopped looking. For `untracked_aging` that is the only
+#              non-manual exit there can ever be, because WesternBid's status
+#              vocabulary is creation-time only and no onward carrier number
+#              exists in any source we hold — so calling it "cleared" would
+#              claim knowledge we do not have.
+RESOLUTION_CLEARED = "cleared"
+RESOLUTION_AGED_OUT = "aged_out"
+
+# Days dark before `no_data` becomes actionable. The 2026-08-20 review settled
+# this empirically: of 45 parcels that ever went dark, 43 recovered on their
+# own, spells lasting 1-5 days (avg 2.15, ceiling 5.0). 6 is one day past the
+# observed ceiling, and on the review date it selected exactly one parcel.
+DEFAULT_ALERT_NO_DATA_DAYS = 6
+
+# Days past Nova Poshta's scheduled delivery date before an undelivered parcel
+# becomes actionable. `is_overdue` alone was 17 of 19 attention rows on
+# 2026-08-20; this is the long tail of that, not a mirror of it.
+DEFAULT_ALERT_OVERDUE_DAYS = 7
+
+# Days since WB created an UNTRACKABLE parcel before it becomes actionable.
+# Worst end-to-end transit ever observed is 31.3 days (p90 11.4), so 14 is
+# comfortably inside "should have arrived by now" without being noisy. Expect
+# ~6 alerts once at launch from the existing untracked backlog.
+DEFAULT_ALERT_UNTRACKED_DAYS = 14
+
+
 def extract_novapost_number(parcel: WbParcel) -> str | None:
     """Return the Nova Poshta tracking number for a parcel, or None.
 
@@ -180,8 +266,37 @@ def carrier_tracking_numbers(parcel: WbParcel) -> list[dict]:
     return numbers
 
 
+def _coerce_days(raw: object | None, key: str, default: int) -> int:
+    """One app_settings day-threshold, coerced or loudly defaulted.
+
+    Extracted from `load_stalled_days` when WB-ALERTS-1 added three more
+    thresholds; the behaviour is byte-for-byte what that function did, and its
+    existing tests are the proof. A bad value never raises and never silently
+    becomes something surprising — it logs and falls back, because a threshold
+    that quietly reads 0 would flag every parcel in the system.
+    """
+    if raw is None:
+        return default
+    try:
+        value = int(Decimal(str(raw)))
+    except (InvalidOperation, ValueError):
+        logger.warning(
+            "Unparseable %s=%r — falling back to %d days", key, raw, default
+        )
+        return default
+    if value < 1:
+        logger.warning("%s=%r is below 1 day — falling back to %d", key, raw, default)
+        return default
+    return value
+
+
 async def load_stalled_days(db: AsyncSession) -> int:
-    """Read the stalled threshold from app_settings, falling back to the default."""
+    """Read the stalled threshold from app_settings, falling back to the default.
+
+    Exactly ONE `db.execute`, and it must stay that way: `classify_parcels`
+    calls this first and the classification tests drive it with an ordered
+    `AsyncMock(side_effect=[...])`.
+    """
     raw = (
         await db.execute(
             select(AppSetting.value).where(
@@ -189,27 +304,7 @@ async def load_stalled_days(db: AsyncSession) -> int:
             )
         )
     ).scalar_one_or_none()
-    if raw is None:
-        return DEFAULT_STALLED_DAYS
-    try:
-        value = int(Decimal(str(raw)))
-    except (InvalidOperation, ValueError):
-        logger.warning(
-            "Unparseable %s=%r — falling back to %d days",
-            WB_TRACKING_STALLED_DAYS,
-            raw,
-            DEFAULT_STALLED_DAYS,
-        )
-        return DEFAULT_STALLED_DAYS
-    if value < 1:
-        logger.warning(
-            "%s=%r is below 1 day — falling back to %d",
-            WB_TRACKING_STALLED_DAYS,
-            raw,
-            DEFAULT_STALLED_DAYS,
-        )
-        return DEFAULT_STALLED_DAYS
-    return value
+    return _coerce_days(raw, WB_TRACKING_STALLED_DAYS, DEFAULT_STALLED_DAYS)
 
 
 @dataclass
@@ -420,21 +515,35 @@ async def load_last_polled_at(db: AsyncSession) -> datetime | None:
 
 
 async def run_poll(db: AsyncSession) -> dict[str, int]:
-    """Select, fetch and record one full tracking poll (WB-TRACK-2).
+    """Select, fetch, record one full tracking poll, then sync alerts (WB-TRACK-2).
 
     THE poll. The daily scheduler job and the manual refresh route both call
     this and neither reimplements it — the same rule `classify_parcels` follows
     for the classification, applied to the write path: one definition, two
-    callers, no parallel path that can drift.
+    callers, no parallel path that can drift. WB-ALERTS-1 rides the same pass
+    rather than adding a fifth scheduler job, which is what makes a manual
+    "Refresh now" update the dashboard alerts too.
 
     Does NOT commit. Each caller owns its transaction boundary — the scheduler
     commits explicitly, the route lets `get_db` commit — and the aged-out
     retirements written by `select_candidates` need committing even when there
     is nothing left to poll, which is why the empty case still returns normally.
+
+    `sync_alerts` runs on BOTH branches. Untracked parcels are never candidates,
+    so the zero-candidate branch is exactly when an `untracked_aging` alert
+    would otherwise never be raised — and auto-resolve has to run whether or not
+    anything was polled.
+
+    Alert sync is deliberately NOT wrapped in try/except. A failure aborts the
+    whole poll, and that is the cheaper mistake: `record_poll` is re-derivable
+    (tomorrow's poll refetches from NP and writes the change event then), so an
+    aborted run costs freshness rather than data — whereas swallowing would let
+    alert generation die in silence, which is the exact failure this sprint
+    exists to fix.
     """
     candidates = await select_candidates(db)
     if not candidates:
-        return {
+        summary = {
             "polled": 0,
             "created": 0,
             "changed": 0,
@@ -442,12 +551,15 @@ async def run_poll(db: AsyncSession) -> dict[str, int]:
             "no_data": 0,
             "missing": 0,
         }
+    else:
+        client = NovaPoshtaTrackingClient()
+        records = await client.get_status_documents(
+            [c.tracking_number for c in candidates]
+        )
+        summary = await record_poll(db, candidates, records)
 
-    client = NovaPoshtaTrackingClient()
-    records = await client.get_status_documents(
-        [c.tracking_number for c in candidates]
-    )
-    return await record_poll(db, candidates, records)
+    summary.update(await sync_alerts(db))
+    return summary
 
 
 @dataclass
@@ -641,3 +753,246 @@ async def classify_parcels(
         polled_at=polled_at,
         stalled_days=stalled_days,
     )
+
+
+# ── WB-ALERTS-1: from classification to the dashboard ──────────────────────
+
+
+@dataclass(frozen=True)
+class AlertThresholds:
+    """The three configurable ages, resolved once per sync."""
+
+    no_data_days: int = DEFAULT_ALERT_NO_DATA_DAYS
+    overdue_days: int = DEFAULT_ALERT_OVERDUE_DAYS
+    untracked_days: int = DEFAULT_ALERT_UNTRACKED_DAYS
+
+
+@dataclass(frozen=True)
+class AlertCondition:
+    """One (parcel, kind) condition observed to hold RIGHT NOW.
+
+    Not an alert — an observation. `sync_alerts` decides whether it opens a new
+    row, refreshes an existing one, or does nothing because the operator already
+    dismissed it.
+    """
+
+    shipment_id: UUID
+    kind: str
+    detail: str
+
+
+async def load_alert_thresholds(db: AsyncSession) -> AlertThresholds:
+    """Read all three alert thresholds in ONE query, defaulting per key."""
+    rows = await db.execute(
+        select(AppSetting.key, AppSetting.value).where(
+            AppSetting.key.in_(
+                (
+                    WB_ALERT_NO_DATA_DAYS,
+                    WB_ALERT_OVERDUE_DAYS,
+                    WB_ALERT_UNTRACKED_DAYS,
+                )
+            )
+        )
+    )
+    raw = {row.key: row.value for row in rows}
+    return AlertThresholds(
+        no_data_days=_coerce_days(
+            raw.get(WB_ALERT_NO_DATA_DAYS),
+            WB_ALERT_NO_DATA_DAYS,
+            DEFAULT_ALERT_NO_DATA_DAYS,
+        ),
+        overdue_days=_coerce_days(
+            raw.get(WB_ALERT_OVERDUE_DAYS),
+            WB_ALERT_OVERDUE_DAYS,
+            DEFAULT_ALERT_OVERDUE_DAYS,
+        ),
+        untracked_days=_coerce_days(
+            raw.get(WB_ALERT_UNTRACKED_DAYS),
+            WB_ALERT_UNTRACKED_DAYS,
+            DEFAULT_ALERT_UNTRACKED_DAYS,
+        ),
+    )
+
+
+def alert_age_days(now: datetime, raised_at: datetime) -> float:
+    """How long an alert has been waiting, in days.
+
+    Public because the router needs it and `_days_between` is internal. Never
+    None: `raised_at` is NOT NULL, and a monitoring number that can be None is
+    a number every caller has to defend against.
+    """
+    return _days_between(now, raised_at) or 0.0
+
+
+def _format_days(days: float) -> str:
+    """`9.7` → "9.7", `14.0` → "14". Ukrainian UI, one decimal at most."""
+    return f"{days:.0f}" if float(days).is_integer() else f"{days:.1f}"
+
+
+def detect_alert_conditions(
+    parcels: list[ClassifiedParcel],
+    thresholds: AlertThresholds,
+    now: datetime,
+) -> list[AlertCondition]:
+    """Which alert conditions hold, given a classification (task rule 7).
+
+    PURE — no session, no I/O, no clock of its own. Every predicate reads a
+    field `classify_parcels` already produced; there is no second definition of
+    delivered / problem / dark / untracked anywhere in this function.
+
+    A parcel may satisfy several kinds at once and that is intended: task rule 3
+    dedupes per (parcel, kind), not per parcel. `59500007135457` on 2026-08-20
+    was both dark 9.7 days and long overdue, and those are two different things
+    to do about it.
+
+    One consequence worth naming rather than special-casing: `classify_parcels`
+    ranks `no_data` ABOVE `problem`, so a code-111 parcel that then goes dark is
+    `no_data` and raises `no_data_stuck`, not `delivery_problem`. That is the
+    single definition doing its job.
+    """
+    conditions: list[AlertCondition] = []
+
+    for parcel in parcels:
+        # A delivered parcel raises nothing, ever. `days_overdue` is already
+        # None for it, but stating the rule beats relying on that.
+        if parcel.state == STATE_DELIVERED:
+            continue
+
+        if parcel.state == STATE_PROBLEM:
+            conditions.append(
+                AlertCondition(
+                    shipment_id=parcel.shipment_id,
+                    kind=ALERT_DELIVERY_PROBLEM,
+                    detail=f"Проблема доставки — код {parcel.status_code or '?'}",
+                )
+            )
+
+        if parcel.state == STATE_NO_DATA:
+            dark_days = _days_between(now, parcel.no_data_since)
+            if dark_days is not None and dark_days > thresholds.no_data_days:
+                conditions.append(
+                    AlertCondition(
+                        shipment_id=parcel.shipment_id,
+                        kind=ALERT_NO_DATA_STUCK,
+                        detail=f"Без даних {_format_days(dark_days)} дн.",
+                    )
+                )
+
+        if (
+            parcel.days_overdue is not None
+            and parcel.days_overdue > thresholds.overdue_days
+        ):
+            conditions.append(
+                AlertCondition(
+                    shipment_id=parcel.shipment_id,
+                    kind=ALERT_OVERDUE_LONG,
+                    detail=f"Прострочено {_format_days(parcel.days_overdue)} дн.",
+                )
+            )
+
+        if parcel.state == STATE_UNTRACKED:
+            # Needs an age, and `wb_created_at` is nullable in the mirror. No
+            # date means no alert rather than a guessed one.
+            age_days = _days_between(now, parcel.wb_created_at)
+            if age_days is not None and age_days > thresholds.untracked_days:
+                carrier = parcel.carrier or "Невідомий перевізник"
+                conditions.append(
+                    AlertCondition(
+                        shipment_id=parcel.shipment_id,
+                        kind=ALERT_UNTRACKED_AGING,
+                        detail=(
+                            f"{carrier} — не відстежується, "
+                            f"{_format_days(age_days)} дн."
+                        ),
+                    )
+                )
+
+    return conditions
+
+
+async def sync_alerts(db: AsyncSession, now: datetime | None = None) -> dict[str, int]:
+    """Reconcile the open alert set against what is true right now (WB-ALERTS-1).
+
+    Runs inside `run_poll`, so it inherits the caller's transaction: it only
+    `db.add`s and mutates loaded rows, and never commits or flushes.
+
+    Three outcomes per (parcel, kind):
+
+      * condition holds and a row is open  → touch `last_seen_at`, refresh the
+        detail text. Nothing is re-raised, which is task rule 3.
+      * condition holds and no row is open → open one. If the previous episode
+        was dismissed it is already RESOLVED (a dismissal alone never resolves),
+        so this only happens after the condition genuinely cleared and came
+        back — a new episode, task rule 5.
+      * row is open and the condition does not hold → close it. This is the
+        load-bearing half: without auto-resolve the dashboard silts up with
+        stale alerts and becomes the next surface nobody opens.
+
+    A dismissed row is still OPEN, so it is *touched* rather than re-raised
+    while its condition persists — that is what "dismissals don't resurrect"
+    means mechanically.
+    """
+    now = now or datetime.now(timezone.utc)
+
+    overview = await classify_parcels(db, now=now)
+    thresholds = await load_alert_thresholds(db)
+
+    conditions = {
+        (c.shipment_id, c.kind): c
+        for c in detect_alert_conditions(overview.parcels, thresholds, now)
+    }
+    # Parcels still inside the 60-day window. Used only to tell the two
+    # auto-resolutions apart — see RESOLUTION_AGED_OUT.
+    in_window = {p.shipment_id for p in overview.parcels}
+
+    open_rows = (
+        (
+            await db.execute(
+                select(WbParcelAlert).where(WbParcelAlert.resolved_at.is_(None))
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    opened = 0
+    resolved = 0
+
+    for row in open_rows:
+        condition = conditions.pop((row.shipment_id, row.kind), None)
+        if condition is not None:
+            row.last_seen_at = now
+            if row.detail != condition.detail:
+                row.detail = condition.detail
+            continue
+
+        row.resolved_at = now
+        row.resolution = (
+            RESOLUTION_CLEARED
+            if row.shipment_id in in_window
+            else RESOLUTION_AGED_OUT
+        )
+        resolved += 1
+
+    # Whatever the loop above did not claim is new.
+    for condition in conditions.values():
+        db.add(
+            WbParcelAlert(
+                shipment_id=condition.shipment_id,
+                kind=condition.kind,
+                detail=condition.detail,
+                raised_at=now,
+                last_seen_at=now,
+            )
+        )
+        opened += 1
+
+    if opened or resolved:
+        logger.info(
+            "WB alerts synced: opened=%d resolved=%d open_now=%d",
+            opened,
+            resolved,
+            len(open_rows) - resolved + opened,
+        )
+
+    return {"alerts_opened": opened, "alerts_resolved": resolved}

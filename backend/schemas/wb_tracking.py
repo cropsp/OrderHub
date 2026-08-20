@@ -104,6 +104,11 @@ class TrackingRefreshResponse(BaseModel):
     no_data: int
     missing: int
     polled_at: datetime | None = None
+    # WB-ALERTS-1: alert sync rides the same pass, so a manual refresh reports
+    # what it did to the dashboard alerts too. Ints, so they stay invisible to
+    # the money-field completeness guard.
+    alerts_opened: int = 0
+    alerts_resolved: int = 0
 
 
 class TrackingOverviewResponse(BaseModel):
