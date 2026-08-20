@@ -145,4 +145,52 @@ export interface TrackingRefreshResult {
   no_data: number
   missing: number
   polled_at: string | null
+  /** WB-ALERTS-1: alert sync rides the same pass as the poll. */
+  alerts_opened: number
+  alerts_resolved: number
+}
+
+/**
+ * Dashboard parcel alerts (WB-ALERTS-1).
+ *
+ * Mirrors `backend/schemas/wb_alert.py` — same hand-mirroring rule as above.
+ */
+
+/** Severity order, mirroring `wb_tracking_service.ALERT_KIND_ORDER`. */
+export const PARCEL_ALERT_KINDS = [
+  'delivery_problem',
+  'no_data_stuck',
+  'overdue_long',
+  'untracked_aging',
+] as const
+
+export type ParcelAlertKind = (typeof PARCEL_ALERT_KINDS)[number]
+
+export interface ParcelAlert {
+  id: string
+  /** A ParcelAlertKind in practice; typed loosely so a kind added server-side
+   *  renders as an unstyled row rather than crashing the dashboard. */
+  kind: string
+  /** Short Ukrainian reason, as of the last poll that saw the condition. */
+  detail: string
+  shipment_id: string
+  /** The Nova Poshta number — null on `untracked_aging`, where the carrier's
+   *  own number in `tracking_numbers` is the only thing an operator can act on. */
+  tracking_number: string | null
+  tracking_numbers: WbTrackingNumber[]
+  recipient_name: string | null
+  carrier: string | null
+  raised_at: string
+  /** Days since the alert was raised. A plain number, never a Decimal-as-string
+   *  (the WB-TRACK-2 lesson: `"10" < "5"`). */
+  age_days: number
+  dismissed_at: string | null
+  dismissed_by_id: string | null
+}
+
+export interface ParcelAlertList {
+  alerts: ParcelAlert[]
+  /** When the alert set was last reconciled. null means the poll has never
+   *  run — which must not be read as "nothing is wrong". */
+  synced_at: string | null
 }

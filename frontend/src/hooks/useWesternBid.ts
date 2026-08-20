@@ -82,3 +82,44 @@ export function useRefreshTracking() {
     },
   })
 }
+
+/**
+ * Open parcel alerts for the dashboard block (WB-ALERTS-1).
+ *
+ * `enabled` gates the fetch rather than the call, because hooks cannot be
+ * called conditionally: the dashboard renders for DESIGNERs too, and
+ * `GET /westernbid/alerts` is OWNER+MANAGER-gated server-side.
+ *
+ * The alerts are computed during the tracking poll, not on read, so this is a
+ * cheap select — and deliberately NOT scoped by the dashboard period selector.
+ * It is an attention queue; it stays live.
+ */
+export function useParcelAlerts(enabled: boolean) {
+  return useQuery({
+    queryKey: ['westernbid', 'alerts'],
+    queryFn: () => westernBidApi.listAlerts(),
+    enabled,
+  })
+}
+
+/**
+ * "Опрацьовано" — record that a human dealt with this alert.
+ *
+ * The row stays open server-side, which is what stops the next poll from
+ * re-raising it while the condition persists.
+ */
+export function useDismissParcelAlert() {
+  const queryClient = useQueryClient()
+  const addToast = useToastStore((s) => s.addToast)
+
+  return useMutation({
+    mutationFn: (alertId: string) => westernBidApi.dismissAlert(alertId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['westernbid', 'alerts'] })
+      addToast('Сповіщення знято', 'success')
+    },
+    onError: (error) => {
+      addToast(getApiErrorMessage(error, 'Не вдалося зняти сповіщення'), 'error')
+    },
+  })
+}

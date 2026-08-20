@@ -12,21 +12,38 @@ import {
 import DashboardPage from '../DashboardPage';
 import type { DashboardResponse } from '@/types/dashboard';
 
+// Mutable so the role can be swapped per test — WB-ALERTS-1 hides the parcel
+// alerts block from DESIGNERs, whom the dashboard route does let in.
+const mockUser = {
+  id: 'user-1',
+  email: 'owner@orderhub.dev',
+  full_name: 'Owner',
+  role: 'owner',
+  is_active: true,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+};
+
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
-    user: {
-      id: 'user-1',
-      email: 'owner@orderhub.dev',
-      full_name: 'Owner',
-      role: 'owner',
-      is_active: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
+    user: mockUser,
     isLoading: false,
     isAuthenticated: true,
     logout: vi.fn(),
     login: vi.fn(),
+  }),
+}));
+
+// Without this the new useParcelAlerts hook fires a real query and every test
+// in this file dies on "No QueryClient set".
+const mockParcelAlerts = vi.fn();
+const mockDismissAlert = vi.fn();
+vi.mock('@/hooks/useWesternBid', () => ({
+  useParcelAlerts: (...args: unknown[]) => mockParcelAlerts(...args),
+  useDismissParcelAlert: () => ({
+    mutate: mockDismissAlert,
+    isPending: false,
+    variables: undefined,
   }),
 }));
 
@@ -95,9 +112,19 @@ function renderDashboard() {
   );
 }
 
+function quietAlerts() {
+  mockParcelAlerts.mockReturnValue({
+    data: { alerts: [], synced_at: '2026-08-20T09:14:00Z' },
+    isLoading: false,
+  });
+}
+
 describe('DashboardPage smoke test', () => {
   beforeEach(() => {
     mockDashboard.mockReset();
+    mockUser.role = 'owner';
+    mockParcelAlerts.mockReset();
+    quietAlerts();
   });
 
   it('renders dashboard widgets without crashing', () => {
@@ -150,6 +177,9 @@ describe('DashboardPage period selector (DASH-PERIOD)', () => {
   beforeEach(() => {
     mockDashboard.mockReset();
     mockOrders.mockClear();
+    mockUser.role = 'owner';
+    mockParcelAlerts.mockReset();
+    quietAlerts();
     localStorage.clear();
     mockDashboard.mockReturnValue({
       data: buildDashboardResponse(),
@@ -201,5 +231,90 @@ describe('DashboardPage period selector (DASH-PERIOD)', () => {
 
     expect(localStorage.getItem('orderhub:dashboard:lastPreset')).toBe('this_year');
     expect(localStorage.getItem('orderhub:shopFinance:lastPreset')).toBeNull();
+  });
+});
+
+describe('DashboardPage parcel alerts (WB-ALERTS-1)', () => {
+  const alert = {
+    id: 'alert-1',
+    kind: 'overdue_long',
+    detail: 'Прострочено 12.7 дн.',
+    shipment_id: 'ship-1',
+    tracking_number: '59500007044916',
+    tracking_numbers: [],
+    recipient_name: 'Jane Doe',
+    carrier: 'NovaPost',
+    raised_at: new Date().toISOString(),
+    age_days: 2.0,
+    dismissed_at: null,
+    dismissed_by_id: null,
+  };
+
+  beforeEach(() => {
+    mockDashboard.mockReset();
+    mockParcelAlerts.mockReset();
+    mockDismissAlert.mockReset();
+    mockUser.role = 'owner';
+    localStorage.clear();
+    mockDashboard.mockReturnValue({
+      data: buildDashboardResponse(),
+      isLoading: false,
+      error: null,
+    });
+    quietAlerts();
+  });
+
+  it('shows a quiet all-clear line rather than nothing when there are no alerts', () => {
+    renderDashboard();
+
+    // "all clear" and "the generator is broken" must not look identical, which
+    // is why the empty state still names the sync time.
+    expect(screen.getByTestId('parcel-alerts-card')).toBeInTheDocument();
+    expect(screen.getByText(/Посилки: все гаразд/)).toBeInTheDocument();
+  });
+
+  it('renders a prominent block with a count when alerts exist', () => {
+    mockParcelAlerts.mockReturnValue({
+      data: { alerts: [alert], synced_at: '2026-08-20T09:14:00Z' },
+      isLoading: false,
+    });
+    renderDashboard();
+
+    expect(screen.getByText('Посилки — потребують уваги')).toBeInTheDocument();
+    expect(screen.getByText('Прострочено 12.7 дн.')).toBeInTheDocument();
+    expect(screen.getByText('59500007044916')).toBeInTheDocument();
+  });
+
+  it('dismisses through the mutation when Опрацьовано is clicked', () => {
+    mockParcelAlerts.mockReturnValue({
+      data: { alerts: [alert], synced_at: null },
+      isLoading: false,
+    });
+    renderDashboard();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Опрацьовано' }));
+
+    expect(mockDismissAlert).toHaveBeenCalledWith('alert-1');
+  });
+
+  it('hides the block from a designer, who would 403 on the endpoint', () => {
+    mockUser.role = 'designer';
+    renderDashboard();
+
+    expect(screen.queryByTestId('parcel-alerts-card')).not.toBeInTheDocument();
+    // The query must not fire either — `enabled` is what gates it.
+    expect(mockParcelAlerts).toHaveBeenCalledWith(false);
+  });
+
+  it('never scopes the alerts by the dashboard period', () => {
+    renderDashboard();
+    fireEvent.click(screen.getByRole('button', { name: 'This Year' }));
+
+    // Alerts are an attention queue, like the order triage list above them —
+    // they stay live and take no date arguments at all.
+    expect(mockParcelAlerts).toHaveBeenCalled();
+    for (const args of mockParcelAlerts.mock.calls) {
+      expect(args).toEqual([true]);
+    }
   });
 });

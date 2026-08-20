@@ -6,6 +6,8 @@
 
 import client from '@/api/client'
 import type {
+  ParcelAlert,
+  ParcelAlertList,
   ParcelState,
   TrackingEvent,
   TrackingOverview,
@@ -58,6 +60,20 @@ export const westernBidApi = {
   refreshTracking: async (): Promise<TrackingRefreshResult> => {
     const { data } = await client.post<TrackingRefreshResult>(
       '/westernbid/tracking/refresh',
+    )
+    return data
+  },
+
+  /** Open, undismissed parcel alerts for the dashboard block (WB-ALERTS-1). */
+  listAlerts: async (): Promise<ParcelAlertList> => {
+    const { data } = await client.get<ParcelAlertList>('/westernbid/alerts')
+    return data
+  },
+
+  /** Mark one alert handled. The server records who and when. */
+  dismissAlert: async (alertId: string): Promise<ParcelAlert> => {
+    const { data } = await client.post<ParcelAlert>(
+      `/westernbid/alerts/${encodeURIComponent(alertId)}/dismiss`,
     )
     return data
   },

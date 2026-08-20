@@ -20,7 +20,10 @@ import ShopDistributionChart from '@/components/dashboard/ShopChart';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useShops } from '@/hooks/useShops';
 import { useCapability } from '@/hooks/useCapability';
-import { Capability } from '@/types/user';
+import { useAuth } from '@/hooks/useAuth';
+import { useDismissParcelAlert, useParcelAlerts } from '@/hooks/useWesternBid';
+import ParcelAlertsCard from '@/components/dashboard/ParcelAlertsCard';
+import { Capability, UserRole } from '@/types/user';
 import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -29,6 +32,14 @@ import { cn } from '@/lib/utils';
 
 export default function DashboardPage() {
   const canViewFinance = useCapability(Capability.VIEW_FINANCE);
+  const { user } = useAuth();
+  // WB-ALERTS-1: parcels are global rather than shop-scoped, and
+  // GET /westernbid/alerts is require_role(OWNER, MANAGER) — the dashboard
+  // route itself has no RequireRole, so a DESIGNER lands here and would 403.
+  const canSeeParcelAlerts =
+    user?.role === UserRole.OWNER || user?.role === UserRole.MANAGER;
+  const parcelAlerts = useParcelAlerts(canSeeParcelAlerts);
+  const dismissAlert = useDismissParcelAlert();
   const [selectedShopId, setSelectedShopId] = useState<string | undefined>(undefined);
   const [range, setRange] = useState<PeriodRange>(() => {
     const preset = loadLastPreset(DASHBOARD_PRESET_STORAGE_KEY);
@@ -133,6 +144,22 @@ export default function DashboardPage() {
           onChange={setRange}
           storageKey={DASHBOARD_PRESET_STORAGE_KEY}
         />
+
+        {/* WB-ALERTS-1: parcel alerts. Above the dashboard-query gate below on
+            purpose — this block has its own query and must not wait behind the
+            financial skeleton. Like the attention queue, it deliberately
+            ignores the period selector: it stays live. */}
+        {canSeeParcelAlerts && (
+          <ParcelAlertsCard
+            alerts={parcelAlerts.data?.alerts ?? []}
+            syncedAt={parcelAlerts.data?.synced_at ?? null}
+            isLoading={parcelAlerts.isLoading}
+            dismissingId={
+              dismissAlert.isPending ? (dismissAlert.variables ?? null) : null
+            }
+            onDismiss={(alertId) => dismissAlert.mutate(alertId)}
+          />
+        )}
 
         {isLoading || !data ? (
           <>
