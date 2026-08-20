@@ -298,3 +298,25 @@ describe('WesternBidPage — the delivered group', () => {
     expect(useDeliveredParcelsMock).toHaveBeenCalledWith(25, 0, true)
   })
 })
+
+describe('WesternBidPage usage note (WB-ALERTS-1)', () => {
+  it('keeps the note collapsed until asked, then explains the page', () => {
+    renderPage([]);
+
+    const toggle = screen.getByRole('button', { name: /Як користуватись/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(
+      screen.queryByText(/Сторінка сама сортує посилки/),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText(/Сторінка сама сортує посилки/)).toBeInTheDocument();
+    // The no_data explanation is the one that changes behaviour: the group
+    // reads as alarming and is usually nothing (43 of 45 dark parcels recovered).
+    expect(
+      screen.getByText(/майже завжди дані повертаються самі за 1–5 днів/),
+    ).toBeInTheDocument();
+  });
+});

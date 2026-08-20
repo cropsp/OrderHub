@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ParcelRow } from '@/components/shipping/ParcelRow'
 import { TrackingGroup } from '@/components/shipping/TrackingGroup'
+import { UsageNote } from '@/components/shipping/UsageNote'
 import type { TrackedParcel } from '@/types/westernbid'
 
 import ShellPage from './ShellPage'
@@ -115,6 +116,13 @@ export default function WesternBidPage() {
       description="Nova Poshta delivery status for parcels sent via WesternBid. Polled daily."
       actions={actions}
     >
+      {/* WB-ALERTS-1: above the loading gate so the note is readable while the
+          page is still fetching. Not in `actions` — Topbar hides that slot
+          below `lg`, and a help panel that vanishes on a tablet is not help. */}
+      <div className="mb-4">
+        <UsageNote />
+      </div>
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
