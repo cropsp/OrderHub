@@ -296,15 +296,24 @@ async def run_wb_tracking_poll():
             # Commits either way: with nothing to poll there may still be
             # aged-out retirements stamped by `select_candidates`.
             await db.commit()
+            # WB-ALERTS-1: read defensively. Everything below this line is
+            # LOGGING, and the commit has already happened — a missing key must
+            # never turn a successful poll into a reported failure plus a
+            # pointless rollback. (It did exactly that once, caught by the dev
+            # smoke rather than by a test, which is why the test now asserts
+            # rollback was not called.)
+            alerts_opened = summary.get("alerts_opened", 0)
+            alerts_resolved = summary.get("alerts_resolved", 0)
+
             if not summary["polled"] and not summary["missing"]:
-                # WB-ALERTS-1: alert sync still ran — untracked parcels are
-                # never poll candidates, so this branch is exactly where an
+                # Alert sync still ran — untracked parcels are never poll
+                # candidates, so this branch is exactly where an
                 # untracked_aging alert gets raised.
                 logger.info(
                     "WB tracking poll: no parcels to track "
                     "(alerts_opened=%d alerts_resolved=%d)",
-                    summary["alerts_opened"],
-                    summary["alerts_resolved"],
+                    alerts_opened,
+                    alerts_resolved,
                 )
                 return
             logger.info(
@@ -317,8 +326,8 @@ async def run_wb_tracking_poll():
                 summary["delivered"],
                 summary["no_data"],
                 summary["missing"],
-                summary["alerts_opened"],
-                summary["alerts_resolved"],
+                alerts_opened,
+                alerts_resolved,
             )
         except Exception as e:
             logger.error(f"WB tracking poll failed: {e}")

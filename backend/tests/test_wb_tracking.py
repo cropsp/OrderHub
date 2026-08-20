@@ -948,6 +948,11 @@ async def test_the_manual_refresh_and_the_daily_job_share_one_poll():
         await scheduler.run_wb_tracking_poll()
     assert job_poll.await_count == 1
     session.commit.assert_awaited_once()
+    # The summary above deliberately lacks WB-ALERTS-1's two counters. Nothing
+    # after the commit is anything but logging, so a lean summary must not be
+    # able to report a failure and roll back work that already committed —
+    # which is precisely what it did until the dev smoke caught it.
+    session.rollback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
