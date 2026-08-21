@@ -176,6 +176,7 @@ code exists **only in Sergii's working copy.**
 | `implementation_plan.md` | Slow-evolving (one closure entry per sprint) | Yes — sections **Active Roadmap** + **Explicitly deferred** + **Open Architectural Questions** | Sprint history + parked backlog + design questions |
 | `task.md` | Volatile (rewritten every sprint) — **git-ignored, local only** | Yes if file exists | Current sprint spec for CC |
 | `docs/integrations/nova-poshta.md` | Slow-evolving | Only if sprint touches NP | NP API contract, gotchas, credentials, playbook |
+| Domain-invariant docs: `docs/design/access-control.md`, `docs/design/partner-config-current.md`, `docs/warehouse/warehouse-invariants.md`, `docs/integrations/idlaser.md` | Slow-evolving | Only if the sprint touches the domain — task.md's "Domain docs to read" section lists them | Current-state invariants extracted from CLAUDE.md gotchas (2026-08-21); each CLAUDE.md stub points to its doc |
 | Per-sprint reading suggestions | — | Sprint context | Find sprint ID in implementation_plan.md to read sprint history |
 
 When in doubt about the current sprint, search
@@ -280,6 +281,12 @@ the planner to resolve.
 ### Scope
 - In scope: <files / endpoints / models touched>
 - Out of scope (do NOT touch): <list>
+
+### Domain docs to read (before planning)
+- <Only the docs relevant to this sprint's area — each domain stub in
+  CLAUDE.md § Gotchas names its doc. E.g. `docs/design/access-control.md`
+  for anything touching shops/orders/money surfaces. Omit the section
+  if no domain doc applies.>
 
 ### Open questions for the planner
 1. <Question CC must answer with cited evidence in the plan.>
