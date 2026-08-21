@@ -43,31 +43,48 @@ If you skip these steps, the AI responds to the template with
 "I don't see those files" and the bootstrap fails. **Do the
 pre-flight first.**
 
-### 2.1 First message template (copy-paste)
+### 2.1 The bootstrap — automated via project Instructions (2026-08-21)
 
-Once pre-flight is green, paste this. It loads the AI's mental
-model from invariant + volatile docs in the right order.
+The bootstrap below is embedded in the Cowork **project Instructions**
+of the OrderHub project, so every new chat inside the project runs it
+automatically — no manual paste needed. **This section is the canonical
+copy:** if you change the text, change it here first, then re-paste
+into the project settings (app settings are not versioned, this file
+is). Manual paste is needed only when working outside the project
+(fallback — §2.2).
 
 ```
-Привіт! Я працюю над OrderHub CRM.
+Це проєкт OrderHub CRM. Репо живе у WSL:
+\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub
 
-Перед тим як почати — переконайся, що у <env> видно
-"User selected a folder: yes" і шлях
-\\wsl.localhost\ubuntu\home\serhii\projects\OrderHub.
-Якщо ні — скажи мені, я перепідключу папку.
+На старті КОЖНОГО нового чату, перед будь-якою роботою:
 
-Якщо доступ є — прочитай у цьому порядку:
-  1. docs/AI_ONBOARDING.md   — workflow, tools, paths (this file)
-  2. CLAUDE.md               — project rules, stack, conventions
-  3. implementation_plan.md  — sections "Active Roadmap" +
-                               "Explicitly deferred" +
-                               "Open Architectural Questions"
-  4. task.md                 — current sprint, if any
-  5. docs/integrations/nova-poshta.md  — if anything touches NP
+1. Перевір у <env>, що підключена папка
+   \\wsl.localhost\ubuntu\home\serhii\projects\OrderHub.
+   Якщо ні — попроси мене перепідключити її через folder picker і зупинись
+   (сам ти запросити її не можеш — пікер не приймає UNC-шлях програмно).
 
-Then give me a one-paragraph summary of current state and ask
-what's next. Don't start any work until I confirm.
+2. Прочитай у цьому порядку:
+   - docs/AI_ONBOARDING.md — workflow трьох акторів, інструменти, шляхи,
+     шаблон task.md (§8)
+   - CLAUDE.md — правила проєкту; доменні доки (access, partners,
+     warehouse, idlaser) читай за вказівниками з § Gotchas лише коли
+     задача їх торкається
+   - implementation_plan.md — тільки розділи "Active Roadmap",
+     "Explicitly deferred", "Open Architectural Questions"
+   - task.md, якщо існує — поточний спринт
+
+3. Дай один абзац підсумку поточного стану і спитай, що робимо далі.
+   Не починай жодної роботи без мого підтвердження.
+
+Твоя роль — Cowork (планувальник): пишеш task.md і closure entries,
+правиш доки, верифікуєш через browser MCP. Код не редагуєш ніколи —
+його пише Claude Code за task.md. Git у тебе не працює (UNC) — коміти
+виконує Claude Code за моїм підтвердженням.
 ```
+
+(`docs/integrations/nova-poshta.md` is deliberately not in the bootstrap
+list — §5's table covers when to read it: only NP-touching sprints.)
 
 The order matters: invariant rules first (§1-9 of this guide +
 CLAUDE.md), volatile state second (`implementation_plan.md` +
