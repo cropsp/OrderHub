@@ -286,7 +286,10 @@ the planner to resolve.
 
 ### Verification
 - Backend: `python -m pytest tests/ -v` — expect <N> passing
-- Frontend: `npx tsc --noEmit && npm run lint` — clean
+- Frontend: `npx tsc -p tsconfig.app.json --noEmit && npm run lint` —
+  no NEW errors vs the TYPECHECK-1 baseline (see CLAUDE.md § Test &
+  Verify; bare `npx tsc --noEmit` is a no-op that checks 0 files —
+  never cite it as evidence)
 - Manual smoke (Cowork via browser MCP / Sergii): <steps>
 
 ### Workflow
@@ -361,9 +364,9 @@ alembic revision --autogenerate -m "description"
 
 # Frontend
 cd frontend
-npx tsc --noEmit
+npx tsc -p tsconfig.app.json --noEmit   # the REAL typecheck; bare `npx tsc --noEmit` is a no-op (solution tsconfig, 0 files)
 npm run lint
-npm run dev          # dev server on :5173 (Vite) or :3000 (configured)
+npm run dev          # dev server on :3000 (vite.config.ts:16 — NOT Vite's default 5173)
 
 # Database — admin access
 docker compose exec -T postgres psql -U crm -d crm_db -c "<SQL>"

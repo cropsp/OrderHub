@@ -1,17 +1,30 @@
 # Profit Definition — Reference Note
 
-**Status:** Living document — v1.1 — 2026-05-15.
+**Status:** Living document — v1.2 — 2026-08-21.
+
+> **⚠️ Partially superseded (marked 2026-08-21, docs audit).** Parts of this note predate two shipped sprints and no longer describe the live system:
+>
+> - **§1** — FIN-1 Net Profit now also nets a **Refunds** term (SHOPIFY-REFUNDS, Model 2: refunds dated by their own `refunded_at`; see `_run_refunds_aggregate` in `backend/services/finance_service.py`).
+> - **§6** (and §4's pointer to it) — `net_profit_product_only` survives only as the legacy `NET_PROFIT_PRODUCT_ONLY` enum value, not selectable for new configs. Current partner bases are **TURNOVER** and **PROFIT** — both net of discounts, both deduct refunds dated in the period, both still exclude shipping economics. Shipped as **PARTNER-CONFIG-1** (merged + deployed 2026-08-07).
+> - **§3 Q3** — FX is no longer manual: UAH terms convert via `fx_service.resolve()` at Calculate time and the rate freezes onto `PartnerSettlement.fx_rate_used`; no usable rate is a loud 422, never a dropped term.
+> - **§3 Q4** — negative bases now produce **negative settlements by design** (no zero-clamp, no "operator doesn't save").
+>
+> Authoritative source for the current partner formula: **`implementation_plan.md` → PARTNER-CONFIG-1** (plus the CLAUDE.md gotcha summary). The superseded sections below are kept unrewritten per §7's audit-trail rule.
+
 **Purpose:** Single source of truth for what "profit" means across the OrderHub system. Specifically referenced by **partner payout calculations** (see `partner-payouts.md`) and the FIN-1 finance dashboard.
 
 **Why this note exists:** "Profit" is the single most-disputed term in small business partnerships (per industry research — see PART-1 design doc §1). Every partner agreement Sergii has uses "profit" without explicit definition. To avoid future "wait, what counts as profit?" conversations with partners, we lock the current definition here and explicitly list questions that may need revisiting.
 
 **Changelog:**
+- **v1.2 (2026-08-21):** Supersession banner added (docs audit; no content rewritten). §1 lacks the Refunds term (SHOPIFY-REFUNDS); §6 formula, Q3 (FX), Q4 (negative bases) superseded by PARTNER-CONFIG-1 (2026-08-07). Authoritative: `implementation_plan.md` → PARTNER-CONFIG-1.
 - **v1.1 (2026-05-15):** Q1-Q5 resolved per Sergii's discovery answers. Added §6 documenting the **partner formula deviation** — partners use `net_profit_product_only` (excludes shipping economics), not FIN-1's `Net Profit` (which includes shipping). FIN-1 itself unchanged.
 - **v1.0 (2026-05-15):** Initial draft, 5 open questions surfaced.
 
 ---
 
 ## 1. Current FIN-1 Net Profit definition (as of 2026-05-15, post-MAT-5 Phase B)
+
+> ⚠️ **Superseded in part (2026-08-21):** the live formula also nets a **Refunds** term (SHOPIFY-REFUNDS, Model 2). See the banner at the top.
 
 **Net Profit per shop, per period, per currency** — as displayed on `/shops/{id}/finance`:
 
@@ -96,6 +109,8 @@ and reports overlapping partner settlements before writing.
 
 ### Q3 (RESOLVED) — FX tracking for cross-currency settlements
 
+> ⚠️ **Superseded by PARTNER-CONFIG-1 (2026-08-07):** FX now resolves via `fx_service.resolve()` at Calculate time; the rate freezes onto `PartnerSettlement.fx_rate_used`. See the banner at the top.
+
 **Original concern:** Should OrderHub track FX rate at payment time, or rely on operator's manual conversion?
 
 **Sergii's answer (2026-05-15):** *"Рахую на момент виплати. Це звісно не коректно глобально, але на моїх обертах це допустимо, далі за потреби пофіксимо."* Manual conversion at payment time, no FX rate stored. Acceptable at current volume; revisit if FX volatility makes manual error-prone.
@@ -103,6 +118,8 @@ and reports overlapping partner settlements before writing.
 **Decision:** PART-1 settlements stay in shop currency (no FX). Operator manually computes UAH equivalent at payment time. If revisited, see PART-2 / PART-3 future work.
 
 ### Q4 (RESOLVED) — Negative Net Profit handling
+
+> ⚠️ **Superseded by PARTNER-CONFIG-1 (2026-08-07):** negative bases now produce negative settlements by design. See the banner at the top.
 
 **Original concern:** If shop has loss in a period, does partner share the loss (negative settlement) or get 0?
 
@@ -135,6 +152,8 @@ These are no longer "open questions" — they're settled facts the system implem
 - **Workshop overhead pro-rata allocation to shops** — currently manual; could be auto-allocated by revenue/order-count weighting if the unallocated card grows persistently.
 
 ## 6. Partner formula deviation — why partners use a different "profit"
+
+> ⚠️ **Superseded by PARTNER-CONFIG-1 (2026-08-07):** this formula survives only as the legacy `NET_PROFIT_PRODUCT_ONLY` enum value (deserialises, not selectable for new configs). Current bases: **TURNOVER** / **PROFIT**, both deducting discounts and period-dated refunds, both still excluding shipping. The *rationale* below (shipping as transit pass-through) still holds. Authoritative: `implementation_plan.md` → PARTNER-CONFIG-1.
 
 **Important distinction surfaced during PART-1 discovery:**
 
