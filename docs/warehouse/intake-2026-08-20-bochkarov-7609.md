@@ -12,22 +12,29 @@ Book **накладна №7609 від 20.08.2026** (new leather supplier, see "
 identity" below) into the **production** warehouse: 2 lines of crazy-horse
 half-hides, invoiced in USD ($165.25), paid **7 271,00 UAH**.
 
-### Supplier identity — open tail
+### Supplier identity — RESOLVED 2026-08-22 (counterparty), factory still informal
 
-The invoice's «Від постачальника» field is blank. What we know: the contact was
+The invoice's «Від постачальника» field is blank. Trail: the contact was
 recommended as **the factory itself** («саме завод»); manager phone
-+380667635969; the Nova Poshta shipment arrived from sender «Бочкарьов Максим
-Олексійович», 380991380215. Open-source lookup (2026-08-22) failed: neither
-phone indexes publicly, and no leather factory matches the name. Candidate
-factories producing crazy-horse half-hides (В-Центр/Вознесенськ, Чинбар) don't
-list the invoice's colours publicly. Supplier recorded provisionally as
-**«Шкірзавод (Бочкарьов)»**.
++380667635969; NP shipment sent from **Вознесенськ** by «Бочкарьов Максим
+Олексійович», 380991380215. The payment (7 271,00 UAH, «За шкіртовар»)
+went to **ФОП ФЕДОРОВА ВІКТОРІЯ ВОЛОДИМИРІВНА**, РНОКПП 2992418907, ПриватБанк,
+IBAN UA973052990000026002001701031 — a business current account (26002…), so
+**the legal counterparty is ФОП Федорова Вікторія Володимирівна**, not the
+factory. Voznesensk hosts exactly two leather factories, both heirs of the 1978
+plant: ТОВ «В-Центр» (v-center.in.ua, retail e-shop) and ТОВ «ВОЗКО»
+(vozko.com, B2B-only via managers, ЄДРПОУ 39679325). The manufacturer is most
+likely **ВОЗКО** (B2B-via-manager model fits; В-Центр's public crazy-horse
+palette lacks these colours) — informal attribution, not proven. Neither phone
+nor Федорова indexes publicly against either factory.
 
-Consequence of append-only receipts: both receipt rows carry the provisional
-name **permanently**. When the real legal name is learned (ask the manager):
-update the ultramarine material's `supplier_name` via `update_material`, use the
-real name on all future receipts, and record the alias mapping here — do not
-attempt to "fix" the booked receipts.
+**Alias mapping:** both booked receipts carry the provisional name
+**«Шкірзавод (Бочкарьов)»** permanently (receipts are append-only — do not
+"fix" them). From the next invoice on, use
+`supplier = "ФОП Федорова Вікторія Володимирівна"` (house style: full ФОП name,
+as with Додон), and update the ultramarine material's `supplier_name`
+accordingly. When searching purchase history for this supplier, check **both**
+names.
 
 ### The invoice (source of truth — transcribed from the photo)
 
@@ -89,7 +96,10 @@ Weighted averages, verified independently:
 
 ### Open tails (none blocking)
 
-- **(a) Real supplier name unknown** — see "Supplier identity" above.
+- **(a) Counterparty resolved (ФОП Федорова, 2026-08-22)** — see "Supplier
+  identity" above. Remaining: `update_material` on the ультрамарин card
+  (supplier_name → ФОП Федорова); which factory actually manufactures
+  (ВОЗКО vs В-Центр) stays unconfirmed and is cosmetic.
 - **(b) Colour code 123-12975 is unsearchable:** it lives only in receipt
   notes; `list_materials(search=…)` covers name and `supplier_sku`, not notes.
   Same tail as Додон's 019296.
