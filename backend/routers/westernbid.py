@@ -143,8 +143,8 @@ async def get_tracking_events(
 
     Oldest first — the question this answers is "how did it get here", which
     reads forwards. `wb_tracking_event` holds one row per observed CHANGE, so a
-    parcel polled daily without moving still has exactly one row; that is the
-    signal, not a gap.
+    parcel polled repeatedly without moving still has exactly one row; that is
+    the signal, not a gap.
 
     Lazy and per-parcel on purpose: only the row an operator expands needs its
     history, and inlining every parcel's log on `/tracking` would grow that
@@ -182,7 +182,7 @@ async def refresh_tracking(
     current_user: User = Depends(require_role(UserRole.OWNER, UserRole.MANAGER)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Force a tracking poll now instead of waiting for the daily job (WB-TRACK-2).
+    """Force a tracking poll now instead of waiting for the 4-hourly job (WB-TRACK-2).
 
     Calls `wb_tracking_service.run_poll` — the EXACT function the scheduler's
     fifth job calls, not a parallel path. Still one keyless Nova Poshta request
@@ -191,8 +191,8 @@ async def refresh_tracking(
     Throttled SERVER-side: a disabled button is a hint, and this route is
     reachable by anyone who can open the page. The cooldown is checked against
     the freshness signal itself (`max(last_polled_at)`), so it needs no stored
-    state and correctly also absorbs a click made moments after the daily job
-    ran — in both cases the honest answer is "this data is already current".
+    state and correctly also absorbs a click made moments after the scheduled
+    job ran — in both cases the honest answer is "this data is already current".
     """
     last_polled_at = await wb_tracking_service.load_last_polled_at(db)
     if last_polled_at is not None:

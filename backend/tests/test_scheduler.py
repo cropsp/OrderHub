@@ -170,8 +170,8 @@ STARTUP_POLICY: dict[str, str] = {
         "(refund ids pre-loaded and skipped, insert is ON CONFLICT DO NOTHING)"
     ),
     "run_wb_tracking_poll": (
-        "startup: daily; one batched keyless request, and record_poll writes an "
-        "event only on an observed change"
+        "startup: 4-hourly; one batched keyless request, and record_poll writes "
+        "an event only on an observed change"
     ),
     "run_fx_rate_refresh": (
         "startup: daily; FX_MIN_REFETCH_HOURS inside the job bounds the re-fetch"

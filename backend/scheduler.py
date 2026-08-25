@@ -276,13 +276,13 @@ async def run_westernbid_poll():
 async def run_wb_tracking_poll():
     """Poll Nova Poshta for delivery status of in-flight WB parcels (WB-TRACK-1).
 
-    Fifth scheduler job, daily. Unlike `run_westernbid_poll` there is NO
+    Fifth scheduler job, every 4 hours. Unlike `run_westernbid_poll` there is NO
     credential branch: `TrackingDocument.getStatusDocuments` needs no API key,
     which is the whole point — tracking is not tied to any shop's Nova Poshta
     credentials and works for shops that have none.
 
     Batched at 100 documents per request, so the ~30 parcels in flight are one
-    HTTP call per day, never one call per parcel.
+    HTTP call per poll, never one call per parcel.
 
     The poll itself lives in `wb_tracking_service.run_poll` (WB-TRACK-2) because
     the manual refresh route calls the very same function. This job owns only
@@ -444,13 +444,28 @@ def start_scheduler():
         coalesce=True,
         next_run_time=datetime.now(timezone.utc),
     )
-    # Nova Poshta delivery tracking (WB-TRACK-1) — fifth job, daily. NP scans a
-    # healthy parcel at least once a day (p90 of observed gaps is 1.17 days), so
-    # a daily poll loses nothing, and the whole in-flight set is one request.
+    # Nova Poshta delivery tracking (WB-TRACK-1) — fifth job, every 4 hours.
+    # The earlier "daily loses nothing" reasoning (p90 of observed scan gaps is
+    # 1.17 days) was DISPROVEN by WB-TRACK-EVENT-COMPLETENESS on 2026-08-25: the
+    # keyless getStatusDocuments returns only a CURRENT status — no history in
+    # any form, and no other method is reachable without a key — so whatever
+    # changes between two polls is lost permanently, with no backfill possible
+    # ever. Cadence is not the largest loss mechanism (stub windows and API
+    # lateness both cost more), but it is the one we control, and it owned the
+    # largest staleness bucket: 41.6% of recorded events were 6-24h stale when
+    # first seen, i.e. exactly one poll cycle. 4h also cuts worst-case detection
+    # of a `111` failed delivery from ~24h to ~4h, which matters because
+    # WB-TRACK-1 raised 111 to `problem` with no retry window.
+    #
+    # 4h matches the domestic poll chosen by the 2026-05 NP audit
+    # (docs/integrations/nova-poshta-audit-2026-05.md:322) and stays inside NP's
+    # own recommended >=4-6h per shipment. The whole in-flight set is still ONE
+    # batched request (NP_TRACKING_BATCH_SIZE = 100 vs 34 parcels in flight), so
+    # this is 6 keyless requests a day rather than 1.
     #
     # next_run_time follows the FX job below, for the same reason: an 'interval'
     # job first fires AFTER the interval, so without it the poll is deferred a
-    # full 24 hours by every backend restart — making tracking freshness a
+    # full interval by every backend restart — making tracking freshness a
     # function of how often we deploy. That was not theoretical. Between the
     # WB-TRACK-1 deploy and WB-TRACK-2 the scheduled poll never fired once in
     # production; all 77 tracking rows came from a one-off run, and the
@@ -463,7 +478,7 @@ def start_scheduler():
     scheduler.add_job(
         run_wb_tracking_poll,
         'interval',
-        days=1,
+        hours=4,
         max_instances=1,
         coalesce=True,
         next_run_time=datetime.now(timezone.utc),
