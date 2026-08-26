@@ -349,6 +349,24 @@ mirror is accurate about what it holds, it simply holds less.
 - **The 2026-08-20 verdict still stands.** 43 recoveries out of 45 is not a marginal call, and
   the >6d `no_data_stuck` threshold is if anything conservative given the floor.
 
+### Carried into next week's report (from `WB-POLL-CADENCE`, merged `42002cb` 2026-08-25)
+
+Three things that will change how next week's numbers read, none of them a change in the parcels:
+
+1. **Dark durations will read longer.** `no_data_since` was previously stamped up to 24h late and
+   will now be accurate to ~4h. The numbers move because they stop being understated, **not**
+   because parcels got worse. Do not report an increase in dark time as a deterioration.
+2. **`sync_alerts` now runs 6×/day** instead of once — intended; alerts appear sooner.
+3. **Watch `59500007135457` specifically — it is the canary for `WB-NO-DATA-CLOCK-RESET`.**
+   `record_poll` clears `no_data_since` on *any* resolved poll and re-stamps it on the next stub,
+   so a single resolved response inside a dark spell resets the 6-day clock to zero. That parcel
+   has been stub for 15 days straight and holds the only `no_data_stuck` alert; **one flicker at
+   the new cadence would auto-resolve its alert as `cleared` while nothing about the parcel
+   changed.** Prod already shows flicker at the old rate: of 66 parcels that ever went dark, 41
+   had 2+ episodes, and the modal dark→resolved turnaround is exactly 24.0h — pinned to the
+   cadence floor, i.e. shorter flickers exist and are invisible today. If that alert disappears
+   next week, it is this defect, not a recovery.
+
 ### Correction owed
 
 The phrase "the 4h poll" in the original backlog row and in `task.md` was **Cowork's error** —

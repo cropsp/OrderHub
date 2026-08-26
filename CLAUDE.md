@@ -86,6 +86,10 @@ npm run lint                                            # eslint
 
 Sprints 1–10 + UI Modernization are complete. This includes: core architecture, DB & auth, full frontend, dashboard analytics, Shopify/Etsy/NP integrations, MCP server with auth guards, attachments/designer workflow, shop management, manual order entry, product catalog with CSV import, parcel calculation service, and all admin UIs. See `implementation_plan.md` for full history.
 
+Also live on prod: WesternBid parcel tracking + dashboard alerts (WB-TRACK-1/2, WB-ALERTS-1,
+2026-08) and the per-order case tracker — issues/returns/reships with an append-only note timeline,
+order-card section + dashboard block (CASE-1, 2026-08-26; design: `docs/design/order-cases-plan.md`).
+
 ## What's Pending
 
 Sprint 11 (Production & Deployment): Prometheus/Grafana monitoring.
@@ -142,7 +146,19 @@ as a Docker Compose stack. **Canonical reference: `SERVER_DEPLOY_PLAN.md` (§1�
 
 - The shop platform enum is `ShopPlatform` (`SHOPIFY|ETSY|MANUAL`, DB type `shop_platform`) — there is no `ShopSource` enum and no `ALTER TYPE … ADD VALUE` migration for it (corrected USER-ACCESS-2). No enum value has ever been added post-hoc; `ShopPlatform` shipped complete in the initial schema.
 - Order status changes MUST go through the audit logging path (`order_status_history`) — never update status directly in DB.
-- Frontend `OrderDetailPanel` was refactored into 8 sub-components in `detail/` — don't re-merge them.
+- **The live order card is `OrderDetailView.tsx`** (rendered by `pages/OrderDetailPage.tsx`), composed
+  of sub-components in `detail/` — don't re-merge them. `OrderDetailPanel.tsx` is **dead code** (zero
+  importers since `15d7b5d`) still present in the tree — never wire new sections into it. CASE-1 did
+  exactly that by following an older version of this gotcha and shipped an invisible feature, caught
+  only by browser smoke; when adding a detail section, also add a composition test against
+  `OrderDetailView` (see `OrderDetailView.test.tsx`).
+- **Order cases (CASE-1):** `order_case` + `order_case_note` — notes are **append-only** (no
+  edit/delete), status changes write `kind='system'` notes with the acting user, statuses/types are
+  **strings in DB + Python enums** (deliberate, WB-ALERTS-1 precedent — do not "fix" into PG enums).
+  The role gate MUST stay on the cases routers: `assert_order_access` admits an assigned DESIGNER, so
+  relying on it alone silently grants designers case access (pinned by
+  `test_case_router_gate_beats_assert_order_access_for_a_designer`). `/cases/open` is shop-scoped via
+  `get_shop_scope`, unlike the global WB alerts endpoint it visually mirrors.
 - Nova Poshta refs auto-clear on manual address input — this is intentional, not a bug.
 - Backend logs rotate at 25MB cap in `backend/logs/server.log` (dev). **On prod the durable log is `/home/prorder/orderhub-logs/server.log`** — `backend/logs/` inside the container is ephemeral (PROD-LOGS-EPHEMERAL, 2026-08-06).
 - `CreateOrderPage.tsx` is a full-page form, not a modal — this was a deliberate UX decision.
