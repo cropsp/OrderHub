@@ -16,7 +16,6 @@ import { DetailCustomer } from './detail/DetailCustomer';
 import { DetailLogistics } from './detail/DetailLogistics';
 import { DetailFinance } from './detail/DetailFinance';
 import { DetailTimeline } from './detail/DetailTimeline';
-import { DetailCases } from './detail/DetailCases';
 
 type OrderDetailPanelProps = {
   orderId: string | null;
@@ -85,19 +84,13 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                     onDeleteItem={handleDeleteItem}
                   />
 
-                  {/* 2. CASES (CASE-1) — open questions about this order.
-                      OWNER/MANAGER only; the endpoints are role-gated too.
-                      Above the softer note fields because a case is something
-                      someone still has to DO. */}
-                  {(isOwner || isManager) && <DetailCases orderId={order.id} />}
-
-                  {/* 3. CUSTOMIZATION INFO */}
+                  {/* 2. CUSTOMIZATION INFO */}
                   <DetailCustomizationInfo
                     order={order}
                     onUpdate={handleUpdate}
                   />
 
-                  {/* 4. PRODUCTION ASSETS */}
+                  {/* 3. PRODUCTION ASSETS */}
                   <div className="bg-zinc-900/80 border border-zinc-800 rounded-xl p-5">
                     <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4 px-1">
                       Production Assets
@@ -105,7 +98,7 @@ export default function OrderDetailPanel({ orderId, onClose }: OrderDetailPanelP
                     <AttachmentManager orderId={order.id} />
                   </div>
 
-                  {/* 5. INTERNAL NOTES */}
+                  {/* 4. INTERNAL NOTES */}
                   <DetailInternalNotes
                     order={order}
                     onUpdate={handleUpdate}

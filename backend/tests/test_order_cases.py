@@ -382,3 +382,109 @@ async def test_overdue_sorts_before_a_later_deadline():
     sql = str(db.execute.await_args.args[0])
     assert "ORDER BY" in sql.upper()
     assert "due_at ASC" in sql
+
+
+# ── response bodies (CASE-1-fix) ───────────────────────────
+
+@pytest.mark.asyncio
+async def test_patch_response_carries_the_note_it_just_wrote():
+    """THE STALE-TIMELINE TEST.
+
+    A mutation response that omits the row it just created is a lie the UI then
+    has to refetch its way out of. The shape reproduced here is the real one:
+    the route loads the case (notes eagerly loaded), writes, commits, and
+    re-queries — and because `expire_on_commit=False` the re-query returns the
+    SAME identity-mapped instance. `get_case` is patched to return that instance
+    both times, which is exactly what the identity map does; nothing else can
+    make the collection correct except the write itself doing so.
+    """
+    from models.order_case import OrderCase
+    from routers.order_cases import update_case as update_case_route
+
+    user = _user()
+    user.id = uuid4()
+    case = OrderCase(
+        id=uuid4(),
+        order_id=uuid4(),
+        case_type=OrderCaseType.RETURN.value,
+        title="Повернулась до відправника",
+        status=OrderCaseStatus.IN_PROGRESS.value,
+        created_by_id=user.id,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    case.notes = []          # loaded, and empty — the pre-write state
+    case.owner = None
+    case.created_by = None
+
+    db = AsyncMock()
+    db.add = MagicMock()
+
+    with patch.object(
+        order_case_service, "get_case", AsyncMock(return_value=case)
+    ), patch(
+        "routers.order_cases._load_order", AsyncMock(return_value=MagicMock())
+    ), patch(
+        "routers.order_cases.assert_order_access", AsyncMock()
+    ):
+        response = await update_case_route(
+            case.id,
+            OrderCaseUpdate(status=OrderCaseStatus.WAITING),
+            user,
+            db,
+        )
+
+    system_notes = [n for n in response.notes if n.kind == OrderCaseNoteKind.SYSTEM.value]
+    assert len(system_notes) == 1
+    assert "В роботі" in system_notes[0].text
+    assert "Чекаємо" in system_notes[0].text
+    assert system_notes[0].created_at is not None
+
+
+@pytest.mark.asyncio
+async def test_resolution_summary_is_appended_to_the_system_note():
+    """Rule 5 (CASE-1-fix): the "why" lives in the append-only timeline too."""
+    db = AsyncMock()
+    db.add = MagicMock()
+    case = _case(status=OrderCaseStatus.WAITING.value)
+
+    await order_case_service.update_case(
+        db,
+        case,
+        OrderCaseUpdate(
+            status=OrderCaseStatus.RESOLVED,
+            resolution_note="Переслали, отримав",
+        ),
+        _user(),
+    )
+
+    note = _notes_added(db)[0]
+    assert note.text == "Статус: Чекаємо → Вирішено — Переслали, отримав"
+    # The column keeps its own copy — this duplicates the summary, not moves it.
+    assert case.resolution_note == "Переслали, отримав"
+
+
+@pytest.mark.asyncio
+async def test_resolving_without_a_summary_keeps_the_bare_transition_text():
+    db = AsyncMock()
+    db.add = MagicMock()
+    case = _case(status=OrderCaseStatus.WAITING.value)
+
+    await order_case_service.update_case(
+        db, case, OrderCaseUpdate(status=OrderCaseStatus.RESOLVED), _user()
+    )
+
+    assert _notes_added(db)[0].text == "Статус: Чекаємо → Вирішено"
+
+
+@pytest.mark.asyncio
+async def test_a_whitespace_only_summary_does_not_dangle_a_dash():
+    db = AsyncMock()
+    db.add = MagicMock()
+    case = _case(status=OrderCaseStatus.WAITING.value)
+
+    await order_case_service.update_case(
+        db, case, OrderCaseUpdate(status=OrderCaseStatus.RESOLVED, resolution_note="   "), _user()
+    )
+
+    assert _notes_added(db)[0].text == "Статус: Чекаємо → Вирішено"

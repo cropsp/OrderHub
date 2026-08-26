@@ -139,3 +139,30 @@ export function isOverdue(dueAt: string | null, now: Date = new Date()): boolean
   if (!dueAt) return false
   return new Date(dueAt).getTime() < now.getTime()
 }
+
+/**
+ * How many days past `due_at` this case is; null when it is not overdue.
+ *
+ * Same client-side stance as `isOverdue` above, and the same injectable `now`
+ * so a test can pin a figure instead of chasing the clock.
+ */
+export function overdueDays(dueAt: string | null, now: Date = new Date()): number | null {
+  if (!dueAt) return null
+  const ms = now.getTime() - new Date(dueAt).getTime()
+  return ms > 0 ? ms / 86_400_000 : null
+}
+
+/**
+ * `14.0 → "14"`, `12.54 → "12.5"` — at most one decimal.
+ *
+ * This is the `_format_days` convention from `wb_tracking_service.py:827`,
+ * reproduced rather than imported because that number is built server-side and
+ * arrives as an opaque string. The dashboard shows both figures side by side,
+ * so they have to speak one dialect. Rounding happens BEFORE the whole-number
+ * check, or a drifting `13.9999` would render "14.0" where the parcel block
+ * beside it renders "14".
+ */
+export function formatOverdueDays(days: number): string {
+  const fixed = days.toFixed(1)
+  return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed
+}

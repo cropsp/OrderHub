@@ -5,7 +5,12 @@ import { useNavigate } from 'react-router-dom'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { caseTypeLabel, isOverdue } from '@/types/orderCase'
+import {
+  caseTypeLabel,
+  formatOverdueDays,
+  isOverdue,
+  overdueDays,
+} from '@/types/orderCase'
 import type { OpenCaseRow, OpenCasesResponse } from '@/types/orderCase'
 
 /**
@@ -30,6 +35,21 @@ type OrderCasesCardProps = {
 
 function orderLabel(row: OpenCaseRow): string {
   return row.order_number || row.order_external_id || '—'
+}
+
+/**
+ * The deadline cell. An overdue row leads with the figure in the parcel-alerts
+ * block's vocabulary — `Прострочено 12.5 дн.` — and keeps the absolute date
+ * after it, because "how late" is what you triage on and "when" is what you
+ * quote to a customer.
+ */
+function dueLabel(row: OpenCaseRow): string {
+  if (!row.due_at) return 'без дедлайну'
+  const late = overdueDays(row.due_at)
+  const absolute = `до ${formatDateTime(row.due_at)}`
+  return late === null
+    ? absolute
+    : `Прострочено ${formatOverdueDays(late)} дн. · ${absolute}`
 }
 
 function CaseRow({ row }: { row: OpenCaseRow }) {
@@ -89,7 +109,7 @@ function CaseRow({ row }: { row: OpenCaseRow }) {
           late ? 'text-red-400' : 'text-zinc-500',
         )}
       >
-        {row.due_at ? `до ${formatDateTime(row.due_at)}` : 'без дедлайну'}
+        {dueLabel(row)}
       </span>
 
       {row.owner_name && (

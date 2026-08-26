@@ -26,6 +26,7 @@ import { DetailCustomer } from './detail/DetailCustomer';
 import { DetailLogistics } from './detail/DetailLogistics';
 import { DetailFinance } from './detail/DetailFinance';
 import { DetailTimeline } from './detail/DetailTimeline';
+import { DetailCases } from './detail/DetailCases';
 
 interface OrderDetailViewProps {
   orderId: string;
@@ -87,6 +88,11 @@ export default function OrderDetailView({ orderId }: OrderDetailViewProps) {
               onUpdateItem={handleUpdateItem}
               onDeleteItem={handleDeleteItem}
             />
+
+            {/* CASES (CASE-1) — open questions about this order. OWNER/MANAGER
+                only; the endpoints are role-gated too. Above the softer note
+                fields because a case is something someone still has to DO. */}
+            {(isOwner || isManager) && <DetailCases orderId={order.id} />}
 
             {/* CUSTOMIZATION INFO */}
             <DetailCustomizationInfo

@@ -186,38 +186,85 @@ describe('DetailCases', () => {
     });
   });
 
-  it('prompts for a summary when resolving and passes it along', () => {
-    const promptSpy = vi
-      .spyOn(window, 'prompt')
-      .mockReturnValue('Переслали, отримав');
+  it('asks for the summary inline, never through a native prompt', () => {
+    // The native dialog is off-theme and a browser may suppress it outright,
+    // which would resolve cases with a summary nobody was able to type.
+    const promptSpy = vi.spyOn(window, 'prompt');
     render(<DetailCases orderId="order-1" />);
 
     fireEvent.change(screen.getByLabelText('Статус'), {
       target: { value: 'resolved' },
     });
 
-    expect(promptSpy).toHaveBeenCalled();
-    expect(updateMutate).toHaveBeenCalledWith({
-      caseId: 'case-1',
-      payload: { status: 'resolved', resolution_note: 'Переслали, отримав' },
-    });
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Підсумок')).toBeInTheDocument();
+    // Picking the status is not yet the decision — confirming is.
+    expect(updateMutate).not.toHaveBeenCalled();
     promptSpy.mockRestore();
   });
 
-  it('still resolves when the summary prompt is cancelled', () => {
-    // The note is optional; a forced field just gets filled with "ok".
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue(null);
+  it('passes the typed summary along when resolving is confirmed', () => {
     render(<DetailCases orderId="order-1" />);
 
     fireEvent.change(screen.getByLabelText('Статус'), {
       target: { value: 'resolved' },
     });
+    fireEvent.change(screen.getByLabelText('Підсумок'), {
+      target: { value: 'Переслали, отримав' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Вирішити' }));
 
+    expect(updateMutate).toHaveBeenCalledWith(
+      {
+        caseId: 'case-1',
+        payload: { status: 'resolved', resolution_note: 'Переслали, отримав' },
+      },
+      expect.anything(),
+    );
+  });
+
+  it('still resolves when the summary is left empty', () => {
+    // The note is optional; a forced field just gets filled with "ok".
+    render(<DetailCases orderId="order-1" />);
+
+    fireEvent.change(screen.getByLabelText('Статус'), {
+      target: { value: 'resolved' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Вирішити' }));
+
+    expect(updateMutate).toHaveBeenCalledWith(
+      { caseId: 'case-1', payload: { status: 'resolved' } },
+      expect.anything(),
+    );
+  });
+
+  it('dismisses the summary box when another status is picked instead', () => {
+    render(<DetailCases orderId="order-1" />);
+
+    fireEvent.change(screen.getByLabelText('Статус'), {
+      target: { value: 'resolved' },
+    });
+    fireEvent.change(screen.getByLabelText('Статус'), {
+      target: { value: 'waiting' },
+    });
+
+    expect(screen.queryByLabelText('Підсумок')).not.toBeInTheDocument();
     expect(updateMutate).toHaveBeenCalledWith({
       caseId: 'case-1',
-      payload: { status: 'resolved' },
+      payload: { status: 'waiting' },
     });
-    promptSpy.mockRestore();
+  });
+
+  it('cancelling the summary box resolves nothing', () => {
+    render(<DetailCases orderId="order-1" />);
+
+    fireEvent.change(screen.getByLabelText('Статус'), {
+      target: { value: 'resolved' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Скасувати' }));
+
+    expect(updateMutate).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Підсумок')).not.toBeInTheDocument();
   });
 
   it('creates a case from the form', () => {

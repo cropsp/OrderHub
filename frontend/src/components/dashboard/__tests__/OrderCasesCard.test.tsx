@@ -121,6 +121,35 @@ describe('OrderCasesCard', () => {
     );
   });
 
+  it('leads an overdue row with the lateness figure and keeps the date', () => {
+    // A real interval rather than the 2020 fixture: the figure is a live
+    // subtraction, so the assertion has to be anchored to now. 3.5 days minus
+    // the few ms this test takes still rounds to "3.5".
+    const threeAndAHalfDaysAgo = new Date(
+      Date.now() - 3.5 * 86_400_000,
+    ).toISOString();
+    renderCard({
+      cases: {
+        in_progress: [buildRow({ due_at: threeAndAHalfDaysAgo })],
+        waiting: [],
+      },
+    });
+
+    const due = screen.getByTestId('order-case-due');
+    // The parcel-alerts block's vocabulary, so the two blocks read alike.
+    expect(due).toHaveTextContent('Прострочено 3.5 дн.');
+    // The absolute deadline survives — it is what gets quoted to a customer.
+    expect(due).toHaveTextContent('до ');
+  });
+
+  it('leaves a future deadline as a bare date', () => {
+    renderCard({ cases: { in_progress: [buildRow({ due_at: FUTURE })], waiting: [] } });
+
+    const due = screen.getByTestId('order-case-due');
+    expect(due.textContent).not.toContain('Прострочено');
+    expect(due).toHaveTextContent('до ');
+  });
+
   it('treats a case with no deadline as not overdue', () => {
     renderCard({ cases: { in_progress: [buildRow({ due_at: null })], waiting: [] } });
 

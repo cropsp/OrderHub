@@ -101,6 +101,11 @@ function CaseTimeline({ item }: { item: OrderCase }) {
 function CaseRow({ item, orderId }: { item: OrderCase; orderId: string }) {
   const [open, setOpen] = useState(false);
   const [noteText, setNoteText] = useState('');
+  // Resolving asks for an optional summary first. Inline rather than
+  // window.prompt: the native dialog ignores the theme and browsers are free to
+  // suppress it outright, which would silently resolve cases with no summary.
+  const [resolving, setResolving] = useState(false);
+  const [summary, setSummary] = useState('');
 
   const updateCase = useUpdateCase(orderId);
   const addNote = useAddCaseNote(orderId);
@@ -108,18 +113,39 @@ function CaseRow({ item, orderId }: { item: OrderCase; orderId: string }) {
   const Chevron = open ? ChevronDown : ChevronRight;
   const late = item.status !== 'resolved' && isOverdue(item.due_at);
 
+  const cancelResolve = () => {
+    setResolving(false);
+    setSummary('');
+  };
+
   const handleStatusChange = (next: CaseStatus) => {
+    // Rule 9: closing asks for an optional summary. Every other transition is
+    // immediate — only a close has a "why" worth writing down.
+    if (next === 'resolved') {
+      setResolving(true);
+      return;
+    }
+    // Picking anything else abandons a summary in progress, so the box does
+    // not linger over a case that is no longer being closed.
+    cancelResolve();
     if (next === item.status) return;
-    // Rule 9: closing prompts for an optional summary. Cancelling the prompt
-    // still resolves — the note is optional, and a forced field gets "ok".
-    const resolutionNote =
-      next === 'resolved'
-        ? window.prompt('Підсумок (необовʼязково):') ?? undefined
-        : undefined;
-    updateCase.mutate({
-      caseId: item.id,
-      payload: { status: next, ...(resolutionNote ? { resolution_note: resolutionNote } : {}) },
-    });
+    updateCase.mutate({ caseId: item.id, payload: { status: next } });
+  };
+
+  const confirmResolve = () => {
+    const note = summary.trim();
+    updateCase.mutate(
+      {
+        caseId: item.id,
+        payload: { status: 'resolved', ...(note ? { resolution_note: note } : {}) },
+      },
+      {
+        onSuccess: () => {
+          setResolving(false);
+          setSummary('');
+        },
+      },
+    );
   };
 
   const handleAddNote = () => {
@@ -161,7 +187,7 @@ function CaseRow({ item, orderId }: { item: OrderCase; orderId: string }) {
 
         <select
           aria-label="Статус"
-          value={item.status}
+          value={resolving ? 'resolved' : item.status}
           disabled={updateCase.isPending}
           onChange={(e) => handleStatusChange(e.target.value as CaseStatus)}
           className={cn(
@@ -179,6 +205,34 @@ function CaseRow({ item, orderId }: { item: OrderCase; orderId: string }) {
 
       {item.next_action && (
         <p className="mt-1 pl-6 text-[11px] text-zinc-500">→ {item.next_action}</p>
+      )}
+
+      {resolving && (
+        <div className="mt-2 flex items-start gap-2 pl-6">
+          <textarea
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            placeholder="Підсумок (необовʼязково)…"
+            rows={2}
+            aria-label="Підсумок"
+            className={cn(FIELD_CLASS, 'resize-none')}
+          />
+          <button
+            type="button"
+            onClick={confirmResolve}
+            disabled={updateCase.isPending}
+            className="shrink-0 rounded-lg border border-teal-500/30 bg-teal-500/10 px-3 py-2 text-xs font-semibold text-teal-300 transition-colors hover:bg-teal-500/20 disabled:opacity-40"
+          >
+            Вирішити
+          </button>
+          <button
+            type="button"
+            onClick={cancelResolve}
+            className="shrink-0 rounded-lg border border-zinc-800 px-3 py-2 text-xs font-semibold text-zinc-400 transition-colors hover:text-zinc-200"
+          >
+            Скасувати
+          </button>
+        </div>
       )}
 
       {open && (

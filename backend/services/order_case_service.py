@@ -104,6 +104,40 @@ async def create_case(
     return case
 
 
+def _build_note(case: OrderCase, user: User, kind: str, text: str) -> OrderCaseNote:
+    """A timeline row, wired through the RELATIONSHIPS rather than by bare FK.
+
+    `case=` / `author=` are load-bearing, not style (CASE-1-fix):
+
+    * `case=case` fires the `back_populates` pair, so the already-loaded
+      `case.notes` collection gains the row in memory. Writing `case_id=` alone
+      does not: with `expire_on_commit=False` (`database.py:30`) the commit
+      expires nothing, and the route's post-commit re-query hits the identity
+      map, where `selectinload` refuses to overwrite a populated collection.
+      The PATCH/POST-notes response then served the timeline as it was BEFORE
+      the write, while a later GET — new session, new identity map — showed it.
+    * `author=user` because `_serialise_case` reads `note.author.full_name`;
+      an unloaded relationship is a `MissingGreenlet` under async.
+    * The matching `case_id=` / `author_id=` are set alongside, not instead:
+      a relationship only populates its FK at flush, and both the response
+      builder and the tests read the row before that. They agree by
+      construction, so there is no state for SQLAlchemy to reconcile.
+    * `created_at` is stamped here rather than left to the column default, the
+      way `resolved_at` already is — the response carries the row before any
+      RETURNING round-trip could fill it in.
+    """
+    return OrderCaseNote(
+        id=uuid.uuid4(),
+        case=case,
+        case_id=case.id,
+        author=user,
+        author_id=user.id,
+        kind=kind,
+        text=text,
+        created_at=datetime.now(timezone.utc),
+    )
+
+
 async def update_case(
     db: AsyncSession, case: OrderCase, data: OrderCaseUpdate, user: User
 ) -> OrderCase:
@@ -146,15 +180,15 @@ async def update_case(
                 case.resolved_at = None
                 case.resolution_note = None
 
-            db.add(
-                OrderCaseNote(
-                    id=uuid.uuid4(),
-                    case_id=case.id,
-                    kind=OrderCaseNoteKind.SYSTEM.value,
-                    author_id=user.id,
-                    text=f"Статус: {_status_label(old_value)} → {_status_label(new_value)}",
-                )
-            )
+            # Rule 5 (CASE-1-fix): a closing summary belongs in the
+            # append-only timeline too, not only in the column the UI shows
+            # separately. The "why" is the part people come back for.
+            text = f"Статус: {_status_label(old_value)} → {_status_label(new_value)}"
+            summary = (fields.get("resolution_note") or "").strip()
+            if new_value == OrderCaseStatus.RESOLVED.value and summary:
+                text = f"{text} — {summary}"
+
+            db.add(_build_note(case, user, OrderCaseNoteKind.SYSTEM.value, text))
         elif (
             new_value == OrderCaseStatus.RESOLVED.value
             and fields.get("resolution_note") is not None
@@ -172,13 +206,7 @@ async def add_note(
     """Append a human comment. Always `kind='comment'` — the wire cannot set it
     (`OrderCaseNoteCreate` has no such field), so a client cannot forge a
     status-transition record."""
-    note = OrderCaseNote(
-        id=uuid.uuid4(),
-        case_id=case.id,
-        kind=OrderCaseNoteKind.COMMENT.value,
-        author_id=user.id,
-        text=text,
-    )
+    note = _build_note(case, user, OrderCaseNoteKind.COMMENT.value, text)
     db.add(note)
     await db.flush()
     return note
