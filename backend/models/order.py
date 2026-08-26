@@ -291,6 +291,17 @@ class Order(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     packaging = relationship(
         "PackagingBox", foreign_keys=[packaging_id], lazy="selectin"
     )
+    # CASE-1. Deliberately NOT lazy="selectin" like its neighbours: the order
+    # list would then issue a cases query per page, and nothing on that surface
+    # shows cases. The order card fetches them separately, the way
+    # AttachmentManager already does. passive_deletes leaves the CASCADE to the
+    # FK rather than loading every note just to delete it.
+    cases = relationship(
+        "OrderCase",
+        back_populates="order",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     @property
     def platform(self) -> str:

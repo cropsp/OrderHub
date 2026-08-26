@@ -23,6 +23,8 @@ import { useCapability } from '@/hooks/useCapability';
 import { useAuth } from '@/hooks/useAuth';
 import { useDismissParcelAlert, useParcelAlerts } from '@/hooks/useWesternBid';
 import ParcelAlertsCard from '@/components/dashboard/ParcelAlertsCard';
+import OrderCasesCard from '@/components/dashboard/OrderCasesCard';
+import { useOpenCases } from '@/hooks/useOrderCases';
 import { Capability, UserRole } from '@/types/user';
 import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -40,6 +42,9 @@ export default function DashboardPage() {
     user?.role === UserRole.OWNER || user?.role === UserRole.MANAGER;
   const parcelAlerts = useParcelAlerts(canSeeParcelAlerts);
   const dismissAlert = useDismissParcelAlert();
+  // CASE-1: same role gate as the parcel alerts above — /cases/open is
+  // OWNER+MANAGER server-side, and a DESIGNER lands on this page.
+  const openCases = useOpenCases(canSeeParcelAlerts);
   const [selectedShopId, setSelectedShopId] = useState<string | undefined>(undefined);
   const [range, setRange] = useState<PeriodRange>(() => {
     const preset = loadLastPreset(DASHBOARD_PRESET_STORAGE_KEY);
@@ -158,6 +163,17 @@ export default function DashboardPage() {
               dismissAlert.isPending ? (dismissAlert.variables ?? null) : null
             }
             onDismiss={(alertId) => dismissAlert.mutate(alertId)}
+          />
+        )}
+
+        {/* CASE-1: open order cases. Below the parcel alerts on purpose —
+            those are machine-generated and self-resolving, these are human
+            commitments; keeping the established block first preserves the
+            existing scan order. Same period-selector independence. */}
+        {canSeeParcelAlerts && (
+          <OrderCasesCard
+            cases={openCases.data}
+            isLoading={openCases.isLoading}
           />
         )}
 

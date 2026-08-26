@@ -366,3 +366,133 @@ async def test_partner_identity_surface_exposes_no_per_shop_data():
     assert set(PartnerResponse.model_fields) == {
         "id", "name", "is_active", "notes", "created_at", "updated_at",
     }
+
+
+# ── CASE-1: order cases ────────────────────────────────────
+#
+# Cases carry no {shop_id}, so test_route_scope_completeness's path scan cannot
+# see them (they are listed in its INDIRECT_SHOP_ROUTES for the record). These
+# are the behavioural proofs that stand in for it.
+
+@pytest.mark.asyncio
+async def test_case_routes_are_role_gated_on_the_whole_router():
+    """DESIGNER gets nothing in v1 (task rule 5), and the gate is on the ROUTER
+    so a route added later inherits it — the failure mode of per-route gating is
+    the route someone forgets."""
+    from fastapi.routing import APIRoute
+    from models.user import UserRole as Role
+    from routers.dependencies import require_role
+    import routers.order_cases as cases_router
+    import main
+
+    assert len(cases_router.router.dependencies) == 1, (
+        "the OWNER/MANAGER gate must cover the whole router"
+    )
+
+    # ...and it really is on every live case route, not just the router object.
+    def _dep_names(route):
+        out = []
+
+        def walk(d):
+            for s in d.dependencies:
+                out.append(getattr(s.call, "__name__", type(s.call).__name__))
+                walk(s)
+
+        walk(route.dependant)
+        return out
+
+    case_routes = [
+        r for r in main.app.routes
+        if isinstance(r, APIRoute) and r.path.startswith("/api/cases")
+    ]
+    assert len(case_routes) == 5
+    for r in case_routes:
+        assert "role_checker" in _dep_names(r), f"{r.path} is not role-gated"
+
+    checker = require_role(Role.OWNER, Role.MANAGER)
+    with pytest.raises(HTTPException) as exc:
+        await checker(current_user=_user(Role.DESIGNER))
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_case_router_gate_beats_assert_order_access_for_a_designer():
+    """The layer that matters, stated as a test.
+
+    `assert_order_access` ALLOWS a designer on an order assigned to them — see
+    test_order_access_designer_assigned_ok above. If the cases router relied on
+    it alone, an assigned designer would read and write cases, silently breaking
+    rule 5. The router's role gate is what makes rule 5 true.
+    """
+    from models.user import UserRole as Role
+    from routers.dependencies import require_role
+
+    me = uuid4()
+    designer = _user(Role.DESIGNER, me)
+    order = MagicMock(assigned_designer_id=me, shop_id=uuid4())
+
+    # The order gate lets them through...
+    await assert_order_access(AsyncMock(), order, designer)
+
+    # ...and the router gate still refuses them.
+    with pytest.raises(HTTPException) as exc:
+        await require_role(Role.OWNER, Role.MANAGER)(current_user=designer)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_case_routes_403_for_manager_without_a_grant():
+    """Shop scope resolves through the order (task rule 6)."""
+    from routers.order_cases import list_cases_for_order
+    from models.user import UserRole as Role
+
+    order = MagicMock(assigned_designer_id=None, shop_id=uuid4())
+    db = AsyncMock()
+    db.execute.side_effect = [_scalar_one(order), _scalars([])]  # found, no grant
+
+    with pytest.raises(HTTPException) as exc:
+        await list_cases_for_order(uuid4(), _user(Role.MANAGER), db)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_open_cases_excludes_unscoped_shops():
+    """THE LEAK TEST.
+
+    The dashboard block is modelled on the parcel-alerts block, whose endpoint is
+    deliberately unscoped because parcels are global. Cases are not: copying that
+    stance would show a restricted manager the problem orders of shops they
+    cannot open. A manager holding one grant must see an `IN` filter on exactly
+    that shop.
+    """
+    from services.order_case_service import list_open_for_user
+    from models.user import UserRole as Role
+
+    granted, forbidden = uuid4(), uuid4()
+    db = AsyncMock()
+    db.execute.side_effect = [_scalars([granted]), _rows([])]
+
+    await list_open_for_user(db, _user(Role.MANAGER))
+
+    sql = str(db.execute.await_args_list[1].args[0])
+    assert "shop_id IN" in sql
+    # An expanding IN() compiles its values into a LIST-valued bind param.
+    params = db.execute.await_args_list[1].args[0].compile().params
+    bound = set()
+    for v in params.values():
+        bound.update(v if isinstance(v, (list, tuple, set, frozenset)) else [v])
+    assert granted in bound
+    assert forbidden not in bound
+
+
+@pytest.mark.asyncio
+async def test_open_cases_owner_sees_every_shop():
+    from services.order_case_service import list_open_for_user
+    from models.user import UserRole as Role
+
+    db = AsyncMock()
+    db.execute.return_value = _rows([])
+
+    await list_open_for_user(db, _user(Role.OWNER))
+
+    assert "shop_id IN" not in str(db.execute.await_args.args[0])

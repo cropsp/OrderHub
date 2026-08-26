@@ -66,6 +66,13 @@ from models.agent_action_log import AgentActionLog
 from models.wb_parcel import WbParcel
 from models.wb_tracking import WbParcelTracking, WbTrackingEvent
 from models.wb_parcel_alert import WbParcelAlert
+from models.order_case import (
+    OrderCase,
+    OrderCaseNote,
+    OrderCaseNoteKind,
+    OrderCaseStatus,
+    OrderCaseType,
+)
 
 __all__ = [
     "Base",
@@ -131,4 +138,9 @@ __all__ = [
     "WbParcelTracking",
     "WbTrackingEvent",
     "WbParcelAlert",
+    "OrderCase",
+    "OrderCaseNote",
+    "OrderCaseNoteKind",
+    "OrderCaseStatus",
+    "OrderCaseType",
 ]

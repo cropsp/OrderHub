@@ -37,6 +37,12 @@ vi.mock('@/hooks/useAuth', () => ({
 // Without this the new useParcelAlerts hook fires a real query and every test
 // in this file dies on "No QueryClient set".
 const mockParcelAlerts = vi.fn();
+// Quiet by default and never reset — every test in this file is about the
+// widgets around it, and an empty cases block renders one silent line.
+const mockOpenCases = vi.fn(() => ({
+  data: { in_progress: [], waiting: [] },
+  isLoading: false,
+}));
 const mockDismissAlert = vi.fn();
 vi.mock('@/hooks/useWesternBid', () => ({
   useParcelAlerts: (...args: unknown[]) => mockParcelAlerts(...args),
@@ -45,6 +51,13 @@ vi.mock('@/hooks/useWesternBid', () => ({
     isPending: false,
     variables: undefined,
   }),
+}));
+
+// CASE-1: the page gained a cases block beside the parcel alerts. Mocked for
+// the same reason every other hook here is — this file is a page smoke test,
+// not a query-layer test.
+vi.mock('@/hooks/useOrderCases', () => ({
+  useOpenCases: (...args: unknown[]) => mockOpenCases(...args),
 }));
 
 vi.mock('@/hooks/useShops', () => ({

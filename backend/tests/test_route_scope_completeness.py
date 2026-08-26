@@ -108,6 +108,25 @@ INDIRECT_SHOP_ROUTES = {
     # under /api/shops/{shop_id}/ instead — the `shop_id` request field narrows
     # the run, it does not grant anything.
     "POST /api/warehouse/backfill-consumption",
+    # CASE-1: order cases. None of these carry {shop_id} — the shop is resolved
+    # through the case's ORDER (task rule 6) — so _shop_id_routes() cannot see
+    # them and this file would stay green without anyone deciding anything.
+    # That is exactly the "green by exclusion" the sprint was told to avoid, so
+    # they are named here and enforced in two composed layers:
+    #   * routers/order_cases.py gates the whole router with
+    #     require_role(OWNER, MANAGER) — DESIGNER gets nothing in v1 (rule 5).
+    #     This layer matters on its own: assert_order_access ALLOWS a designer
+    #     on orders assigned to them, so the order gate alone would not do it.
+    #   * each order-scoped route then calls assert_order_access, and the
+    #     dashboard route (which has no order in its path) filters by
+    #     access_service.get_shop_scope inside list_open_for_user.
+    # Behavioural coverage: test_shop_access.py::test_case_routes_* below, and
+    # the leak test test_open_cases_excludes_unscoped_shops.
+    "GET /api/cases/order/{order_id}",
+    "POST /api/cases/order/{order_id}",
+    "PATCH /api/cases/{case_id}",
+    "POST /api/cases/{case_id}/notes",
+    "GET /api/cases/open",
 }
 
 
